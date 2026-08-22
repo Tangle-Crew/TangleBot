@@ -1,0 +1,9 @@
+services:
+  tanglebot:
+    build:
+      context: ./Tanglebot
+    restart: unless-stopped
+    env_file:
+      - ./Tanglebot/.env
+    volumes:
+      - ./Tanglebot/data:/app/data

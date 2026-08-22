@@ -1,0 +1,56 @@
+# What Was Done Today — 2026-08-06
+
+- reviewed the updated `DiscordBotUpdated/Untitled/Tanglebot` structure after the master-repo refresh
+- resolved remaining LFG merge conflicts in:
+  - `src/handlers/eventHandler.js`
+  - `src/utils/roleMenu.js`
+  - `src/utils/lfgPost.js`
+- preserved the existing Discord `/lfg-post` flow while keeping the shared RuneLite/Supabase bridge in place
+- restored backend mirroring for Discord-created groups and mirrored join/leave/close actions on legacy forum-thread groups
+- updated synced RuneLite group rendering so Discord thread names and embeds now reflect `OPEN`, `FULL`, `STARTED`, `CLOSED`, `CANCELLED`, and `EXPIRED` states correctly
+- updated the shared delivery worker in `supabase/functions/process-lfg-discord-delivery/index.ts` so it:
+  - forces stale-group expiration on each poll
+  - renames synced forum threads on every delivered state change, including join/leave capacity changes
+  - archives and locks terminal synced forum threads when the shared backend marks them closed or expired
+- adjusted the legacy `/lfg-post` thread-title countdown bucketing in `src/utils/lfgGroup.js` so full groups no longer keep a stale higher-hour label after the embed timestamp has already shifted to the next lower hour bucket
+- added backend queue metadata support for public/shared LFG groups:
+  - migration `supabase/migrations/20260806120000_add_public_lfg_queue_metadata.sql`
+  - edge function `supabase/functions/lfg-group-metadata/index.ts`
+  - bot bridge sync in `src/utils/lfgBackend.js` and `src/utils/lfgPost.js`
+- updated the public landing page `src/pages/Landing.tsx` so the website now:
+  - polls shared LFG groups more aggressively
+  - updates visible start/falloff timing labels between fetches
+  - reflects `OPEN`, `FULL`, and `STARTED` state changes from the backend
+  - shows queue count when a mirrored Discord-created group currently has people waiting
+- verified the edited bot-side JavaScript files with `node --check`
+- verified the frontend changes with `npm run build`
+- added canonical shared queue support for LFG groups in `supabase/migrations/20260806153000_add_canonical_lfg_queue_and_website_actions.sql`
+- extended shared LFG snapshots so website and Discord renders now receive:
+  - queue members by RSN
+  - total queue count
+  - queue-related permissions
+- updated shared LFG actions so the backend now supports:
+  - `queue`
+  - `dequeue`
+  - automatic promotion from queue into the main group when a spot opens
+- added authenticated website participation flow in `supabase/functions/lfg-website-action/index.ts`
+  - requires Discord OAuth on the site
+  - derives the Discord account from the authenticated Supabase session instead of trusting typed Discord usernames
+  - uses the supplied or saved RSN as the public-facing identity
+  - automatically chooses `join` or `queue` based on current live capacity
+- updated `src/pages/Landing.tsx` so public LFG cards now support website-side join/queue actions through a modal flow with Discord auth + RSN collection
+- updated mirrored Discord synced-group rendering in:
+  - `supabase/functions/process-lfg-discord-delivery/index.ts`
+  - `supabase/functions/discord-lfg-interactions/index.ts`
+  - `DiscordBotUpdated/Untitled/Tanglebot/src/utils/lfgSyncedPost.js`
+  so queue size and queue members are visible and queue-related button actions are exposed
+- changed shared LFG `join` behavior so a join attempt against an already-full shared group now queues the user instead of returning a hard `GROUP_FULL` failure
+- this now applies consistently to:
+  - RuneLite plugin shared-group joins
+  - synced Discord shared-group button/slash-command joins
+  - website shared-group joins
+- updated the shared in-memory reducer tests in `src/test/lfg.test.ts` to cover the new full-group queue-on-join behavior
+- updated the RuneLite plugin LFG success chat so it now reports the backend action message directly, including `Joined queue`
+- added `supabase/migrations/20260806170000_assign_default_user_role_on_auth_sync.sql` so authenticated site users are automatically assigned the standard `user` role when their `auth.users` row syncs, but existing `admin` role holders are left unchanged
+- included a backfill in that migration for already-synced users who currently have no `user_roles` row
+- local edge-function `deno check` could not be run because `deno` is not installed in this workspace

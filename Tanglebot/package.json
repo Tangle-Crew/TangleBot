@@ -1,0 +1,22 @@
+{
+  "name": "tanglebot",
+  "version": "1.0.0",
+  "description": "Discord bot for an OSRS clan",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "deploy": "node src/deploy-commands.js"
+  },
+  "overrides": {
+    "uuid": ">=11.1.1",
+    "undici": "^6.27.0"
+  },
+  "dependencies": {
+    "@napi-rs/canvas": "^1.0.0",
+    "axios": "^1.7.7",
+    "discord.js": "^14.16.0",
+    "dotenv": "^16.4.5",
+    "gif-encoder-2": "^1.0.5",
+    "googleapis": "^144.0.0"
+  }
+}
