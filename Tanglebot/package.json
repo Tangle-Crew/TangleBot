@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Discord bot for an OSRS clan",
   "main": "src/index.js",
+  "license": "MIT",
   "scripts": {
     "start": "node src/index.js",
     "deploy": "node src/deploy-commands.js"

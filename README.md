@@ -562,3 +562,9 @@ npm start
 - [googleapis](https://github.com/googleapis/google-api-nodejs-client) — Google Sheets access for `/donationhighscore` and `/pethighscore`
 - [axios](https://axios-http.com/) — Supabase/LFG backend and proof-intake HTTP calls
 - [Claude by Anthropic](https://claude.ai/) — AI-assisted development
+
+---
+
+## License
+
+[MIT](LICENSE)
