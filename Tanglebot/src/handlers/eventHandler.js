@@ -19,6 +19,7 @@ const { refreshLeaderboardOnStartup: refreshDonationLeaderboardOnStartup } = req
 const { syncDiscordCatalog, isConfigured: isLfgBackendConfigured } = require('../utils/lfgBackend');
 const { startLfgDeliveryWorker } = require('../utils/lfgDeliveryWorker');
 const { handleSyncedGroupButtonInteraction } = require('../utils/lfgSyncedPost');
+const { scheduleWeeklyRankSync } = require('../utils/clanRanks');
 
 // customId-prefix routing tables for InteractionCreate, one per interaction kind. errorReply is
 // optional — omitted for the honeypot button so a mis-click there stays silent instead of
@@ -51,6 +52,7 @@ async function dispatchByCustomIdPrefix(interaction, routes) {
 
 function loadEvents(client) {
   let stopLfgDeliveryWorker = null;
+  let stopWeeklyRankSync = null;
   const submissionConfig = loadSubmissionConfig();
   client.submissionConfig = submissionConfig;
   if (submissionConfig.enabled) {
@@ -77,6 +79,7 @@ function loadEvents(client) {
       }
     }
     stopLfgDeliveryWorker = startLfgDeliveryWorker();
+    stopWeeklyRankSync = scheduleWeeklyRankSync(client);
 
     const adminLogChannelId = process.env.ADMIN_LOG_CHANNEL_ID;
     const ownerRoleId = process.env.OWNER_ROLE_ID;
@@ -175,6 +178,10 @@ function loadEvents(client) {
     if (stopLfgDeliveryWorker) {
       stopLfgDeliveryWorker();
       stopLfgDeliveryWorker = null;
+    }
+    if (stopWeeklyRankSync) {
+      stopWeeklyRankSync();
+      stopWeeklyRankSync = null;
     }
   });
 }

@@ -2,7 +2,6 @@ const { SlashCommandBuilder, MessageFlags, EmbedBuilder } = require('discord.js'
 const { getRows, updateRow, appendRow } = require('../utils/googleSheets');
 const { DEFAULT_EMBED_COLOR } = require('../utils/embedColor');
 const { mentionOrName, postLeaderboard: postLeaderboardShared } = require('../utils/leaderboard');
-const { notifyAdminLog } = require('../utils/roleMenu');
 
 const TEMPLAR_ROLE_ID = process.env.TEMPLAR_ROLE_ID;
 
@@ -111,7 +110,7 @@ function totalDonatedHeading(totalDonated) {
   return `${COINS_EMOJI} Total Donated: ${formatGP(totalDonated)} ${COINS_EMOJI}`;
 }
 
-function buildEmbeds(entries) {
+function buildEmbeds(entries, memberIds) {
   const header = buildHeaderEmbed();
 
   if (entries.length === 0) {
@@ -131,7 +130,7 @@ function buildEmbeds(entries) {
   // (still bigger than plain text, without every mention looking oversized).
   const blocks = entries.map((entry, i) => {
     const badge = donorBadge(entry);
-    const namePart = mentionOrName(entry);
+    const namePart = mentionOrName(entry, memberIds);
     const line = badge
       ? `${badge} ${namePart} | **${formatGP(entry.donated)}**`
       : `${namePart} | **${formatGP(entry.donated)}**`;
@@ -174,18 +173,6 @@ async function postLeaderboard(guild, channelId, entries, botUserId) {
     dataFile: 'donationhighscores_message.json',
     logPrefix: 'DHS',
     isOwnLeaderboardMessage,
-    onDisplayNameChange: async (entry) => {
-      try {
-        await updateRow(
-          process.env.DONATIONS_SHEET_ID,
-          `${SHEET_TAB}!A${entry.rowNumber}:C${entry.rowNumber}`,
-          [entry.discordId, entry.displayName, entry.donated]
-        );
-        console.log(`[DHS] Refreshed stored display name for ${entry.discordId} -> "${entry.displayName}"`);
-      } catch (err) {
-        console.error(`[DHS] Failed to persist refreshed display name for ${entry.discordId}:`, err);
-      }
-    },
   });
 }
 
@@ -359,23 +346,9 @@ module.exports = {
 
       if (subcommand === 'add') {
         console.log(`[DHS] ${interaction.user.tag} added ${formatGP(amount)} to ${targetUser.tag} (now ${formatGP(newAmount)})`);
-        notifyAdminLog(
-          interaction.client,
-          '💰 Donation Added',
-          `${interaction.user} has added **${formatGP(amount)}** GP donation to ${targetUser}. New total: **${formatGP(newAmount)}** GP.`,
-          [],
-          EMBED_COLOR
-        );
       } else {
         console.log(`[DHS] ${interaction.user.tag} removed ${formatGP(amount)} from ${targetUser.tag} (now ${formatGP(newAmount)})`);
         if (clamped) console.warn(`[DHS] ${targetUser.tag}'s total would have gone negative — clamped to 0`);
-        notifyAdminLog(
-          interaction.client,
-          '💰 Donation Removed',
-          `${interaction.user} has removed **${formatGP(amount)}** GP donation from ${targetUser}. New total: **${formatGP(newAmount)}** GP.`,
-          [],
-          EMBED_COLOR
-        );
       }
 
       const tierChange = await syncDonationRoles(guild, targetUser.id, currentAmount, newAmount);

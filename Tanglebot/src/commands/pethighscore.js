@@ -2,7 +2,6 @@ const { SlashCommandBuilder, MessageFlags, EmbedBuilder } = require('discord.js'
 const { getRows, updateRow, appendRow } = require('../utils/googleSheets');
 const { DEFAULT_EMBED_COLOR } = require('../utils/embedColor');
 const { mentionOrName, postLeaderboard: postLeaderboardShared } = require('../utils/leaderboard');
-const { notifyAdminLog } = require('../utils/roleMenu');
 
 const TEMPLAR_ROLE_ID = process.env.TEMPLAR_ROLE_ID;
 const OWNER_ROLE_ID = process.env.OWNER_ROLE_ID;
@@ -123,7 +122,7 @@ function buildHeaderEmbed() {
 }
 
 // The "# " markdown heading renders emoji noticeably larger than plain text.
-function buildEmbeds(entries) {
+function buildEmbeds(entries, memberIds) {
   const header = buildHeaderEmbed();
 
   if (entries.length === 0) {
@@ -141,7 +140,7 @@ function buildEmbeds(entries) {
     const emojiLine = entry.petKeys.map(k => petEmoji(PET_BY_KEY.get(k))).join(' ');
     const petWord = entry.count === 1 ? 'pet' : 'pets';
     const medal = RANK_MEDALS[i] ? `${RANK_MEDALS[i]} ` : '';
-    return `${medal}${mentionOrName(entry)} | **${entry.count}** ${petWord}\n# ${emojiLine}`;
+    return `${medal}${mentionOrName(entry, memberIds)} | **${entry.count}** ${petWord}\n# ${emojiLine}`;
   });
 
   const descriptions = [];
@@ -181,18 +180,6 @@ async function postLeaderboard(guild, channelId, entries, botUserId) {
     dataFile: 'pethighscores_message.json',
     logPrefix: 'PHS',
     isOwnLeaderboardMessage,
-    onDisplayNameChange: async (entry) => {
-      try {
-        await updateRow(
-          process.env.PET_HIGHSCORES_SHEET_ID,
-          `${SHEET_TAB}!A${entry.rowNumber}:C${entry.rowNumber}`,
-          [entry.discordId, entry.displayName, entry.petKeys.join(', ')]
-        );
-        console.log(`[PHS] Refreshed stored display name for ${entry.discordId} -> "${entry.displayName}"`);
-      } catch (err) {
-        console.error(`[PHS] Failed to persist refreshed display name for ${entry.discordId}:`, err);
-      }
-    },
   });
 }
 
@@ -432,22 +419,8 @@ module.exports = {
 
       if (subcommand === 'add') {
         console.log(`[PHS] ${interaction.user.tag} added "${pet.name}" to ${targetUser.tag} (now ${newKeys.length} pets)`);
-        notifyAdminLog(
-          interaction.client,
-          '🐾 Pet Added',
-          `${interaction.user} has added **${pet.name}** to ${targetUser}'s pet collection. They now have **${newKeys.length}** pet${newKeys.length === 1 ? '' : 's'}.`,
-          [],
-          EMBED_COLOR
-        );
       } else {
         console.log(`[PHS] ${interaction.user.tag} removed "${pet.name}" from ${targetUser.tag} (now ${newKeys.length} pets)`);
-        notifyAdminLog(
-          interaction.client,
-          '🐾 Pet Removed',
-          `${interaction.user} has removed **${pet.name}** from ${targetUser}'s pet collection. They now have **${newKeys.length}** pet${newKeys.length === 1 ? '' : 's'}.`,
-          [],
-          EMBED_COLOR
-        );
       }
 
       const roleChange = await syncMasterRole(guild, targetUser.id, newKeys.length);

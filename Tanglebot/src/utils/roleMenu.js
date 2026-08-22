@@ -441,26 +441,63 @@ function roleIconOptions(guild, emoji) {
   return { icon: `https://cdn.discordapp.com/emojis/${emoji}.${ext}?size=64` };
 }
 
+// Shared "find by exact name, create if missing" role factory used by LFG and clan ranks. `name`
+// is the exact Discord role name — callers apply their own prefixing (e.g. lfgRoleName) first.
+async function ensureNamedRole(guild, { name, color, emoji, mentionable = true, reason, logPrefix }) {
+  const existing = guild.roles.cache.find((r) => r.name === name);
+  if (existing) return existing;
+
+  const tag = logPrefix ? `[${logPrefix}] ` : '';
+  try {
+    const role = await guild.roles.create({
+      name,
+      mentionable,
+      ...(isValidColor(color) ? { colors: { primaryColor: color } } : {}),
+      ...roleIconOptions(guild, emoji),
+      reason,
+    });
+    console.log(`${tag}Created missing role: "${role.name}"`);
+    return role;
+  } catch (err) {
+    console.error(`${tag}Could not auto-create role "${name}":`, err.message);
+    return null;
+  }
+}
+
+// Diffs an existing role's color/icon against the desired config and edits it if needed.
+// Returns 'updated', 'skipped' (already matches), or 'failed' (edit call errored).
+async function syncNamedRoleAppearance(guild, role, { color, emoji }, reason, logPrefix) {
+  const edits = {};
+  if (isValidColor(color) && role.hexColor.toLowerCase() !== color.toLowerCase()) {
+    edits.colors = { primaryColor: color };
+  }
+  if (guildSupportsRoleIcons(guild) && isValidEmoji(emoji)) {
+    Object.assign(edits, roleIconOptions(guild, emoji));
+  }
+
+  if (Object.keys(edits).length === 0) return 'skipped';
+
+  try {
+    await role.edit({ ...edits, reason });
+    return 'updated';
+  } catch (err) {
+    const tag = logPrefix ? `[${logPrefix}] ` : '';
+    console.error(`${tag}Could not sync appearance for role "${role.name}":`, err.message);
+    return 'failed';
+  }
+}
+
 // Finds the role, creating it first if it's missing.
 async function ensureRoleExists(guild, name) {
   const roleConfig = findRoleConfig(name);
-  const existing = findRole(guild, name);
-  if (existing) return existing;
-
-  try {
-    const role = await guild.roles.create({
-      name: lfgRoleName(name),
-      mentionable: true,
-      ...(isValidColor(roleConfig?.color) ? { colors: { primaryColor: roleConfig.color } } : {}),
-      ...roleIconOptions(guild, roleConfig?.emoji),
-      reason: 'Auto-created for the LFG system (roleMenu.js CATEGORIES)',
-    });
-    console.log(`[LFG] Created missing role: "${role.name}"`);
-    return role;
-  } catch (err) {
-    console.error(`[LFG] Could not auto-create role "${lfgRoleName(name)}":`, err.message);
-    return null;
-  }
+  return ensureNamedRole(guild, {
+    name: lfgRoleName(name),
+    color: roleConfig?.color,
+    emoji: roleConfig?.emoji,
+    mentionable: true,
+    reason: 'Auto-created for the LFG system (roleMenu.js CATEGORIES)',
+    logPrefix: 'LFG',
+  });
 }
 
 // Looks up a role's CATEGORIES entry by its base label (e.g. "Yama"), across all categories.
@@ -472,12 +509,9 @@ function findRoleConfig(name) {
   return null;
 }
 
-// Backfills color + icon onto every already-created LFG- role so pre-existing roles pick up
-// changes made to CATEGORIES after they were first created (ensureRoleExists only runs the
-// create path once, on first use). Safe to call repeatedly — a role already matching is skipped.
-// Returns a summary so callers (e.g. an admin command) can report what happened.
+// Backfills color + icon onto every already-created LFG- role so later CATEGORIES edits reach
+// them too. Safe to call repeatedly — an already-matching role is skipped.
 async function syncRoleAppearance(guild) {
-  const supportsIcons = guildSupportsRoleIcons(guild);
   const results = { updated: [], skipped: [], failed: [] };
 
   for (const category of Object.values(CATEGORIES)) {
@@ -488,26 +522,8 @@ async function syncRoleAppearance(guild) {
         continue;
       }
 
-      const edits = {};
-      if (isValidColor(roleConfig.color) && role.hexColor.toLowerCase() !== roleConfig.color.toLowerCase()) {
-        edits.colors = { primaryColor: roleConfig.color };
-      }
-      if (supportsIcons && isValidEmoji(roleConfig.emoji)) {
-        Object.assign(edits, roleIconOptions(guild, roleConfig.emoji));
-      }
-
-      if (Object.keys(edits).length === 0) {
-        results.skipped.push(roleConfig.label);
-        continue;
-      }
-
-      try {
-        await role.edit({ ...edits, reason: 'LFG role appearance sync (roleMenu.js CATEGORIES)' });
-        results.updated.push(roleConfig.label);
-      } catch (err) {
-        console.error(`[LFG] Could not sync appearance for role "${role.name}":`, err.message);
-        results.failed.push(roleConfig.label);
-      }
+      const outcome = await syncNamedRoleAppearance(guild, role, roleConfig, 'LFG role appearance sync (roleMenu.js CATEGORIES)', 'LFG');
+      results[outcome].push(roleConfig.label);
     }
   }
 
@@ -564,6 +580,8 @@ module.exports = {
   handleRoleMenuButtonInteraction,
   ensureRoleExists,
   syncRoleAppearance,
+  ensureNamedRole,
+  syncNamedRoleAppearance,
   lfgRoleName,
   notifyAdminLog,
   scheduleReplyCleanup,

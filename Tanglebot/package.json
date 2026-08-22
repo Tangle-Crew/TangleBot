@@ -17,6 +17,7 @@
     "discord.js": "^14.16.0",
     "dotenv": "^16.4.5",
     "gif-encoder-2": "^1.0.5",
-    "googleapis": "^144.0.0"
+    "googleapis": "^144.0.0",
+    "node-cron": "^4.6.0"
   }
 }
