@@ -7,4 +7,5 @@ Thumbs.db
 desktop.ini
 .env
 node_modules/
-/Tanglebot/data
+/Tanglebot/data/*
+!/Tanglebot/data/clan-ranks.json

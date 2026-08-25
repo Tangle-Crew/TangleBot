@@ -55,4 +55,17 @@ async function appendRow(sheetId, range, values) {
   });
 }
 
-module.exports = { getRows, updateRow, appendRow };
+// Batch form of appendRow — one API call for many rows, for bulk imports (e.g. seeding a sheet
+// from an entire guild's member list) instead of one round-trip per row.
+async function appendRows(sheetId, range, rowsValues) {
+  const sheets = await getSheetsClient();
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: sheetId,
+    range,
+    valueInputOption: 'RAW',
+    insertDataOption: 'INSERT_ROWS',
+    requestBody: { values: rowsValues },
+  });
+}
+
+module.exports = { getRows, updateRow, appendRow, appendRows };

@@ -1,0 +1,9 @@
+{
+  "ranks": [
+    { "key": "recruit", "name": "Recruit", "emoji": "", "color": "#95A5A6", "daysRequired": 0 },
+    { "key": "member", "name": "Member", "emoji": "", "color": "#3498DB", "daysRequired": 30 },
+    { "key": "veteran", "name": "Veteran", "emoji": "", "color": "#9B59B6", "daysRequired": 90 },
+    { "key": "elite", "name": "Elite", "emoji": "", "color": "#E67E22", "daysRequired": 180 },
+    { "key": "legend", "name": "Legend", "emoji": "", "color": "#F1C40F", "daysRequired": 365, "static": true }
+  ]
+}

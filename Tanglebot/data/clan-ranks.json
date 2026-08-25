@@ -1,0 +1,31 @@
+{
+  "ranks": [
+    { "key": "owner", "name": "Owner", "emoji": "1534398665437872278", "color": "#DA7614", "daysRequired": 0, "static": true, "ignore": true },
+    { "key": "deputy_owner", "name": "Deputy Owner", "emoji": "1534398530129498344", "color": "#919994", "daysRequired": 0, "static": true, "ignore": true },
+    { "key": "templar", "name": "Templar", "emoji": "1534398760803762257", "color": "#383838", "daysRequired": 0, "static": true, "ignore": true },
+    { "key": "coordinator", "name": "Coordinator", "emoji": "1534398516846264350", "color": "#443310", "daysRequired": 0, "static": true, "ignore": true },
+    { "key": "zenyte", "name": "Zenyte", "emoji": "1534398798384861214", "color": "#E47A1A", "daysRequired": 0, "static": true, "ignore": true },
+    { "key": "onyx", "name": "Onyx", "emoji": "1534398660916543661", "color": "#2D2D2D", "daysRequired": 0, "static": true, "ignore": true },
+    { "key": "dragonstone", "name": "Dragonstone", "emoji": "1534398539201904700", "color": "#9A01F4", "daysRequired": 0, "static": true, "ignore": true },
+    { "key": "diamond", "name": "Diamond", "emoji": "1534398533074157568", "color": "#E3E3E3", "daysRequired": 0, "static": true, "ignore": true },
+    { "key": "ruby", "name": "Ruby", "emoji": "1534398699961188533", "color": "#E42C08", "daysRequired": 0, "static": true, "ignore": true },
+    { "key": "epic", "name": "Epic", "emoji": "1534398547615551620", "color": "#3ECE27", "daysRequired": 0, "static": true },
+    { "key": "beast", "name": "Beast", "emoji": "1534398484848050236", "color": "#FFFF00", "daysRequired": 0, "static": true },
+    { "key": "competitor", "name": "Competitor", "emoji": "1534398512853418005", "color": "#48DE6F", "daysRequired": 0, "static": true },
+    { "key": "crusader", "name": "Crusader", "emoji": "1534398523708149823", "color": "#6BA1BA", "daysRequired": 0, "static": true },
+    { "key": "magic", "name": "Magic", "emoji": "1534398622664360128", "color": "#3ECE27", "daysRequired": 0, "ignore": true },
+    { "key": "gnomechild", "name": "Gnome Child", "emoji": "1534398569912729661", "color": "#C99B78", "daysRequired": 0, "static": true, "ignore": true },
+    { "key": "guest", "name": "Guest", "emoji": "1534398581014921518", "color": "#008869", "daysRequired": 0, "static": true },
+    { "key": "recruit", "name": "Recruit", "emoji": "1534398693195649166", "color": "#DA7614", "daysRequired": 30 },
+    { "key": "corporal", "name": "Corporal", "emoji": "1534398517861158973", "color": "#DA7614", "daysRequired": 60 },
+    { "key": "sergeant", "name": "Sergeant", "emoji": "1534398727354187886", "color": "#DA7614", "daysRequired": 90 },
+    { "key": "lieutenant", "name": "Lieutenant", "emoji": "1534398616314052758", "color": "#E47A1A", "daysRequired": 180 },
+    { "key": "captain", "name": "Captain", "emoji": "1534398503881674812", "color": "#DFEFD6", "daysRequired": 270 },
+    { "key": "general", "name": "General", "emoji": "1534398568675414066", "color": "#FFFF00", "daysRequired": 365 },
+    { "key": "master", "name": "Master", "emoji": "1534398628850962503", "color": "#FFFF00", "daysRequired": 545 },
+    { "key": "officer", "name": "Officer", "emoji": "1534398659762852020", "color": "#DA7614", "daysRequired": 730 },
+    { "key": "commander", "name": "Commander", "emoji": "1534398511796457492", "color": "#DA7614", "daysRequired": 1095 },
+    { "key": "colonel", "name": "Colonel", "emoji": "1534398510823112804", "color": "#DA7614", "daysRequired": 1275 },
+    { "key": "brigadier", "name": "Brigadier", "emoji": "1534398495476285520", "color": "#DA7614", "daysRequired": 1460 }
+  ]
+}

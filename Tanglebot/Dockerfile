@@ -16,5 +16,6 @@ COPY package*.json ./
 RUN npm ci --omit=dev
 
 COPY src/ ./src/
+COPY data/clan-ranks.json ./data/clan-ranks.json
 
 CMD ["node", "src/index.js"]

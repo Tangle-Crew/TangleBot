@@ -21,9 +21,9 @@ const EMBED_COLOR = DEFAULT_EMBED_COLOR;
 // Thin rule separating a category's name from its activity list — see buildActivitiesEmbed.
 const FIELD_DIVIDER = '─'.repeat(20);
 
-// Pulled from the repo's main branch (not a pinned commit) so pushing a new gif there
+// Pulled from the repo's master branch (not a pinned commit) so pushing a new gif there
 // updates the embed automatically — no redeploy or code change needed.
-const HOW_TO_GIF_URL = 'https://raw.githubusercontent.com/Tangle-Crew/TangleBot/main/assets/lfg-tour.gif';
+const HOW_TO_GIF_URL = 'https://raw.githubusercontent.com/Pdiddy973/TangleCrew/master/assets/lfg-tour.gif';
 
 function buildInstructionsEmbed() {
   return new EmbedBuilder()
