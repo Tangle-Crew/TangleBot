@@ -19,6 +19,9 @@ const PET_CATALOG_SHEET_TAB = 'Pets';
 const PET_CATALOG_RANGE = `${PET_CATALOG_SHEET_TAB}!A2:C`;
 const PET_CATALOG_APPEND_RANGE = `${PET_CATALOG_SHEET_TAB}!A:C`;
 
+// Pet slots exposed on add/remove; only the first is required.
+const PET_OPTION_NAMES = ['pet', 'pet2', 'pet3', 'pet4', 'pet5'];
+
 let PETS = [];
 const PET_BY_KEY = new Map();
 const PET_ORDER = new Map();
@@ -204,7 +207,7 @@ async function postLeaderboard(guild, channelId, entries, botUserId) {
   });
 }
 
-async function loadEntries() {
+async function fetchEntries() {
   const rows = await getRows(process.env.PET_HIGHSCORES_SHEET_ID, DATA_RANGE);
   return rows
     .map((r, i) => ({
@@ -215,6 +218,20 @@ async function loadEntries() {
     }))
     .filter(e => e.discordId)
     .map(e => ({ ...e, count: e.petKeys.length }));
+}
+
+// Cached like PETS: fetched once and reused by autocomplete and command runs, kept in
+// sync in place after writes; a restart re-reads from the sheet.
+let entriesLoadPromise = null;
+function ensureEntriesLoaded() {
+  if (!entriesLoadPromise) {
+    entriesLoadPromise = fetchEntries().catch(err => {
+      entriesLoadPromise = null;
+      console.error('[PHS] Failed to load entries from the Highscores sheet tab:', err);
+      throw err;
+    });
+  }
+  return entriesLoadPromise;
 }
 
 function sortedForDisplay(entries) {
@@ -234,7 +251,7 @@ async function refreshLeaderboardOnStartup(client) {
   try {
     await ensurePetsLoaded();
     const guild = await client.guilds.fetch(process.env.CLAN_ID);
-    const entries = await loadEntries();
+    const entries = await ensureEntriesLoaded();
     await postLeaderboard(guild, channelId, sortedForDisplay(entries), client.user.id);
   } catch (err) {
     console.error('[PHS] Failed to refresh leaderboard on startup:', err);
@@ -334,24 +351,38 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('pethighscore')
     .setDescription('Manage the OSRS pet high scores leaderboard')
-    .addSubcommand(sub =>
+    .addSubcommand(sub => {
       sub
         .setName('add')
-        .setDescription("Add a pet to a member's collection")
-        .addUserOption(o => o.setName('user').setDescription('Member who got the pet').setRequired(true))
-        .addStringOption(o =>
-          o.setName('pet').setDescription('Pet name').setRequired(true).setAutocomplete(true)
-        )
-    )
-    .addSubcommand(sub =>
+        .setDescription("Add one or more pets to a member's collection")
+        .addUserOption(o => o.setName('user').setDescription('Member who got the pet(s)').setRequired(true));
+      PET_OPTION_NAMES.forEach((name, i) => {
+        sub.addStringOption(o =>
+          o
+            .setName(name)
+            .setDescription(i === 0 ? 'Pet name' : `Another pet name (optional)`)
+            .setRequired(i === 0)
+            .setAutocomplete(true)
+        );
+      });
+      return sub;
+    })
+    .addSubcommand(sub => {
       sub
         .setName('remove')
-        .setDescription("Remove a pet from a member's collection (for fixing mistakes)")
-        .addUserOption(o => o.setName('user').setDescription('Member to remove the pet from').setRequired(true))
-        .addStringOption(o =>
-          o.setName('pet').setDescription('Pet name').setRequired(true).setAutocomplete(true)
-        )
-    )
+        .setDescription("Remove one or more pets from a member's collection (for fixing mistakes)")
+        .addUserOption(o => o.setName('user').setDescription('Member to remove the pet(s) from').setRequired(true));
+      PET_OPTION_NAMES.forEach((name, i) => {
+        sub.addStringOption(o =>
+          o
+            .setName(name)
+            .setDescription(i === 0 ? 'Pet name' : `Another pet name (optional)`)
+            .setRequired(i === 0)
+            .setAutocomplete(true)
+        );
+      });
+      return sub;
+    })
     .addSubcommand(sub =>
       sub
         .setName('new')
@@ -364,8 +395,40 @@ module.exports = {
 
   async autocomplete(interaction) {
     await ensurePetsLoaded();
-    const focused = interaction.options.getFocused().toLowerCase();
-    const choices = PETS.filter(p => p.name.toLowerCase().includes(focused)).slice(0, 25);
+
+    const subcommand = interaction.options.getSubcommand();
+    const focused = interaction.options.getFocused(true);
+    const query = String(focused.value || '').toLowerCase();
+
+    // Don't re-suggest a pet already picked in one of this command's other pet slots.
+    const pickedKeys = new Set(
+      PET_OPTION_NAMES
+        .filter(name => name !== focused.name)
+        .map(name => interaction.options.getString(name))
+        .filter(Boolean)
+    );
+
+    let pool = PETS;
+
+    if (subcommand === 'add' || subcommand === 'remove') {
+      const targetUser = interaction.options.getUser('user');
+      if (targetUser) {
+        const entries = await ensureEntriesLoaded().catch(() => null);
+        if (entries) {
+          const entry = entries.find(e => e.discordId === targetUser.id);
+          const ownedKeys = new Set(entry ? entry.petKeys : []);
+          pool = subcommand === 'remove'
+            ? PETS.filter(p => ownedKeys.has(p.key))
+            : PETS.filter(p => !ownedKeys.has(p.key));
+        }
+      }
+    }
+
+    const choices = pool
+      .filter(p => !pickedKeys.has(p.key))
+      .filter(p => p.name.toLowerCase().includes(query))
+      .slice(0, 25);
+
     await interaction.respond(choices.map(p => ({ name: p.name, value: p.key })));
   },
 
@@ -390,13 +453,23 @@ module.exports = {
     const channelId = process.env.PET_HIGHSCORES_CHANNEL_ID;
 
     const targetUser = interaction.options.getUser('user', true);
-    const petInput = interaction.options.getString('pet', true);
-    const pet = findPet(petInput);
+    const petInputs = PET_OPTION_NAMES.map(name => interaction.options.getString(name)).filter(Boolean);
 
-    if (!pet) {
-      console.warn(`[PHS] ${interaction.user.tag} submitted unknown pet "${petInput}" for /pethighscore ${subcommand}`);
+    const pets = [];
+    const unknownInputs = [];
+    for (const input of petInputs) {
+      const pet = findPet(input);
+      if (!pet) {
+        unknownInputs.push(input);
+      } else if (!pets.some(p => p.key === pet.key)) {
+        pets.push(pet);
+      }
+    }
+
+    if (unknownInputs.length > 0) {
+      console.warn(`[PHS] ${interaction.user.tag} submitted unknown pet(s) "${unknownInputs.join('", "')}" for /pethighscore ${subcommand}`);
       return interaction.reply({
-        content: `Unknown pet "${petInput}". Pick one from the autocomplete suggestions.`,
+        content: `Unknown pet${unknownInputs.length === 1 ? '' : 's'} "${unknownInputs.join('", "')}". Pick from the autocomplete suggestions.`,
         flags: MessageFlags.Ephemeral,
       });
     }
@@ -409,24 +482,30 @@ module.exports = {
       if (!member) console.warn(`[PHS] Could not fetch member ${targetUser.id} (${targetUser.tag}) — falling back to username`);
       const displayName = member?.displayName || targetUser.username;
 
-      const entries = await loadEntries();
+      const entries = await ensureEntriesLoaded();
       const existingIndex = entries.findIndex(e => e.discordId === targetUser.id);
       const existing = existingIndex === -1 ? null : entries[existingIndex];
       const currentKeys = existing ? existing.petKeys : [];
-      const hasPet = currentKeys.includes(pet.key);
 
-      if (subcommand === 'add' && hasPet) {
-        console.log(`[PHS] ${interaction.user.tag} tried to add "${pet.name}" to ${targetUser.tag}, who already has it`);
-        return interaction.editReply(`<@${targetUser.id}> already has **${pet.name}** logged.`);
-      }
-      if (subcommand === 'remove' && !hasPet) {
-        console.log(`[PHS] ${interaction.user.tag} tried to remove "${pet.name}" from ${targetUser.tag}, who doesn't have it`);
-        return interaction.editReply(`<@${targetUser.id}> doesn't have **${pet.name}** logged.`);
+      const toApply = subcommand === 'add'
+        ? pets.filter(p => !currentKeys.includes(p.key))
+        : pets.filter(p => currentKeys.includes(p.key));
+      const skipped = subcommand === 'add'
+        ? pets.filter(p => currentKeys.includes(p.key))
+        : pets.filter(p => !currentKeys.includes(p.key));
+
+      if (toApply.length === 0) {
+        const names = skipped.map(p => `**${p.name}**`).join(', ');
+        const msg = subcommand === 'add'
+          ? `<@${targetUser.id}> already has ${names} logged.`
+          : `<@${targetUser.id}> doesn't have ${names} logged.`;
+        console.log(`[PHS] ${interaction.user.tag} tried to ${subcommand} ${skipped.map(p => p.name).join(', ')} for ${targetUser.tag} — no change`);
+        return interaction.editReply(msg);
       }
 
       const newKeys = subcommand === 'add'
-        ? sortPetKeys([...currentKeys, pet.key])
-        : sortPetKeys(currentKeys.filter(k => k !== pet.key));
+        ? sortPetKeys([...currentKeys, ...toApply.map(p => p.key)])
+        : sortPetKeys(currentKeys.filter(k => !toApply.some(p => p.key === k)));
 
       const rowValues = [targetUser.id, displayName, newKeys.join(', ')];
 
@@ -438,21 +517,23 @@ module.exports = {
         entries.push({ discordId: targetUser.id, displayName, petKeys: newKeys, count: newKeys.length });
       }
 
+      const appliedNames = toApply.map(p => p.name).join(', ');
+
       if (subcommand === 'add') {
-        console.log(`[PHS] ${interaction.user.tag} added "${pet.name}" to ${targetUser.tag} (now ${newKeys.length} pets)`);
+        console.log(`[PHS] ${interaction.user.tag} added "${appliedNames}" to ${targetUser.tag} (now ${newKeys.length} pets)`);
         notifyAdminLog(
           interaction.client,
           '🐾 Pet Added',
-          `${interaction.user} has added **${pet.name}** to ${targetUser}'s pet collection. They now have **${newKeys.length}** pet${newKeys.length === 1 ? '' : 's'}.`,
+          `${interaction.user} has added **${appliedNames}** to ${targetUser}'s pet collection. They now have **${newKeys.length}** pet${newKeys.length === 1 ? '' : 's'}.`,
           [],
           EMBED_COLOR
         );
       } else {
-        console.log(`[PHS] ${interaction.user.tag} removed "${pet.name}" from ${targetUser.tag} (now ${newKeys.length} pets)`);
+        console.log(`[PHS] ${interaction.user.tag} removed "${appliedNames}" from ${targetUser.tag} (now ${newKeys.length} pets)`);
         notifyAdminLog(
           interaction.client,
           '🐾 Pet Removed',
-          `${interaction.user} has removed **${pet.name}** from ${targetUser}'s pet collection. They now have **${newKeys.length}** pet${newKeys.length === 1 ? '' : 's'}.`,
+          `${interaction.user} has removed **${appliedNames}** from ${targetUser}'s pet collection. They now have **${newKeys.length}** pet${newKeys.length === 1 ? '' : 's'}.`,
           [],
           EMBED_COLOR
         );
@@ -464,7 +545,14 @@ module.exports = {
 
       const verb = subcommand === 'add' ? 'Added' : 'Removed';
       const prep = subcommand === 'add' ? 'to' : 'from';
-      let summary = `${verb} **${pet.name}** ${prep} <@${targetUser.id}>'s collection. They now have **${newKeys.length}** pet${newKeys.length === 1 ? '' : 's'}.`;
+      let summary = `${verb} **${appliedNames}** ${prep} <@${targetUser.id}>'s collection. They now have **${newKeys.length}** pet${newKeys.length === 1 ? '' : 's'}.`;
+
+      if (skipped.length > 0) {
+        const skippedNames = skipped.map(p => `**${p.name}**`).join(', ');
+        summary += subcommand === 'add'
+          ? `\n(Skipped ${skippedNames} — already logged.)`
+          : `\n(Skipped ${skippedNames} — not logged.)`;
+      }
 
       if (roleChange === 'added') {
         summary += `\n<@${targetUser.id}> reached ${PET_MASTER_THRESHOLD}+ pets and was given the Pet Master role.`;

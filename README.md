@@ -146,11 +146,11 @@ Tracks which OSRS pets each member has collected in a Google Sheet the bot both 
 
 | Subcommand | Description |
 |------------|-------------|
-| `add` | Adds a pet to a member's collection |
-| `remove` | Removes a pet from a member's collection (for fixing mistakes) |
+| `add` | Adds one or more pets to a member's collection |
+| `remove` | Removes one or more pets from a member's collection (for fixing mistakes) |
 | `new` | Registers a brand-new pet type on the leaderboard — **Owner role only** |
 
-`add`/`remove` take a `user` (the member) and a `pet` option (autocompletes against the full pet list as you type). `new` takes a `name` and an `emoji` (paste the custom emoji itself, or its raw numeric ID) and appends it to the `Pets` tab of the Google Sheet on the fly — no code edit or bot restart needed, and it's immediately available in `add`/`remove` autocomplete. This is separate from and stricter than the Templar gate on `add`/`remove`, since it changes the shared pet list rather than one member's data.
+`add`/`remove` take a `user` (the member) and up to five pet options (`pet`, `pet2`, `pet3`, `pet4`, `pet5` — only `pet` is required) so several pets can be logged or fixed in one command. Each slot autocompletes independently and skips pets already picked in another slot. Once `user` is filled in, the pet autocomplete is also narrowed to that member's actual state instead of the full catalog: `add` only suggests pets they don't have yet, and `remove` only suggests pets they do. `new` takes a `name` and an `emoji` (paste the custom emoji itself, or its raw numeric ID) and appends it to the `Pets` tab of the Google Sheet on the fly — no code edit or bot restart needed, and it's immediately available in `add`/`remove` autocomplete. This is separate from and stricter than the Templar gate on `add`/`remove`, since it changes the shared pet list rather than one member's data.
 
 Restricted to users with the **Templar** role. Only loaded if `PET_HIGHSCORES_SHEET_ID`, `PET_HIGHSCORES_CHANNEL_ID`, and `GOOGLE_SERVICE_ACCOUNT_JSON` are set.
 
@@ -174,8 +174,8 @@ Restricted to users with the **Templar** role. Only loaded if `PET_HIGHSCORES_SH
 <summary><strong>How it works</strong></summary>
 
 1. Reads the member's current row from the configured Google Sheet (by Discord ID), or starts a new one if they don't have a row yet.
-2. Adds or removes the pet, keeping each member's pet list stored in a fixed order (the order pets are listed on the `Pets` sheet tab) regardless of the order they were logged in.
-3. Writes the updated row back to the sheet.
+2. Adds or removes every pet given in one command (skipping any already owned on `add`, or not owned on `remove`, and noting the skips in the reply), keeping each member's pet list stored in a fixed order (the order pets are listed on the `Pets` sheet tab) regardless of the order they were logged in.
+3. Writes the updated row back to the sheet in a single write, whether one pet was given or several.
 4. Re-sorts every member by pet count, highest first, and rebuilds the leaderboard embed: one block per member showing `@mention — N pets` followed by a large row of that member's pet emojis (using the "# heading" markdown trick to enlarge emoji). A member who's left the server shows their last known name instead of a dead mention.
 5. Posts the leaderboard to the configured channel, or edits the existing leaderboard message(s) in place (no duplicates), the same message-recovery behavior as `/donationhighscore` if the tracked message is missing.
 6. If the member's new pet count crosses `PET_MASTER_THRESHOLD` in either direction, grants or revokes the Pet Master role.
