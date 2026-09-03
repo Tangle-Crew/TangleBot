@@ -1009,9 +1009,14 @@ function refreshCleanupSchedule(client, group) {
 // Self-reschedules every KEEP_ALIVE_INTERVAL_MS while the group stays open, restarted (not left
 // running) on any sign of life. delayMs defaults to that interval; runKeepAliveCheck passes the
 // shorter KEEP_ALIVE_RETRY_DELAY_MS instead when a check got skipped for a live queue offer.
+// Never fires before the group's own start time, though — a group that's still hours from
+// starting doesn't need "is this still active?" pings yet, so the delay is stretched out to land
+// no earlier than timeEpoch.
 function scheduleKeepAliveCheck(client, group, delayMs = KEEP_ALIVE_INTERVAL_MS) {
   if (group.keepAliveTimeoutId) clearTimeout(group.keepAliveTimeoutId);
-  group.keepAliveTimeoutId = setTimeout(() => runKeepAliveCheck(client, group), delayMs);
+  const msUntilStart = group.timeEpoch * 1000 - Date.now();
+  const effectiveDelay = Math.max(delayMs, msUntilStart);
+  group.keepAliveTimeoutId = setTimeout(() => runKeepAliveCheck(client, group), effectiveDelay);
 }
 
 function stopKeepAliveCheck(group) {
