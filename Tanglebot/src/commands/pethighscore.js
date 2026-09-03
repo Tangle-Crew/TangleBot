@@ -136,11 +136,19 @@ function buildEmbeds(entries) {
     ];
   }
 
-  // entries is already sorted highest-first, so index doubles as rank.
-  const blocks = entries.map((entry, i) => {
+  // entries is already sorted highest-first. Rank is based on distinct pet
+  // counts (dense ranking) so tied members share the same medal instead of
+  // one getting bumped to a lower spot by array position.
+  let rank = 0;
+  let prevCount = null;
+  const blocks = entries.map((entry) => {
+    if (entry.count !== prevCount) {
+      rank += 1;
+      prevCount = entry.count;
+    }
     const emojiLine = entry.petKeys.map(k => petEmoji(PET_BY_KEY.get(k))).join(' ');
     const petWord = entry.count === 1 ? 'pet' : 'pets';
-    const medal = RANK_MEDALS[i] ? `${RANK_MEDALS[i]} ` : '';
+    const medal = RANK_MEDALS[rank - 1] ? `${RANK_MEDALS[rank - 1]} ` : '';
     return `${medal}${mentionOrName(entry)} | **${entry.count}** ${petWord}\n# ${emojiLine}`;
   });
 
