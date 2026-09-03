@@ -219,9 +219,9 @@ function formatCapacity(group) {
   return group.sizeCap === Infinity ? 'Mass' : String(group.sizeCap);
 }
 
-// The entire main post body as plain text — role ping first (so it actually notifies), then
-// everything that used to live in the embed. Edited on every membership change (see updateMainPost
-// / updateGroupMessage in lfgPost.js).
+// The entire main post body as plain text — role ping first (so it actually notifies), then the
+// group's details and member list. Edited on every membership change (see updateMainPost /
+// updateGroupMessage in lfgPost.js).
 function buildGroupText(group) {
   const capDisplay = formatCapacity(group);
   const memberLines = [...group.members].map((id) => `<@${id}>`).join('\n');

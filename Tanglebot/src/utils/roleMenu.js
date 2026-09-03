@@ -300,8 +300,8 @@ function buildClearAllRow() {
 
 function buildCategoryButtonRows(categoryKey, member) {
   const category = CATEGORIES[categoryKey];
-  // One pass over the member's small role list, not the whole guild's role cache per category role
-  // (the old approach — up to 15x per render).
+  // One pass over the member's small role list, rather than scanning the whole guild's role cache
+  // per category role (up to 15x per render).
   const memberRoleNames = new Set(member.roles.cache.filter((r) => r.name.startsWith(ROLE_PREFIX)).map((r) => r.name));
 
   const buttons = category.roles.map((r) => {

@@ -696,7 +696,7 @@ async function handleJoinButton(interaction, groupId) {
 
   if (justFilled) {
     // Full doesn't mean "started" — the countdown keeps running (it still self-stops once the
-    // start time actually passes, see computeCountdownRefreshDelay). Stopping it here used to
+    // start time actually passes, see computeCountdownRefreshDelay). Stopping it here would
     // freeze the title forever on whatever bucket it was in when the group filled, since nothing
     // else naturally re-triggers it for a group nobody leaves.
     await Promise.all([
@@ -1120,8 +1120,8 @@ async function handleLfgPostModalSubmit(interaction) {
   }
 }
 
-// Labels the shared "<Action> clicked" log line below — every group-button handler used to log
-// this itself with only the action word differing, so it's hoisted here instead.
+// Labels the shared "<Action> clicked" log line below, keyed by button action so each handler
+// doesn't need its own copy of the log call.
 const GROUP_ACTION_LABELS = {
   join: 'Join',
   leave: 'Leave',
