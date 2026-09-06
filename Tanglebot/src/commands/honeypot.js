@@ -33,6 +33,7 @@ module.exports = {
     }
 
     const subcommand = interaction.options.getSubcommand();
+    console.log(`Honeypot: /honeypot ${subcommand} invoked by ${interaction.user.username}`);
 
     if (subcommand === 'status') {
       const enabled = isTestModeEnabled();

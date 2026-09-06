@@ -20,6 +20,7 @@ function readJson(filename) {
 // truncated, unparseable file behind — the rename is atomic on the same filesystem.
 function writeJson(filename, data) {
   const filePath = path.join(DATA_DIR, filename);
+  console.log(`Writing data file: ${filename}`);
   fs.mkdirSync(DATA_DIR, { recursive: true });
   const tempPath = `${filePath}.${process.pid}.tmp`;
   fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), 'utf8');

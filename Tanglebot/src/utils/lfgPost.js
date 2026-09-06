@@ -209,6 +209,7 @@ async function sendSetupMenu(interaction) {
 
 async function handleSetupSelect(interaction, field) {
   const session = getSession(interaction.user.id);
+  console.log(`[LFG] Setup selection: ${field}=${interaction.values[0]} for ${interaction.user.username}`);
   session[field] = interaction.values[0];
 
   if (field === 'category') {
@@ -240,6 +241,7 @@ async function handleSetupSelect(interaction, field) {
 
 // ---- Once all 4 dropdowns are filled: open the description modal directly ----
 async function openDescriptionModal(interaction) {
+  console.log(`[LFG] Opening description modal for ${interaction.user.username}`);
   const modal = new ModalBuilder()
     .setCustomId('lfgpost:desc')
     .setTitle('Add a description');
@@ -258,6 +260,7 @@ async function openDescriptionModal(interaction) {
 
 // Reports to admin log, then aborts the setup flow with an ⚠️ message — shared by every /lfg-post failure path, so the pairing only needs to change in one place.
 async function abortWithAdminAlert(interaction, title, adminMessage, userMessage) {
+  console.log(`[LFG] Aborting: ${title}`);
   await notifyAdminLog(interaction.client, title, adminMessage);
   return interaction.update({ content: userMessage, components: [] });
 }
@@ -553,6 +556,7 @@ function tearDownGroup(group) {
 // The post is gone — drop the now-stale in-memory group instead of leaking it forever. Otherwise,
 // every future click on the dead button would keep hitting the same error.
 function cleanupStaleGroup(group) {
+  console.log(`[LFG] Cleaning up stale group ${group.id} — its post no longer exists`);
   if (group.cleanupTimeoutId) clearTimeout(group.cleanupTimeoutId);
   tearDownGroup(group);
 }
@@ -561,6 +565,7 @@ function cleanupStaleGroup(group) {
 // and start their offer clock (QUEUE_OFFER_TIMEOUT_MS); otherwise reopen to the public Join button.
 // precedingText, if given, folds into the same notice (e.g. "X left" + "offered to Y" as one message).
 async function advanceQueueOrReopen(client, channel, group, precedingText = '') {
+  console.log(`[LFG] Advancing queue for group ${group.id}`);
   clearPendingOffer(group);
 
   if (group.queue.length === 0) {
@@ -655,6 +660,7 @@ function canCancelDisband(interaction, group) {
 async function handleJoinButton(interaction, groupId) {
   const group = await requireGroup(interaction, groupId);
   if (!group) return;
+  console.log(`[LFG] ${interaction.user.username} attempting to join group ${groupId}`);
   if (group.members.has(interaction.user.id)) {
     return replyEphemeral(interaction, 'You\'re already in this group.');
   }
@@ -728,6 +734,7 @@ async function handleJoinButton(interaction, groupId) {
 async function handleLeaveButton(interaction, groupId) {
   const group = await requireGroup(interaction, groupId);
   if (!group) return;
+  console.log(`[LFG] ${interaction.user.username} leaving group ${groupId}`);
 
   if (!group.members.has(interaction.user.id)) {
     const queueIndex = group.queue.indexOf(interaction.user.id);
@@ -805,6 +812,7 @@ async function handleQueueAcceptButton(interaction, groupId) {
   const group = await requireGroup(interaction, groupId);
   if (!group) return;
   if (!requirePendingOffer(interaction, group)) return;
+  console.log(`[LFG] ${interaction.user.username} accepted queue offer for group ${groupId}`);
 
   // Mutate before the deferUpdate() network round trip, not after — otherwise the 5-minute queue
   // offer timeout could fire mid-await and shift the same person off the queue a second time once
@@ -856,6 +864,7 @@ async function handleQueueDeclineButton(interaction, groupId) {
   const group = await requireGroup(interaction, groupId);
   if (!group) return;
   if (!requirePendingOffer(interaction, group)) return;
+  console.log(`[LFG] ${interaction.user.username} declined queue offer for group ${groupId}`);
 
   // Mutate before the deferUpdate() network round trip — see handleQueueAcceptButton.
   clearPendingOffer(group);
@@ -877,6 +886,7 @@ async function handleStartNowButton(interaction, groupId) {
     return replyEphemeral(interaction, '⚠️ This group has already started.');
   }
 
+  console.log(`[LFG] ${interaction.user.username} started group ${groupId} early`);
   group.timeEpoch = Math.floor(Date.now() / 1000);
   stopCountdownRefresh(group);
   // The initial keep-alive timer was stretched out to not fire before the group's original start
@@ -898,6 +908,7 @@ async function handleStartNowButton(interaction, groupId) {
 // timer. Used by both an explicit Disband click and an auto-disband with no interaction to work
 // from (a missed keep-alive check). The caller clears the main post's button row first.
 async function beginDisband(client, channel, group, announcementText) {
+  console.log(`[LFG] Beginning disband for group ${group.id}`);
   group.status = 'disbanded';
   // Also drops pendingOfferUserId, not just its timer — otherwise a later Cancel Disband would
   // reopen the group still marking a stale offer as "pending" for no one in particular.
@@ -933,6 +944,7 @@ async function handleDisbandButton(interaction, groupId) {
     return replyEphemeral(interaction, '⚠️ This group is already disbanding — anyone in it (or its queue), or a Coordinator or higher, can cancel that with **Cancel Disband**.');
   }
 
+  console.log(`[LFG] ${interaction.user.username} disbanding group ${groupId}`);
   // Nothing else is actionable on the main post once disbanding starts — clear its row.
   if (!(await updateGroupMessage(interaction, group, []))) return;
 
@@ -973,6 +985,7 @@ async function handleCancelDisbandButton(interaction, groupId) {
     return followUpEphemeral(interaction, '⚠️ Too late — this group\'s post was already being removed. Start a new one with the usual command.');
   }
 
+  console.log(`[LFG] ${interaction.user.username} cancelled disband for group ${groupId}`);
   group.status = isGroupFull(group) ? 'closed' : 'open';
 
   if (group.status === 'open') scheduleCountdownRefresh(interaction.client, group);
@@ -1042,6 +1055,7 @@ function refreshCleanupSchedule(client, group) {
 // starting doesn't need "is this still active?" pings yet, so the delay is stretched out to land
 // no earlier than timeEpoch.
 function scheduleKeepAliveCheck(client, group, delayMs = KEEP_ALIVE_INTERVAL_MS) {
+  console.log(`[LFG] Scheduling keep-alive check for group ${group.id}`);
   if (group.keepAliveTimeoutId) clearTimeout(group.keepAliveTimeoutId);
   const msUntilStart = group.timeEpoch * 1000 - Date.now();
   const effectiveDelay = Math.max(delayMs, msUntilStart);
@@ -1134,6 +1148,7 @@ async function handleKeepAliveButton(interaction, groupId) {
     return replyEphemeral(interaction, '⚠️ Only members of this group, or a Coordinator or higher, can confirm it\'s still active.');
   }
 
+  console.log(`[LFG] ${interaction.user.username} confirmed group ${groupId} is still active`);
   resetKeepAliveCheck(interaction.client, group);
 
   // Edits the prompt message directly (the button the user just clicked lives on it) instead of

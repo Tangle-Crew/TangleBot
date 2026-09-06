@@ -196,6 +196,7 @@ function loadEvents(client) {
 
   client.once(Events.ClientDestroy, () => {
     if (stopLfgDeliveryWorker) {
+      console.log('[LFG] Stopping delivery worker on client destroy');
       stopLfgDeliveryWorker();
       stopLfgDeliveryWorker = null;
     }

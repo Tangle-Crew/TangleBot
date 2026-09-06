@@ -206,6 +206,7 @@ async function postLeaderboard(guild, channelId, entries, botUserId) {
 }
 
 async function loadEntries() {
+  console.log('[DHS] Fetching donation entries from sheet');
   const rows = await getRows(process.env.DONATIONS_SHEET_ID, DATA_RANGE);
   return rows
     .map((r, i) => ({

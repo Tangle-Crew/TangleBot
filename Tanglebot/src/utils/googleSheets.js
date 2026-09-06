@@ -7,6 +7,7 @@ let cachedAuth = null;
 function getAuth() {
   if (cachedAuth) return cachedAuth;
 
+  console.log('Initializing Google Sheets auth from service account credentials');
   const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
   if (!raw) throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON is not set in .env');
 
@@ -29,12 +30,14 @@ async function getSheetsClient() {
 }
 
 async function getRows(sheetId, range) {
+  console.log(`Reading sheet rows: ${range}`);
   const sheets = await getSheetsClient();
   const res = await sheets.spreadsheets.values.get({ spreadsheetId: sheetId, range });
   return res.data.values || [];
 }
 
 async function updateRow(sheetId, range, values) {
+  console.log(`Updating sheet row: ${range}`);
   const sheets = await getSheetsClient();
   await sheets.spreadsheets.values.update({
     spreadsheetId: sheetId,
@@ -45,6 +48,7 @@ async function updateRow(sheetId, range, values) {
 }
 
 async function appendRow(sheetId, range, values) {
+  console.log(`Appending sheet row: ${range}`);
   const sheets = await getSheetsClient();
   const res = await sheets.spreadsheets.values.append({
     spreadsheetId: sheetId,

@@ -72,6 +72,7 @@ function getConfiguredIntakeUrl(env = process.env) {
 }
 
 function setConfiguredIntakeUrl(url) {
+  console.log(`Submission intake URL override updated to: ${url}`);
   const runtimeConfig = getSubmissionRuntimeConfig();
   runtimeConfig.intakeUrl = url;
   writeJson(SUBMISSION_RUNTIME_CONFIG_FILE, runtimeConfig);
@@ -158,6 +159,7 @@ function loadSubmissionConfig(env = process.env) {
     return !env[key];
   });
   if (missing.length === REQUIRED_ENV_KEYS.length) {
+    console.log('Submission intake is disabled — none of the required config is set.');
     return { enabled: false, missing };
   }
 
@@ -165,6 +167,7 @@ function loadSubmissionConfig(env = process.env) {
     throw new Error(`Submission intake is partially configured. Missing: ${missing.join(', ')}`);
   }
 
+  console.log('Submission intake is enabled.');
   return {
     enabled: true,
     intakeSecret: env.DISCORD_KC_INTAKE_SECRET,
@@ -226,6 +229,7 @@ async function resolveEventIdForChannel(channelId, config) {
 }
 
 async function forwardSubmission({ attachment, config, eventId, message, parsed }) {
+  console.log(`Forwarding submission for message=${message.id} channel=${message.channelId} event=${eventId} to intake URL`);
   const response = await fetch(config.intakeUrl, {
     method: 'POST',
     headers: {
@@ -279,6 +283,7 @@ function getLastAcceptedSubmission() {
 }
 
 function saveLastAcceptedSubmission({ attachment, eventId, isDrop, message, parsed }) {
+  console.log(`Saving last accepted submission: type=${isDrop ? 'drop' : 'kc'} message=${message.id}`);
   const submission = {
     acceptedAt: new Date().toISOString(),
     channelId: message.channelId,

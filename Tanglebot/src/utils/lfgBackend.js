@@ -86,6 +86,7 @@ async function createGroup({ member, categoryKey, activityLabel, description, st
   const playerHint = buildPlayerHint(member);
   const discordUserId = member?.id ?? member?.user?.id ?? null;
   idempotencyKey = idempotencyKey ?? `discord-create:${discordUserId ?? 'unknown'}:${Date.now()}`;
+  console.log(`[LFG] Creating group (category=${categoryKey}, activity=${activityLabel})`);
   let response;
   try {
     response = await axios.post(
@@ -129,6 +130,7 @@ async function actOnGroupDetailed({ member, groupId, action, idempotencyKey = nu
   const playerHint = buildPlayerHint(member);
   const discordUserId = member?.id ?? member?.user?.id ?? null;
   idempotencyKey = idempotencyKey ?? `discord-action:${action}:${groupId}:${discordUserId ?? 'unknown'}:${Date.now()}`;
+  console.log(`[LFG] Group action: ${action} on ${groupId}`);
   let response;
   try {
     response = await axios.post(
@@ -169,6 +171,7 @@ async function actOnGroup(args) {
 async function syncGroupMetadata({ groupId, queueCount = 0 }) {
   if (!isConfigured() || !groupId) return null;
 
+  console.log(`[LFG] Syncing group metadata for ${groupId} (queueCount=${queueCount})`);
   let response;
   try {
     response = await axios.post(
@@ -210,6 +213,7 @@ async function fetchGroups({ member }) {
 
   const playerHint = buildPlayerHint(member);
   const discordUserId = member?.id ?? member?.user?.id ?? null;
+  console.log(`[LFG] Fetching groups for user ${discordUserId ?? 'unknown'}`);
   const response = await axios.get(
     `${lfgConfig().supabaseUrl}/functions/v1/lfg-groups`,
     {

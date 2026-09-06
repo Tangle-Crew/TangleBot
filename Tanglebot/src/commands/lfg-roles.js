@@ -13,6 +13,7 @@ module.exports = {
     .setDescription('Get your private LFG Roles menu (Bosses / Raids)'),
 
   async execute(interaction) {
+    console.log(`[LFG] /lfg-roles invoked by ${interaction.user.username}`);
     const embed = buildMenuEmbed();
     const row = buildCategoryButtonsRow();
     const clearRow = buildClearAllRow();

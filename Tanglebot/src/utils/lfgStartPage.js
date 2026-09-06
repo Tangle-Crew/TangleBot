@@ -93,6 +93,7 @@ function buildStartPageEmbeds() {
 // Every active + archived thread in the forum, as one list — shared by both fallback lookups
 // below so a missing/stale stored id only costs one pair of fetches, not two.
 async function fetchAllThreads(forumChannel) {
+  console.log('[LFG] Fetching active + archived forum threads to locate the start post');
   const [active, archived] = await Promise.all([
     forumChannel.threads.fetchActive().catch(() => null),
     forumChannel.threads.fetchArchived().catch(() => null),

@@ -14,6 +14,7 @@ module.exports = {
 
   async execute(interaction) {
     const channel = interaction.options.getChannel('channel') ?? interaction.channel;
+    console.log(`[channelmap] /channelmap invoked by ${interaction.user.username} for channel ${channel.id}`);
 
     return interaction.reply({
       content: [

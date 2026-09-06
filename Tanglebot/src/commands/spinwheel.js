@@ -204,6 +204,7 @@ function drawWheelFrame(ctx, SIZE, entries, rotationAngle, flash) {
 
 // ── GIF generator ──────────────────────────────────────────────────────────────
 function createSpinGif(entries, winnerIdx) {
+  console.log(`[spinwheel] Generating spin GIF for ${entries.length} entries (winner index ${winnerIdx})`);
   const SIZE       = 400;
   const N          = entries.length;
   const sliceAngle = (2 * Math.PI) / N;

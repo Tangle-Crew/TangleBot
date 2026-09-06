@@ -68,6 +68,7 @@ function followUpEphemeral(interaction, content, { autoDelete = false } = {}) {
 // Reports an issue to admin log, then replies to the user with an ephemeral, ⚠️-prefixed message.
 // Shared by every /lfg-roles failure path, so the pairing only needs to change in one place.
 async function notifyAdminLogAndReply(interaction, title, adminMessage, userMessage) {
+  console.warn(`[LFG] ${title}`);
   await notifyAdminLog(interaction.client, title, adminMessage);
   return replyEphemeral(interaction, userMessage);
 }
@@ -318,6 +319,7 @@ function buildCategoryButtonRows(categoryKey, member) {
 }
 
 async function sendCategoryMenu(interaction, categoryKey, isUpdate) {
+  console.log(`[LFG] Sending ${categoryKey} role menu to ${interaction.user.tag}`);
   const category = CATEGORIES[categoryKey];
   const rows = buildCategoryButtonRows(categoryKey, interaction.member);
   const payload = { content: categoryPrompt(category.activityNoun), components: rows, flags: MessageFlags.Ephemeral };
@@ -399,6 +401,7 @@ async function handleClearAllRoles(interaction) {
 async function handleRoleMenuButtonInteraction(interaction) {
   const parts = interaction.customId.split(':'); // ["roles", "category"|"toggle"|"clearall", ...]
   const kind = parts[1];
+  console.log(`[LFG] Role menu button interaction: ${interaction.customId}`);
 
   if (kind === 'category') {
     const categoryKey = parts[2];

@@ -43,6 +43,7 @@ function isTestModeEnabled() {
 }
 
 function setTestModeEnabled(enabled) {
+  console.log(`Honeypot: setting test mode to ${!!enabled}`);
   const runtimeConfig = getRuntimeConfig();
   runtimeConfig.testMode = !!enabled;
   writeJson(RUNTIME_CONFIG_FILE, runtimeConfig);
@@ -136,6 +137,7 @@ async function downloadImageAttachment(attachment, index) {
 }
 
 async function downloadImageAttachments(attachments) {
+  console.log(`Honeypot: downloading ${attachments.length} trap message image attachment(s)`);
   const files = await Promise.all(attachments.map((attachment, index) => downloadImageAttachment(attachment, index)));
   return files.filter(Boolean);
 }

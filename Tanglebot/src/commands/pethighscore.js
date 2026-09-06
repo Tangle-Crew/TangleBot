@@ -216,6 +216,7 @@ async function postLeaderboard(guild, channelId, entries, botUserId) {
 }
 
 async function fetchEntries() {
+  console.log('[PHS] Fetching pet highscore entries from sheet');
   const rows = await getRows(process.env.PET_HIGHSCORES_SHEET_ID, DATA_RANGE);
   return rows
     .map((r, i) => ({
@@ -437,6 +438,7 @@ module.exports = {
       .filter(p => p.name.toLowerCase().includes(query))
       .slice(0, 25);
 
+    console.log(`[PHS] Autocomplete query: "${query}" (${choices.length} match(es))`);
     await interaction.respond(choices.map(p => ({ name: p.name, value: p.key })));
   },
 
