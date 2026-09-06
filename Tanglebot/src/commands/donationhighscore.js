@@ -224,8 +224,12 @@ async function refreshLeaderboardOnStartup(client) {
 
   try {
     const guild = await client.guilds.fetch(process.env.CLAN_ID);
-    const entries = await loadEntries();
-    await postLeaderboard(guild, channelId, sortedForDisplay(entries), client.user.id);
+    // Locked like add/remove — postLeaderboard's display-name refresh writes rows too, and would
+    // otherwise race an add/remove happening at the same time (e.g. right after a bot restart).
+    await withFileLock(DONATION_LOCK_KEY, async () => {
+      const entries = await loadEntries();
+      await postLeaderboard(guild, channelId, sortedForDisplay(entries), client.user.id);
+    });
   } catch (err) {
     console.error('[DHS] Failed to refresh leaderboard on startup:', err);
   }
