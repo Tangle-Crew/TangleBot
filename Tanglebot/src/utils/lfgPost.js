@@ -381,6 +381,7 @@ async function handleDescriptionModalSubmit(interaction) {
         maximumPlayers: Number.isFinite(sizeCap) ? sizeCap : null,
         discordChannelId: thread.id,
         discordMessageId: thread.id,
+        idempotencyKey: interaction.id,
       });
       group.backendGroupId = backendGroup?.id ?? null;
       await syncBackendQueueCount(group);
@@ -689,6 +690,7 @@ async function handleJoinButton(interaction, groupId) {
         member: interaction.member,
         groupId: group.backendGroupId,
         action: 'join',
+        idempotencyKey: interaction.id,
       });
     } catch (err) {
       await notifyBackendMirrorFailure(interaction, group, 'join', err);
@@ -753,6 +755,7 @@ async function handleLeaveButton(interaction, groupId) {
         member: interaction.member,
         groupId: group.backendGroupId,
         action: 'leave',
+        idempotencyKey: interaction.id,
       });
     } catch (err) {
       await notifyBackendMirrorFailure(interaction, group, 'leave', err);
@@ -822,6 +825,7 @@ async function handleQueueAcceptButton(interaction, groupId) {
         member: interaction.member,
         groupId: group.backendGroupId,
         action: 'join',
+        idempotencyKey: interaction.id,
       });
     } catch (err) {
       await notifyBackendMirrorFailure(interaction, group, 'queue accept', err);
@@ -875,6 +879,10 @@ async function handleStartNowButton(interaction, groupId) {
 
   group.timeEpoch = Math.floor(Date.now() / 1000);
   stopCountdownRefresh(group);
+  // The initial keep-alive timer was stretched out to not fire before the group's original start
+  // time (see scheduleKeepAliveCheck) — starting early needs it rescheduled from now, or a group
+  // that was hours from starting gets no "still active?" check until that original, now-moot time.
+  scheduleKeepAliveCheck(interaction.client, group);
 
   if (!(await updateGroupMessage(interaction, group))) return;
 
@@ -934,6 +942,7 @@ async function handleDisbandButton(interaction, groupId) {
         member: interaction.member,
         groupId: group.backendGroupId,
         action: 'close',
+        idempotencyKey: interaction.id,
       });
     } catch (err) {
       await notifyBackendMirrorFailure(interaction, group, 'close', err);

@@ -78,12 +78,15 @@ async function syncDiscordCatalog() {
   return response.data;
 }
 
-async function createGroup({ member, categoryKey, activityLabel, description, startTimeIso, maximumPlayers, discordChannelId = null, discordMessageId = null }) {
+// idempotencyKey should be a stable per-attempt id (the triggering interaction's own id is ideal)
+// so the backend can actually dedupe a redelivered request — falling back to a value that changes
+// every call would make every call look brand new and defeat the point of sending one at all.
+async function createGroup({ member, categoryKey, activityLabel, description, startTimeIso, maximumPlayers, discordChannelId = null, discordMessageId = null, idempotencyKey = null }) {
   if (!isConfigured()) return null;
 
   const playerHint = buildPlayerHint(member);
   const discordUserId = member?.id ?? member?.user?.id ?? null;
-  const idempotencyKey = `discord-create:${discordUserId ?? 'unknown'}:${Date.now()}`;
+  idempotencyKey = idempotencyKey ?? `discord-create:${discordUserId ?? 'unknown'}:${Date.now()}`;
   let response;
   try {
     response = await axios.post(
@@ -120,12 +123,13 @@ async function createGroup({ member, categoryKey, activityLabel, description, st
   return response.data ?? null;
 }
 
-async function actOnGroupDetailed({ member, groupId, action }) {
+// idempotencyKey — see createGroup's comment above.
+async function actOnGroupDetailed({ member, groupId, action, idempotencyKey = null }) {
   if (!isConfigured() || !groupId) return null;
 
   const playerHint = buildPlayerHint(member);
   const discordUserId = member?.id ?? member?.user?.id ?? null;
-  const idempotencyKey = `discord-action:${action}:${groupId}:${discordUserId ?? 'unknown'}:${Date.now()}`;
+  idempotencyKey = idempotencyKey ?? `discord-action:${action}:${groupId}:${discordUserId ?? 'unknown'}:${Date.now()}`;
   let response;
   try {
     response = await axios.post(

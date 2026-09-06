@@ -170,7 +170,11 @@ async function ensureLfgStartPost(client) {
       return;
     } catch (err) {
       if (!isAlreadyGoneError(err)) {
+        // Not "already gone" — the post still exists but is now stale (old embeds) until the next
+        // restart retries this. Surface it rather than failing silently, since there's no other
+        // retry path in between.
         console.error('[LFG] Could not update existing start page post:', err.message);
+        await notifyAdminLog(client, '⚠️ LFG Start Page Update Failed', `The LFG start page post exists but couldn't be updated: ${err.message}`);
         return;
       }
       // Thread or starter message was deleted out-of-band — recreate instead of leaving no post.
