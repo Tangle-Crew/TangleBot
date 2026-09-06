@@ -82,17 +82,6 @@ function loadEvents(client) {
     }
     stopLfgDeliveryWorker = startLfgDeliveryWorker();
 
-    const adminLogChannelId = process.env.ADMIN_LOG_CHANNEL_ID;
-    const ownerRoleId = process.env.OWNER_ROLE_ID;
-    if (adminLogChannelId) {
-      try {
-        const channel = await client.channels.fetch(adminLogChannelId);
-        await channel.send(`<@&${ownerRoleId}> Bot is online and ready.`);
-      } catch (err) {
-        console.error('Failed to send startup message to admin log channel:', err);
-      }
-    }
-
     try {
       await sendHoneypotStartupMessage(client, honeypotConfig);
     } catch (err) {
@@ -126,6 +115,19 @@ function loadEvents(client) {
         }
       } catch (err) {
         console.error('[LFG] Role appearance sync failed:', err.message);
+      }
+    }
+
+    // Sent last, after every other startup step above has finished (or failed) — this is the
+    // signal that the bot is actually ready to use, not just that it's started connecting.
+    const adminLogChannelId = process.env.ADMIN_LOG_CHANNEL_ID;
+    const ownerRoleId = process.env.OWNER_ROLE_ID;
+    if (adminLogChannelId) {
+      try {
+        const channel = await client.channels.fetch(adminLogChannelId);
+        await channel.send(`<@&${ownerRoleId}> Bot is online and ready.`);
+      } catch (err) {
+        console.error('Failed to send startup message to admin log channel:', err);
       }
     }
   });
