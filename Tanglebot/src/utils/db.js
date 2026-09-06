@@ -52,6 +52,7 @@ function withFileLock(filename, fn) {
 // message content) that could exceed a length cap needs this.
 function truncate(text, max) {
   if (!text) return text;
+  if (max <= 0) return '';
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 

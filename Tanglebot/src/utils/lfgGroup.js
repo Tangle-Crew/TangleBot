@@ -234,7 +234,16 @@ function capMentionLines(lines, maxChars = MAX_ROSTER_SECTION_CHARS) {
     kept.push(line);
     total += line.length + 1;
   }
-  if (kept.length < lines.length) kept.push(`_…and ${lines.length - kept.length} more_`);
+  if (kept.length === lines.length) return kept.join('\n');
+
+  // The summary line itself counts against the budget too — drop kept lines until it fits.
+  let summary = `_…and ${lines.length - kept.length} more_`;
+  while (kept.length > 0 && total + summary.length + 1 > maxChars) {
+    total -= kept[kept.length - 1].length + 1;
+    kept.pop();
+    summary = `_…and ${lines.length - kept.length} more_`;
+  }
+  kept.push(truncate(summary, maxChars));
   return kept.join('\n');
 }
 
