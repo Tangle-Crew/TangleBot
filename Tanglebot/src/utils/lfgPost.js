@@ -492,10 +492,13 @@ function stopCountdownRefresh(group) {
   }
 }
 
-// Capped like buildGroupText's roster (see capMentionLines) — a "Mass" group's full member list
-// could otherwise push memberNotice's actual message text past Discord's 2000-char cap and truncate it away.
-function mentionAll(group) {
-  return capMentionLines([...group.members].map((id) => `<@${id}>`));
+// Unlike buildGroupText's roster, this list exists to actually ping people, not just to be read —
+// so instead of a small fixed budget, it gets whatever room memberNotice has left after reserving
+// space for the real notice text, fitting as many full mentions as possible (never mid-mention).
+// A "Mass" group large enough to still overflow that is a Discord message-cap limit no amount of
+// budgeting can lift — Discord notices caps content at 2000 chars regardless of who's counting.
+function mentionAll(group, maxChars) {
+  return capMentionLines([...group.members].map((id) => `<@${id}>`), maxChars);
 }
 
 // Pings the whole group before a message — reserved for notices where everyone genuinely needs
@@ -503,7 +506,10 @@ function mentionAll(group) {
 // churn (someone joining, leaving, or taking a freed spot) doesn't get this — see the individual
 // handlers below, which pass their notice text straight to sendOrEditActivity instead.
 function memberNotice(group, text) {
-  return `${mentionAll(group)}\n${text}`;
+  // Reserve room for the notice text (plus its joining newline) first, so it's never the part that
+  // gets cut — only the mention list shrinks if a "Mass" group's full roster wouldn't otherwise fit.
+  const mentions = mentionAll(group, Math.max(0, 1900 - text.length - 1));
+  return `${mentions}\n${text}`;
 }
 
 // Every notice (join/leave/formed/reopened/queue/keep-alive/disband) gets its own fresh message,
