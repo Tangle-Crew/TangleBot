@@ -6,6 +6,7 @@ const {
 } = require('discord.js');
 const { actOnGroupDetailed } = require('./lfgBackend');
 const { followUpEphemeral, replyEphemeral, isAlreadyGoneError } = require('./roleMenu');
+const { capMentionLines } = require('./lfgGroup');
 
 const SYNCED_GROUP_BUTTON_PREFIX = 'lfgsyncgroup';
 
@@ -87,10 +88,10 @@ function buildSyncedGroupEmbed(group) {
     group?.description ? `**Description:** ${group.description}` : null,
     '',
     `**Members (${members.length}/${capDisplay(group?.maximumPlayers)}):**`,
-    members.length ? members.map(memberLabel).join('\n') : '_none yet_',
+    members.length ? capMentionLines(members.map(memberLabel)) : '_none yet_',
     '',
     `**Queue (${group?.queueCount ?? queueMembers.length}):**`,
-    queueMembers.length ? queueMembers.map(memberLabel).join('\n') : '_none_',
+    queueMembers.length ? capMentionLines(queueMembers.map(memberLabel)) : '_none_',
   ].filter(Boolean).join('\n');
 
   let title = 'Looking For Group';

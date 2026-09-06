@@ -61,8 +61,11 @@ async function appendRow(sheetId, range, values) {
 }
 
 // Parses the row number out of an append response's updatedRange, e.g. "Sheet!A15:C15" -> 15.
+// A caller that caches the result long-term should treat a null return as a real failure, not
+// silently store it — a row number that's missing or wrong breaks the next edit to that row.
 function parseAppendedRowNumber(updatedRange) {
   const match = /![A-Z]+(\d+):/.exec(updatedRange || '');
+  if (!match) console.warn(`Could not parse a row number out of updatedRange: "${updatedRange}"`);
   return match ? parseInt(match[1], 10) : null;
 }
 

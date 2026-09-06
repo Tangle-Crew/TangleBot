@@ -524,8 +524,14 @@ module.exports = {
 
         // Posted inside the lock so two overlapping commands' leaderboard updates land in the same
         // order as their sheet writes — otherwise the slower command's stale snapshot could
-        // overwrite the faster one's newer post.
-        await postLeaderboard(guild, channelId, sortedForDisplay(entries), interaction.client.user.id);
+        // overwrite the faster one's newer post. Its own failure (e.g. the channel is gone) is
+        // caught here rather than left to abort the command — the sheet write already succeeded,
+        // so Pet Master role sync and the user's reply still need to happen.
+        try {
+          await postLeaderboard(guild, channelId, sortedForDisplay(entries), interaction.client.user.id);
+        } catch (err) {
+          console.error('[PHS] Failed to update leaderboard post after a pet edit:', err.message);
+        }
 
         return { toApply, skipped, newKeys, appliedNames: toApply.map(p => p.name).join(', '), noOp: false };
       });

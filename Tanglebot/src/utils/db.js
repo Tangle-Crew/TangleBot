@@ -27,15 +27,22 @@ function writeJson(filename, data) {
   // Unique per call, not just per-process — two unlocked concurrent writes to the same filename
   // would otherwise share one temp path and race each other's write/rename.
   const tempPath = `${filePath}.${process.pid}.${++writeCounter}.tmp`;
-  fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), 'utf8');
-  fs.renameSync(tempPath, filePath);
+  try {
+    fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), 'utf8');
+    fs.renameSync(tempPath, filePath);
+  } catch (err) {
+    fs.rmSync(tempPath, { force: true });
+    throw err;
+  }
 }
 
 const fileLocks = new Map(); // filename -> tail of its pending operation chain
 
 // Serializes async read-modify-write sequences against the same data file within this process —
 // e.g. reading stored state, awaiting some Discord API calls, then writing it back — so two
-// concurrent callers can't interleave and clobber each other's write.
+// concurrent callers can't interleave and clobber each other's write. A call must never await
+// another withFileLock call using the same key from inside its own callback — the inner call
+// would wait on the outer one to finish, which is itself waiting on the inner call: a deadlock.
 function withFileLock(filename, fn) {
   const previous = fileLocks.get(filename) || Promise.resolve();
   const run = previous.then(fn, fn);

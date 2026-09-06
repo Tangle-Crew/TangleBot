@@ -97,10 +97,12 @@ async function postLeaderboardLocked(guild, channelId, entries, botUserId, { bui
 
   let prevMessages = await Promise.all(prevIds.map((id) => channel.messages.fetch(id).catch(() => null)));
 
-  // Only fall back to a full history scan when every stored ID came back empty — a partial miss
-  // keeps whichever messages did fetch fine (the per-index loop below sends a fresh message only
-  // for the actual gaps), instead of discarding good matches because one was stale.
-  if (prevIds.length === 0 || !prevMessages.some((m) => m)) {
+  // Any stored ID coming back stale triggers a rescan, not just losing all of them — the per-index
+  // loop below sends a brand-new message for a gap it can't fill, which lands chronologically after
+  // the untouched (edited-in-place) survivors and visibly reorders the leaderboard in the channel.
+  // findPreviousLeaderboardMessages recovers survivors in original send order instead, so gaps only
+  // ever get filled at the tail, preserving the correct order.
+  if (!(prevIds.length > 0 && prevMessages.every((m) => m))) {
     console.log(`[${logPrefix}] Stored leaderboard message ID(s) missing or stale — scanning channel history to recover`);
     const recovered = await findPreviousLeaderboardMessages(channel, botUserId, isOwnLeaderboardMessage);
     if (recovered.length) prevMessages = recovered;
