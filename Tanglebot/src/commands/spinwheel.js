@@ -35,17 +35,23 @@ function shuffle(arr) {
   return a;
 }
 
-// Expand entries, supporting numeric ranges like "1-10" mixed with plain tokens
-function parseEntries(raw) {
+// Expand entries, supporting numeric ranges like "1-10" mixed with plain tokens.
+// Stops as soon as `cap` is exceeded so a fat-fingered range like "1-100000000"
+// can't block the event loop or exhaust memory building a huge array.
+function parseEntries(raw, cap) {
   const out = [];
   for (const token of raw.split(',').map(s => s.trim()).filter(Boolean)) {
     const m = token.match(/^(\d+)-(\d+)$/);
     if (m) {
       const a = parseInt(m[1], 10), b = parseInt(m[2], 10);
       const step = a <= b ? 1 : -1;
-      for (let n = a; step > 0 ? n <= b : n >= b; n += step) out.push(String(n));
+      for (let n = a; step > 0 ? n <= b : n >= b; n += step) {
+        out.push(String(n));
+        if (out.length > cap) return out;
+      }
     } else {
       out.push(token);
+      if (out.length > cap) return out;
     }
   }
   return out;
@@ -297,14 +303,14 @@ module.exports = {
     const doShuffle = interaction.options.getBoolean('shuffle') ?? false;
     const ping      = interaction.options.getString('ping') ?? '';
 
-    let entries = parseEntries(raw);
+    let entries = parseEntries(raw, 50);
 
     if (entries.length < 2) {
       return interaction.editReply({ content: 'You need at least 2 entries to spin the wheel.' });
     }
 
     if (entries.length > 50) {
-      return interaction.editReply({ content: `Too many entries (${entries.length}). Maximum is 50.` });
+      return interaction.editReply({ content: 'Too many entries. Maximum is 50.' });
     }
 
     if (numWin >= entries.length) {

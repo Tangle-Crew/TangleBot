@@ -947,6 +947,14 @@ async function handleCancelDisbandButton(interaction, groupId) {
 
   await interaction.deferUpdate();
 
+  // The empty/disband cleanup timer may have fired and already started deleting this thread while
+  // this click was in flight (see schedulePostGroupCleanup) — clearTimeout can't stop that once
+  // thread.delete() has been called. Don't lie and say the group is staying open when its post is
+  // already on its way out.
+  if (group.cleanupInFlight) {
+    return followUpEphemeral(interaction, '⚠️ Too late — this group\'s post was already being removed. Start a new one with the usual command.');
+  }
+
   group.status = isGroupFull(group) ? 'closed' : 'open';
 
   if (group.status === 'open') scheduleCountdownRefresh(interaction.client, group);
@@ -968,6 +976,11 @@ function schedulePostGroupCleanup(client, group, delayMs) {
   console.log(`[LFG] Cleanup scheduled for group ${group.id} (thread ${group.threadId}) in ${delayMs}ms`);
   group.cleanupTimeoutId = setTimeout(async () => {
     console.log(`[LFG] Cleanup timer fired for group ${group.id} (thread ${group.threadId})`);
+    // Once this fires, thread.delete() below is a real network call that can take seconds — long
+    // enough for a concurrent Cancel Disband to run mid-delete and clearTimeout can't stop us at
+    // that point. This flag lets that handler notice it lost the race instead of falsely telling
+    // the user the group is staying open right before its thread actually disappears.
+    group.cleanupInFlight = true;
     const startedAt = Date.now();
     try {
       // Cache hit avoids a network round-trip entirely — the thread should still be

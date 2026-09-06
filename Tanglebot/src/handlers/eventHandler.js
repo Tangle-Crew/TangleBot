@@ -65,7 +65,11 @@ function loadEvents(client) {
 
   client.once(Events.ClientReady, async (c) => {
     console.log(`Logged in as ${c.user.tag}`);
-    await syncCommands(client);
+    try {
+      await syncCommands(client);
+    } catch (err) {
+      console.error('Failed to sync slash commands:', err);
+    }
     if (isLfgBackendConfigured()) {
       try {
         const result = await syncDiscordCatalog();
@@ -89,10 +93,29 @@ function loadEvents(client) {
       }
     }
 
-    await sendHoneypotStartupMessage(client, honeypotConfig);
-    await ensureLfgStartPost(client);
-    await refreshPetLeaderboardOnStartup(client);
-    await refreshDonationLeaderboardOnStartup(client);
+    try {
+      await sendHoneypotStartupMessage(client, honeypotConfig);
+    } catch (err) {
+      console.error('Failed to send honeypot startup message:', err);
+    }
+
+    try {
+      await ensureLfgStartPost(client);
+    } catch (err) {
+      console.error('[LFG] Failed to ensure LFG start post:', err);
+    }
+
+    try {
+      await refreshPetLeaderboardOnStartup(client);
+    } catch (err) {
+      console.error('[PHS] Failed to refresh pet leaderboard on startup:', err);
+    }
+
+    try {
+      await refreshDonationLeaderboardOnStartup(client);
+    } catch (err) {
+      console.error('[DHS] Failed to refresh donation leaderboard on startup:', err);
+    }
 
     if (process.env.CLAN_ID) {
       try {

@@ -23,7 +23,16 @@ const client = new Client({
 
 client.commands = new Collection();
 
+// Last-resort safety net: log and keep running instead of letting a missed
+// await/catch anywhere in the codebase take down the whole bot.
+process.on('unhandledRejection', (err) => {
+  console.error('Unhandled promise rejection:', err);
+});
+
 loadCommands(client);
 loadEvents(client);
 
-client.login(discordBotToken);
+client.login(discordBotToken).catch((err) => {
+  console.error('Failed to log in to Discord:', err);
+  process.exit(1);
+});
