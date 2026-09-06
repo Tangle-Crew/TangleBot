@@ -520,6 +520,11 @@ module.exports = {
           const appendResult = await appendRow(sheetId, APPEND_RANGE, rowValues);
           const rowNumber = parseAppendedRowNumber(appendResult?.updates?.updatedRange);
           entries.push({ discordId: targetUser.id, displayName, petKeys: newKeys, count: newKeys.length, rowNumber });
+          // rowNumber feeds this entry's next update range — entries is cached across commands
+          // (see ensureEntriesLoaded), so a failure to parse it can't be left cached as null. Drop
+          // the whole cache instead, forcing a fresh reload next time that recovers the real value
+          // straight from the sheet.
+          if (rowNumber == null) entriesLoadPromise = null;
         }
 
         // Posted inside the lock so two overlapping commands' leaderboard updates land in the same
