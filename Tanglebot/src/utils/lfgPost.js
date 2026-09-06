@@ -492,11 +492,9 @@ function stopCountdownRefresh(group) {
   }
 }
 
-// Unlike buildGroupText's roster, this list exists to actually ping people, not just to be read —
-// so instead of a small fixed budget, it gets whatever room memberNotice has left after reserving
-// space for the real notice text, fitting as many full mentions as possible (never mid-mention).
-// A "Mass" group large enough to still overflow that is a Discord message-cap limit no amount of
-// budgeting can lift — Discord notices caps content at 2000 chars regardless of who's counting.
+// Unlike buildGroupText's roster, this list has to actually ping people — it gets whatever room
+// memberNotice has left after reserving space for the real notice text, fitting as many full
+// mentions as possible without cutting one in half.
 function mentionAll(group, maxChars) {
   return capMentionLines([...group.members].map((id) => `<@${id}>`), maxChars);
 }
@@ -898,11 +896,10 @@ async function handleStartNowButton(interaction, groupId) {
   console.log(`[LFG] ${interaction.user.username} started group ${groupId} early`);
   group.timeEpoch = Math.floor(Date.now() / 1000);
   stopCountdownRefresh(group);
-  // The initial keep-alive timer was stretched out to not fire before the group's original start
-  // time (see scheduleKeepAliveCheck) — starting early needs it rescheduled from now, or a group
-  // that was hours from starting gets no "still active?" check until that original, now-moot time.
-  // stopKeepAliveCheck first also clears any "Still Here?" reply window already in progress — left
-  // running, it would still auto-disband this just-started group once it expired.
+  // The keep-alive timer is stretched to not fire before a group's start time (see
+  // scheduleKeepAliveCheck), so starting early needs it rescheduled from now. stopKeepAliveCheck
+  // first also clears any "Still Here?" reply window in progress, which would otherwise still
+  // auto-disband this just-started group once it expired.
   stopKeepAliveCheck(group);
   scheduleKeepAliveCheck(interaction.client, group);
 

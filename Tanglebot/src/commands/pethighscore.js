@@ -9,10 +9,9 @@ const TEMPLAR_ROLE_ID = process.env.TEMPLAR_ROLE_ID;
 const OWNER_ROLE_ID = process.env.OWNER_ROLE_ID;
 const PET_MASTER_THRESHOLD = parseInt(process.env.PET_MASTER_THRESHOLD ?? '10', 10);
 
-// Lock key for withFileLock — not a real data file, just a namespace to serialize add/remove
-// against the pet highscores sheet so two concurrent commands for the same member can't both read
-// the same "before" pet list and race: the loser's write would otherwise clobber the winner's, or
-// (for a first-time entry) both would append a duplicate row for the same Discord ID.
+// Lock key for withFileLock — not a real data file, just a namespace serializing add/remove
+// against the pet highscores sheet, so two concurrent edits for the same member can't both read
+// the same "before" pet list and clobber each other's write (or append duplicate rows for a new entry).
 const PET_LOCK_KEY = 'pethighscores-sheet';
 
 // Fixed tab names matching Tanglebot/example/pethighscores_template.xlsx —
@@ -527,11 +526,9 @@ module.exports = {
           if (rowNumber == null) entriesLoadPromise = null;
         }
 
-        // Posted inside the lock so two overlapping commands' leaderboard updates land in the same
-        // order as their sheet writes — otherwise the slower command's stale snapshot could
-        // overwrite the faster one's newer post. Its own failure (e.g. the channel is gone) is
-        // caught here rather than left to abort the command — the sheet write already succeeded,
-        // so Pet Master role sync and the user's reply still need to happen.
+        // Posted inside the lock so overlapping commands' leaderboard updates land in sheet-write
+        // order. A posting failure is caught here rather than aborting the command — the sheet
+        // write already succeeded, so Pet Master role sync and the reply still need to happen.
         try {
           await postLeaderboard(guild, channelId, sortedForDisplay(entries), interaction.client.user.id);
         } catch (err) {

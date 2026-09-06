@@ -222,10 +222,8 @@ function formatCapacity(group) {
 
 // Caps a rendered section to a character budget, dropping whole lines (never mid-mention) and
 // summarizing the rest — keeps a "Mass" (uncapped) group's roster from pushing the whole post
-// past Discord's 2000-char message cap. Members and queue are budgeted separately, so a group
-// with both a full roster and a full queue combines to at most ~1300 chars from these two
-// sections — small enough, alongside the capped description, to stay clear of buildGroupText's
-// final truncate() even with every section maxed out at once.
+// past Discord's 2000-char message cap, even with the roster, queue, and description all maxed
+// out at once.
 const MAX_ROSTER_SECTION_CHARS = 550;
 const MAX_DESCRIPTION_CHARS = 150;
 function capMentionLines(lines, maxChars = MAX_ROSTER_SECTION_CHARS) {

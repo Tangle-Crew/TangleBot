@@ -54,10 +54,9 @@ function highestTierFor(donated) {
   return DONATION_TIERS.find(t => donated >= t.threshold) || null;
 }
 
-// Lock key for withFileLock — not a real data file, just a namespace to serialize add/remove
-// against the donations sheet so two concurrent commands can't both read the same "before" total
-// and race: the loser's write would otherwise clobber the winner's, or (for a first-time donor)
-// both would append a duplicate row for the same Discord ID.
+// Lock key for withFileLock — not a real data file, just a namespace serializing add/remove
+// against the donations sheet, so two concurrent edits for the same donor can't both read the
+// same "before" total and clobber each other's write (or append duplicate rows for a new donor).
 const DONATION_LOCK_KEY = 'donations-sheet';
 
 // Handles raw numbers, "300M", "150m", "75,000,000", "10.1m", etc. Returns
@@ -366,11 +365,9 @@ module.exports = {
           loadedEntries.push({ discordId: targetUser.id, displayName, donated: newAmount, rowNumber });
         }
 
-        // Posted inside the lock so two overlapping commands' leaderboard updates land in the same
-        // order as their sheet writes — otherwise the slower command's stale snapshot could
-        // overwrite the faster one's newer post. Its own failure (e.g. the channel is gone) is
-        // caught here rather than left to abort the command — the sheet write already succeeded,
-        // so tier role sync and the user's reply still need to happen.
+        // Posted inside the lock so overlapping commands' leaderboard updates land in sheet-write
+        // order. A posting failure is caught here rather than aborting the command — the sheet
+        // write already succeeded, so tier role sync and the reply still need to happen.
         try {
           await postLeaderboard(guild, channelId, sortedForDisplay(loadedEntries), interaction.client.user.id);
         } catch (err) {
