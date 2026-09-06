@@ -18,11 +18,15 @@ function readJson(filename) {
 
 // Writes to a temp file and renames it into place so a crash mid-write can never leave a
 // truncated, unparseable file behind — the rename is atomic on the same filesystem.
+let writeCounter = 0;
+
 function writeJson(filename, data) {
   const filePath = path.join(DATA_DIR, filename);
   console.log(`Writing data file: ${filename}`);
   fs.mkdirSync(DATA_DIR, { recursive: true });
-  const tempPath = `${filePath}.${process.pid}.tmp`;
+  // Unique per call, not just per-process — two unlocked concurrent writes to the same filename
+  // would otherwise share one temp path and race each other's write/rename.
+  const tempPath = `${filePath}.${process.pid}.${++writeCounter}.tmp`;
   fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), 'utf8');
   fs.renameSync(tempPath, filePath);
 }

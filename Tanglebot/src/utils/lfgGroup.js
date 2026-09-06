@@ -4,6 +4,7 @@ const {
   ButtonStyle,
 } = require('discord.js');
 const { CATEGORIES, emojiMarkup } = require('./roleMenu');
+const { truncate } = require('./db');
 
 // Top-level accordion categories for the /lfg-post dropdown, derived from roleMenu.js's CATEGORIES.
 const CATEGORY_OPTIONS = Object.entries(CATEGORIES).map(([key, c]) => ({
@@ -222,7 +223,8 @@ function formatCapacity(group) {
 // Caps a rendered section to a character budget, dropping whole lines (never mid-mention) and
 // summarizing the rest — keeps a "Mass" (uncapped) group's roster from pushing the whole post
 // past Discord's 2000-char message cap.
-const MAX_ROSTER_SECTION_CHARS = 800;
+const MAX_ROSTER_SECTION_CHARS = 700;
+const MAX_DESCRIPTION_CHARS = 300;
 function capMentionLines(lines, maxChars = MAX_ROSTER_SECTION_CHARS) {
   let total = 0;
   const kept = [];
@@ -253,7 +255,7 @@ function buildGroupText(group) {
     `**Start:** <t:${group.timeEpoch}:t> (<t:${group.timeEpoch}:R>)`,
     `**Group Size:** ${group.sizeLabel}`,
   ];
-  if (group.description) lines.push('**Description:**', group.description);
+  if (group.description) lines.push('**Description:**', truncate(group.description, MAX_DESCRIPTION_CHARS));
   lines.push('', `**Members (${group.members.size}/${capDisplay}):**`, memberLines || '_none yet_');
 
   // Numbered in join order (group.queue is always FIFO — see advanceQueueOrReopen in lfgPost.js),
@@ -266,7 +268,9 @@ function buildGroupText(group) {
   }
 
   lines.push('', `_Started by ${group.creatorTag}_`);
-  return lines.join('\n');
+  // Per-section caps above keep this well under Discord's 2000-char message cap in practice;
+  // this is a last-resort backstop against edge cases they don't account for.
+  return truncate(lines.join('\n'), 1900);
 }
 
 function makeGroupId() {
@@ -288,6 +292,7 @@ module.exports = {
   describeStartCountdown,
   computeCountdownRefreshDelay,
   buildGroupText,
+  capMentionLines,
   buildGroupRow,
   buildQueueOfferRow,
   buildCancelDisbandRow,

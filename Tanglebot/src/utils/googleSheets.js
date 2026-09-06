@@ -60,4 +60,10 @@ async function appendRow(sheetId, range, values) {
   return res.data;
 }
 
-module.exports = { getRows, updateRow, appendRow };
+// Parses the row number out of an append response's updatedRange, e.g. "Sheet!A15:C15" -> 15.
+function parseAppendedRowNumber(updatedRange) {
+  const match = /![A-Z]+(\d+):/.exec(updatedRange || '');
+  return match ? parseInt(match[1], 10) : null;
+}
+
+module.exports = { getRows, updateRow, appendRow, parseAppendedRowNumber };

@@ -4,12 +4,12 @@
 const FALLBACK_COLOR = 0x006400;
 
 function parseEmbedColor(raw) {
-  const parsed = parseInt((raw || '006400').replace(/^#|^0x/i, ''), 16);
-  if (Number.isNaN(parsed)) {
+  const hex = (raw || '006400').replace(/^#|^0x/i, '');
+  if (!/^[0-9a-f]+$/i.test(hex)) {
     console.warn(`DEFAULT_EMBED_COLOR "${raw}" isn't a valid hex color — falling back to #006400.`);
     return FALLBACK_COLOR;
   }
-  return parsed;
+  return parseInt(hex, 16);
 }
 
 const DEFAULT_EMBED_COLOR = parseEmbedColor(process.env.DEFAULT_EMBED_COLOR);

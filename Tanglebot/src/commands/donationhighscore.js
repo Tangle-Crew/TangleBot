@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, MessageFlags, EmbedBuilder } = require('discord.js');
-const { getRows, updateRow, appendRow } = require('../utils/googleSheets');
+const { getRows, updateRow, appendRow, parseAppendedRowNumber } = require('../utils/googleSheets');
 const { DEFAULT_EMBED_COLOR } = require('../utils/embedColor');
+const { withFileLock } = require('../utils/db');
 const { mentionOrName, postLeaderboard: postLeaderboardShared } = require('../utils/leaderboard');
 const { notifyAdminLog } = require('../utils/roleMenu');
 
@@ -53,21 +54,11 @@ function highestTierFor(donated) {
   return DONATION_TIERS.find(t => donated >= t.threshold) || null;
 }
 
-// Parses the row number out of an append response's updatedRange, e.g. "Donations!A15:C15" -> 15.
-function parseAppendedRowNumber(updatedRange) {
-  const match = /![A-Z]+(\d+):/.exec(updatedRange || '');
-  return match ? parseInt(match[1], 10) : null;
-}
-
-// Serializes add/remove against the donations sheet so two concurrent commands can't both read
-// the same "before" total and race — the loser's write would otherwise clobber the winner's, or
-// (for a first-time donor) both would append a duplicate row for the same Discord ID.
-let donationOpChain = Promise.resolve();
-function withDonationLock(fn) {
-  const run = donationOpChain.then(fn, fn);
-  donationOpChain = run.catch(() => {});
-  return run;
-}
+// Lock key for withFileLock — not a real data file, just a namespace to serialize add/remove
+// against the donations sheet so two concurrent commands can't both read the same "before" total
+// and race: the loser's write would otherwise clobber the winner's, or (for a first-time donor)
+// both would append a duplicate row for the same Discord ID.
+const DONATION_LOCK_KEY = 'donations-sheet';
 
 // Handles raw numbers, "300M", "150m", "75,000,000", "10.1m", etc. Returns
 // null (rather than 0) for unparseable input so callers can tell "no amount"
@@ -342,14 +333,14 @@ module.exports = {
       if (!member) console.warn(`[DHS] Could not fetch member ${targetUser.id} (${targetUser.tag}) — falling back to username`);
       const displayName = member?.displayName || targetUser.username;
 
-      const { entries, currentAmount, newAmount, clamped, noDonationsLogged } = await withDonationLock(async () => {
+      const { currentAmount, newAmount, clamped, noDonationsLogged } = await withFileLock(DONATION_LOCK_KEY, async () => {
         const loadedEntries = await loadEntries();
         const existingIndex = loadedEntries.findIndex(e => e.discordId === targetUser.id);
         const existing = existingIndex === -1 ? null : loadedEntries[existingIndex];
         const currentAmount = existing ? existing.donated : 0;
 
         if (subcommand === 'remove' && currentAmount === 0) {
-          return { entries: loadedEntries, currentAmount, newAmount: currentAmount, clamped: false, noDonationsLogged: true };
+          return { currentAmount, newAmount: currentAmount, clamped: false, noDonationsLogged: true };
         }
 
         let clamped = false;
@@ -375,7 +366,12 @@ module.exports = {
           loadedEntries.push({ discordId: targetUser.id, displayName, donated: newAmount, rowNumber });
         }
 
-        return { entries: loadedEntries, currentAmount, newAmount, clamped };
+        // Posted inside the lock so two overlapping commands' leaderboard updates land in the same
+        // order as their sheet writes — otherwise the slower command's stale snapshot could
+        // overwrite the faster one's newer post.
+        await postLeaderboard(guild, channelId, sortedForDisplay(loadedEntries), interaction.client.user.id);
+
+        return { currentAmount, newAmount, clamped };
       });
 
       if (noDonationsLogged) {
@@ -405,8 +401,6 @@ module.exports = {
       }
 
       const tierChange = await syncDonationRoles(guild, targetUser.id, currentAmount, newAmount);
-
-      await postLeaderboard(guild, channelId, sortedForDisplay(entries), interaction.client.user.id);
 
       const verb = subcommand === 'add' ? 'Added' : 'Removed';
       const prep = subcommand === 'add' ? 'to' : 'from';

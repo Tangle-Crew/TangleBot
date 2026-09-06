@@ -185,6 +185,7 @@ async function handleSyncedGroupButtonInteraction(interaction) {
       member: interaction.member,
       groupId,
       action,
+      idempotencyKey: interaction.id,
     });
   } catch (err) {
     console.error(`[LFG] Synced group ${action} failed for ${groupId}:`, err.message);

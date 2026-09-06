@@ -20,6 +20,7 @@ const {
   findTimeOption,
   resolveTimeEpoch,
   buildGroupText,
+  capMentionLines,
   buildGroupRow,
   buildQueueOfferRow,
   buildCancelDisbandRow,
@@ -491,8 +492,10 @@ function stopCountdownRefresh(group) {
   }
 }
 
+// Capped like buildGroupText's roster (see capMentionLines) — a "Mass" group's full member list
+// could otherwise push memberNotice's actual message text past Discord's 2000-char cap and truncate it away.
 function mentionAll(group) {
-  return [...group.members].map((id) => `<@${id}>`).join('\n');
+  return capMentionLines([...group.members].map((id) => `<@${id}>`));
 }
 
 // Pings the whole group before a message — reserved for notices where everyone genuinely needs
@@ -892,6 +895,9 @@ async function handleStartNowButton(interaction, groupId) {
   // The initial keep-alive timer was stretched out to not fire before the group's original start
   // time (see scheduleKeepAliveCheck) — starting early needs it rescheduled from now, or a group
   // that was hours from starting gets no "still active?" check until that original, now-moot time.
+  // stopKeepAliveCheck first also clears any "Still Here?" reply window already in progress — left
+  // running, it would still auto-disband this just-started group once it expired.
+  stopKeepAliveCheck(group);
   scheduleKeepAliveCheck(interaction.client, group);
 
   if (!(await updateGroupMessage(interaction, group))) return;

@@ -311,7 +311,7 @@ module.exports = {
     }
 
     if (entries.length > 50) {
-      return interaction.editReply({ content: 'Too many entries. Maximum is 50.' });
+      return interaction.editReply({ content: 'Too many entries (over 50). Maximum is 50.' });
     }
 
     if (numWin >= entries.length) {

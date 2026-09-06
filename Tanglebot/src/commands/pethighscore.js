@@ -1,12 +1,19 @@
 const { SlashCommandBuilder, MessageFlags, EmbedBuilder } = require('discord.js');
-const { getRows, updateRow, appendRow } = require('../utils/googleSheets');
+const { getRows, updateRow, appendRow, parseAppendedRowNumber } = require('../utils/googleSheets');
 const { DEFAULT_EMBED_COLOR } = require('../utils/embedColor');
 const { mentionOrName, postLeaderboard: postLeaderboardShared } = require('../utils/leaderboard');
 const { notifyAdminLog } = require('../utils/roleMenu');
+const { withFileLock } = require('../utils/db');
 
 const TEMPLAR_ROLE_ID = process.env.TEMPLAR_ROLE_ID;
 const OWNER_ROLE_ID = process.env.OWNER_ROLE_ID;
 const PET_MASTER_THRESHOLD = parseInt(process.env.PET_MASTER_THRESHOLD ?? '10', 10);
+
+// Lock key for withFileLock — not a real data file, just a namespace to serialize add/remove
+// against the pet highscores sheet so two concurrent commands for the same member can't both read
+// the same "before" pet list and race: the loser's write would otherwise clobber the winner's, or
+// (for a first-time entry) both would append a duplicate row for the same Discord ID.
+const PET_LOCK_KEY = 'pethighscores-sheet';
 
 // Fixed tab names matching Tanglebot/example/pethighscores_template.xlsx —
 // the setup docs have users copy that file as their sheet, so these aren't
@@ -59,14 +66,6 @@ function ensurePetsLoaded() {
       });
   }
   return petsLoadPromise;
-}
-
-// Parses the row number out of an append response's updatedRange, e.g.
-// "Highscores!A15:C15" -> 15. Needed because entries are cached in memory
-// and later edits (add/remove without a restart) look up this rowNumber.
-function parseAppendedRowNumber(updatedRange) {
-  const match = /![A-Z]+(\d+):/.exec(updatedRange || '');
-  return match ? parseInt(match[1], 10) : null;
 }
 
 function slugify(name) {
@@ -438,7 +437,6 @@ module.exports = {
       .filter(p => p.name.toLowerCase().includes(query))
       .slice(0, 25);
 
-    console.log(`[PHS] Autocomplete query: "${query}" (${choices.length} match(es))`);
     await interaction.respond(choices.map(p => ({ name: p.name, value: p.key })));
   },
 
@@ -492,19 +490,47 @@ module.exports = {
       if (!member) console.warn(`[PHS] Could not fetch member ${targetUser.id} (${targetUser.tag}) — falling back to username`);
       const displayName = member?.displayName || targetUser.username;
 
-      const entries = await ensureEntriesLoaded();
-      const existingIndex = entries.findIndex(e => e.discordId === targetUser.id);
-      const existing = existingIndex === -1 ? null : entries[existingIndex];
-      const currentKeys = existing ? existing.petKeys : [];
+      const { toApply, skipped, newKeys, appliedNames, noOp } = await withFileLock(PET_LOCK_KEY, async () => {
+        const entries = await ensureEntriesLoaded();
+        const existingIndex = entries.findIndex(e => e.discordId === targetUser.id);
+        const existing = existingIndex === -1 ? null : entries[existingIndex];
+        const currentKeys = existing ? existing.petKeys : [];
 
-      const toApply = subcommand === 'add'
-        ? pets.filter(p => !currentKeys.includes(p.key))
-        : pets.filter(p => currentKeys.includes(p.key));
-      const skipped = subcommand === 'add'
-        ? pets.filter(p => currentKeys.includes(p.key))
-        : pets.filter(p => !currentKeys.includes(p.key));
+        const toApply = subcommand === 'add'
+          ? pets.filter(p => !currentKeys.includes(p.key))
+          : pets.filter(p => currentKeys.includes(p.key));
+        const skipped = subcommand === 'add'
+          ? pets.filter(p => currentKeys.includes(p.key))
+          : pets.filter(p => !currentKeys.includes(p.key));
 
-      if (toApply.length === 0) {
+        if (toApply.length === 0) {
+          return { toApply, skipped, newKeys: currentKeys, appliedNames: '', noOp: true };
+        }
+
+        const newKeys = subcommand === 'add'
+          ? sortPetKeys([...currentKeys, ...toApply.map(p => p.key)])
+          : sortPetKeys(currentKeys.filter(k => !toApply.some(p => p.key === k)));
+
+        const rowValues = [targetUser.id, displayName, newKeys.join(', ')];
+
+        if (existing) {
+          await updateRow(sheetId, `${SHEET_TAB}!A${existing.rowNumber}:C${existing.rowNumber}`, rowValues);
+          entries[existingIndex] = { ...existing, displayName, petKeys: newKeys, count: newKeys.length };
+        } else {
+          const appendResult = await appendRow(sheetId, APPEND_RANGE, rowValues);
+          const rowNumber = parseAppendedRowNumber(appendResult?.updates?.updatedRange);
+          entries.push({ discordId: targetUser.id, displayName, petKeys: newKeys, count: newKeys.length, rowNumber });
+        }
+
+        // Posted inside the lock so two overlapping commands' leaderboard updates land in the same
+        // order as their sheet writes — otherwise the slower command's stale snapshot could
+        // overwrite the faster one's newer post.
+        await postLeaderboard(guild, channelId, sortedForDisplay(entries), interaction.client.user.id);
+
+        return { toApply, skipped, newKeys, appliedNames: toApply.map(p => p.name).join(', '), noOp: false };
+      });
+
+      if (noOp) {
         const names = skipped.map(p => `**${p.name}**`).join(', ');
         const msg = subcommand === 'add'
           ? `<@${targetUser.id}> already has ${names} logged.`
@@ -512,23 +538,6 @@ module.exports = {
         console.log(`[PHS] ${interaction.user.tag} tried to ${subcommand} ${skipped.map(p => p.name).join(', ')} for ${targetUser.tag} — no change`);
         return interaction.editReply(msg);
       }
-
-      const newKeys = subcommand === 'add'
-        ? sortPetKeys([...currentKeys, ...toApply.map(p => p.key)])
-        : sortPetKeys(currentKeys.filter(k => !toApply.some(p => p.key === k)));
-
-      const rowValues = [targetUser.id, displayName, newKeys.join(', ')];
-
-      if (existing) {
-        await updateRow(sheetId, `${SHEET_TAB}!A${existing.rowNumber}:C${existing.rowNumber}`, rowValues);
-        entries[existingIndex] = { ...existing, displayName, petKeys: newKeys, count: newKeys.length };
-      } else {
-        const appendResult = await appendRow(sheetId, APPEND_RANGE, rowValues);
-        const rowNumber = parseAppendedRowNumber(appendResult?.updates?.updatedRange);
-        entries.push({ discordId: targetUser.id, displayName, petKeys: newKeys, count: newKeys.length, rowNumber });
-      }
-
-      const appliedNames = toApply.map(p => p.name).join(', ');
 
       if (subcommand === 'add') {
         console.log(`[PHS] ${interaction.user.tag} added "${appliedNames}" to ${targetUser.tag} (now ${newKeys.length} pets)`);
@@ -551,8 +560,6 @@ module.exports = {
       }
 
       const roleChange = await syncMasterRole(guild, targetUser.id, newKeys.length);
-
-      await postLeaderboard(guild, channelId, sortedForDisplay(entries), interaction.client.user.id);
 
       const verb = subcommand === 'add' ? 'Added' : 'Removed';
       const prep = subcommand === 'add' ? 'to' : 'from';
