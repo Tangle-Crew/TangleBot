@@ -19,7 +19,22 @@ const commandsPath = path.join(__dirname, 'commands');
 
 for (const file of fs.readdirSync(commandsPath).filter(f => f.endsWith('.js'))) {
   const command = require(path.join(commandsPath, file));
-  if (command.data) commands.push(command.data.toJSON());
+  if (!command.data) continue;
+
+  if (command.requiredEnv) {
+    const missing = command.requiredEnv.filter(k => !process.env[k]);
+    if (missing.length > 0) {
+      console.log(`Skipping /${command.data.name}: missing env var(s): ${missing.join(', ')}`);
+      continue;
+    }
+  }
+
+  if (command.requiredEnvAny && !command.requiredEnvAny.some(k => process.env[k])) {
+    console.log(`Skipping /${command.data.name}: none of the env var(s) set: ${command.requiredEnvAny.join(', ')}`);
+    continue;
+  }
+
+  commands.push(command.data.toJSON());
 }
 
 const rest = new REST().setToken(discordBotToken);

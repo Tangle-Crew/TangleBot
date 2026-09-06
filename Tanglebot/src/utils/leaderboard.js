@@ -1,4 +1,4 @@
-const { readJson, writeJson } = require('./db');
+const { readJson, writeJson, withFileLock } = require('./db');
 
 // Discord caps a message at 10 embeds and ~6000 chars combined (separate from each embed's own
 // ~4096 description cap, enforced by the caller's buildEmbeds). Packing must respect both or a
@@ -81,7 +81,14 @@ async function findPreviousLeaderboardMessages(channel, botUserId, isOwnLeaderbo
 //   logPrefix                                    tag for console logs, e.g. "PHS" / "DHS"
 //   isOwnLeaderboardMessage(firstEmbed) -> bool   identifies this leaderboard's own post during recovery
 //   onDisplayNameChange(entry) -> Promise         (optional) persists a refreshed display name back to the sheet
-async function postLeaderboard(guild, channelId, entries, botUserId, { buildEmbeds, dataFile, logPrefix, isOwnLeaderboardMessage, onDisplayNameChange }) {
+async function postLeaderboard(guild, channelId, entries, botUserId, options) {
+  // Serialized per dataFile: two overlapping calls (e.g. two admins editing entries back-to-back)
+  // reading/writing the same stored message-ID file would otherwise race and one write could
+  // silently clobber the other's, orphaning a freshly-sent message.
+  return withFileLock(options.dataFile, () => postLeaderboardLocked(guild, channelId, entries, botUserId, options));
+}
+
+async function postLeaderboardLocked(guild, channelId, entries, botUserId, { buildEmbeds, dataFile, logPrefix, isOwnLeaderboardMessage, onDisplayNameChange }) {
   const channel = await guild.channels.fetch(channelId);
   const freshEntries = await refreshDisplayNames(guild, entries, onDisplayNameChange);
   const groups = packEmbedsIntoMessages(buildEmbeds(freshEntries));
@@ -91,7 +98,10 @@ async function postLeaderboard(guild, channelId, entries, botUserId, { buildEmbe
 
   let prevMessages = await Promise.all(prevIds.map((id) => channel.messages.fetch(id).catch(() => null)));
 
-  if (!(prevIds.length > 0 && prevMessages.every((m) => m))) {
+  // Only fall back to a full history scan when every stored ID came back empty — a partial miss
+  // keeps whichever messages did fetch fine (the per-index loop below sends a fresh message only
+  // for the actual gaps), instead of discarding good matches because one was stale.
+  if (prevIds.length === 0 || !prevMessages.some((m) => m)) {
     console.log(`[${logPrefix}] Stored leaderboard message ID(s) missing or stale — scanning channel history to recover`);
     const recovered = await findPreviousLeaderboardMessages(channel, botUserId, isOwnLeaderboardMessage);
     if (recovered.length) prevMessages = recovered;

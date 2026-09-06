@@ -3,16 +3,39 @@ const path = require('path');
 
 const DATA_DIR = path.join(__dirname, '..', '..', 'data');
 
+// A corrupt file (e.g. from a crash mid-write) is treated as empty rather than taking down
+// whatever called this.
 function readJson(filename) {
   const filePath = path.join(DATA_DIR, filename);
   if (!fs.existsSync(filePath)) return {};
-  return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch (err) {
+    console.error(`Could not parse ${filename}, treating it as empty:`, err.message);
+    return {};
+  }
 }
 
+// Writes to a temp file and renames it into place so a crash mid-write can never leave a
+// truncated, unparseable file behind — the rename is atomic on the same filesystem.
 function writeJson(filename, data) {
   const filePath = path.join(DATA_DIR, filename);
   fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+  const tempPath = `${filePath}.${process.pid}.tmp`;
+  fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), 'utf8');
+  fs.renameSync(tempPath, filePath);
+}
+
+const fileLocks = new Map(); // filename -> tail of its pending operation chain
+
+// Serializes async read-modify-write sequences against the same data file within this process —
+// e.g. reading stored state, awaiting some Discord API calls, then writing it back — so two
+// concurrent callers can't interleave and clobber each other's write.
+function withFileLock(filename, fn) {
+  const previous = fileLocks.get(filename) || Promise.resolve();
+  const run = previous.then(fn, fn);
+  fileLocks.set(filename, run.catch(() => {}));
+  return run;
 }
 
 // Shared text-truncation helper — anything displayed back to Discord (embed fields/values,
@@ -29,4 +52,4 @@ function hasAnyRole(member, roleIds) {
   return roleIds.filter(Boolean).some((roleId) => member.roles?.cache?.has(roleId));
 }
 
-module.exports = { readJson, writeJson, truncate, hasAnyRole };
+module.exports = { readJson, writeJson, withFileLock, truncate, hasAnyRole };

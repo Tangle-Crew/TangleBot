@@ -512,7 +512,9 @@ async function sendOrEditActivity(channel, group, text, components = []) {
     });
   }
 
-  const message = await channel.send({ content: text, components });
+  // A "Mass" (uncapped) group's member-mention list can exceed Discord's 2000-char message cap —
+  // truncating here keeps this from throwing and leaving activityMessageId stuck null.
+  const message = await channel.send({ content: truncate(text, 2000), components });
   group.activityMessageId = message.id;
 }
 
@@ -609,7 +611,12 @@ async function handleQueueOfferTimeout(client, group) {
     await syncBackendQueueCount(group);
     await advanceQueueOrReopen(client, channel, group, `⌛ <@${skippedUserId}> didn't respond in time and was removed from the queue.`);
   } catch (err) {
-    if (!isAlreadyGoneError(err)) console.error(`[LFG] Could not advance queue for group ${group.id}:`, err.message);
+    if (isAlreadyGoneError(err)) {
+      // Thread was deleted out-of-band — drop the group instead of leaking it with dead timers.
+      cleanupStaleGroup(group);
+    } else {
+      console.error(`[LFG] Could not advance queue for group ${group.id}:`, err.message);
+    }
   }
 }
 
@@ -796,12 +803,15 @@ async function handleQueueAcceptButton(interaction, groupId) {
   if (!group) return;
   if (!requirePendingOffer(interaction, group)) return;
 
-  await interaction.deferUpdate();
-
+  // Mutate before the deferUpdate() network round trip, not after — otherwise the 5-minute queue
+  // offer timeout could fire mid-await and shift the same person off the queue a second time once
+  // this handler resumes.
   clearPendingOffer(group);
   group.queue.shift();
   group.members.add(interaction.user.id);
   group.status = isGroupFull(group) ? 'closed' : 'open';
+
+  await interaction.deferUpdate();
   await syncBackendQueueCount(group);
 
   // No group-wide ping — filling a freed spot is routine membership churn, same as a join.
@@ -843,10 +853,11 @@ async function handleQueueDeclineButton(interaction, groupId) {
   if (!group) return;
   if (!requirePendingOffer(interaction, group)) return;
 
-  await interaction.deferUpdate();
-
+  // Mutate before the deferUpdate() network round trip — see handleQueueAcceptButton.
   clearPendingOffer(group);
   const declinedUserId = group.queue.shift();
+
+  await interaction.deferUpdate();
   await syncBackendQueueCount(group);
 
   await advanceQueueOrReopen(interaction.client, interaction.channel, group, `↪️ <@${declinedUserId}> declined the spot.`);
@@ -1068,7 +1079,12 @@ async function runKeepAliveCheck(client, group) {
     );
     group.keepAliveReplyTimeoutId = setTimeout(() => handleKeepAliveTimeout(client, group), KEEP_ALIVE_REPLY_WINDOW_MS);
   } catch (err) {
-    if (!isAlreadyGoneError(err)) console.error(`[LFG] Could not send keep-alive check for group ${group.id}:`, err.message);
+    if (isAlreadyGoneError(err)) {
+      // Thread was deleted out-of-band — drop the group instead of leaking it with dead timers.
+      cleanupStaleGroup(group);
+    } else {
+      console.error(`[LFG] Could not send keep-alive check for group ${group.id}:`, err.message);
+    }
   }
 }
 
@@ -1097,7 +1113,12 @@ async function handleKeepAliveTimeout(client, group) {
     await beginDisband(client, channel, group, '⌛ No one confirmed this group was still active, so it was automatically disbanded.');
     console.log(`[LFG] Group ${group.id} auto-disbanded after a missed keep-alive check.`);
   } catch (err) {
-    if (!isAlreadyGoneError(err)) console.error(`[LFG] Could not auto-disband group ${group.id} after a missed keep-alive check:`, err.message);
+    if (isAlreadyGoneError(err)) {
+      // Thread was deleted out-of-band — drop the group instead of leaking it with dead timers.
+      cleanupStaleGroup(group);
+    } else {
+      console.error(`[LFG] Could not auto-disband group ${group.id} after a missed keep-alive check:`, err.message);
+    }
   }
 }
 

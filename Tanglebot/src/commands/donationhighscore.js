@@ -53,6 +53,25 @@ function highestTierFor(donated) {
   return DONATION_TIERS.find(t => donated >= t.threshold) || null;
 }
 
+// Parses the row number out of an append response's updatedRange, e.g.
+// "Donations!A15:C15" -> 15. Kept in sync with pethighscore.js's identical helper — an appended
+// entry needs a real rowNumber in case this command is ever changed to cache entries across
+// invocations instead of reloading the sheet every time.
+function parseAppendedRowNumber(updatedRange) {
+  const match = /![A-Z]+(\d+):/.exec(updatedRange || '');
+  return match ? parseInt(match[1], 10) : null;
+}
+
+// Serializes add/remove against the donations sheet so two concurrent commands can't both read
+// the same "before" total and race — the loser's write would otherwise clobber the winner's, or
+// (for a first-time donor) both would append a duplicate row for the same Discord ID.
+let donationOpChain = Promise.resolve();
+function withDonationLock(fn) {
+  const run = donationOpChain.then(fn, fn);
+  donationOpChain = run.catch(() => {});
+  return run;
+}
+
 // Handles raw numbers, "300M", "150m", "75,000,000", "10.1m", etc. Returns
 // null (rather than 0) for unparseable input so callers can tell "no amount"
 // apart from a genuine zero.
@@ -325,36 +344,45 @@ module.exports = {
       if (!member) console.warn(`[DHS] Could not fetch member ${targetUser.id} (${targetUser.tag}) — falling back to username`);
       const displayName = member?.displayName || targetUser.username;
 
-      const entries = await loadEntries();
-      const existingIndex = entries.findIndex(e => e.discordId === targetUser.id);
-      const existing = existingIndex === -1 ? null : entries[existingIndex];
-      const currentAmount = existing ? existing.donated : 0;
+      const { entries, currentAmount, newAmount, clamped, noDonationsLogged } = await withDonationLock(async () => {
+        const loadedEntries = await loadEntries();
+        const existingIndex = loadedEntries.findIndex(e => e.discordId === targetUser.id);
+        const existing = existingIndex === -1 ? null : loadedEntries[existingIndex];
+        const currentAmount = existing ? existing.donated : 0;
 
-      if (subcommand === 'remove' && currentAmount === 0) {
+        if (subcommand === 'remove' && currentAmount === 0) {
+          return { entries: loadedEntries, currentAmount, newAmount: currentAmount, clamped: false, noDonationsLogged: true };
+        }
+
+        let clamped = false;
+        let newAmount;
+        if (subcommand === 'add') {
+          newAmount = currentAmount + amount;
+        } else {
+          newAmount = currentAmount - amount;
+          if (newAmount < 0) {
+            clamped = true;
+            newAmount = 0;
+          }
+        }
+
+        const rowValues = [targetUser.id, displayName, newAmount];
+
+        if (existing) {
+          await updateRow(sheetId, `${SHEET_TAB}!A${existing.rowNumber}:C${existing.rowNumber}`, rowValues);
+          loadedEntries[existingIndex] = { ...existing, displayName, donated: newAmount };
+        } else {
+          const appendResult = await appendRow(sheetId, APPEND_RANGE, rowValues);
+          const rowNumber = parseAppendedRowNumber(appendResult?.updates?.updatedRange);
+          loadedEntries.push({ discordId: targetUser.id, displayName, donated: newAmount, rowNumber });
+        }
+
+        return { entries: loadedEntries, currentAmount, newAmount, clamped };
+      });
+
+      if (noDonationsLogged) {
         console.log(`[DHS] ${interaction.user.tag} tried to remove from ${targetUser.tag}, who has no donations logged`);
         return interaction.editReply(`<@${targetUser.id}> doesn't have any donations logged.`);
-      }
-
-      let clamped = false;
-      let newAmount;
-      if (subcommand === 'add') {
-        newAmount = currentAmount + amount;
-      } else {
-        newAmount = currentAmount - amount;
-        if (newAmount < 0) {
-          clamped = true;
-          newAmount = 0;
-        }
-      }
-
-      const rowValues = [targetUser.id, displayName, newAmount];
-
-      if (existing) {
-        await updateRow(sheetId, `${SHEET_TAB}!A${existing.rowNumber}:C${existing.rowNumber}`, rowValues);
-        entries[existingIndex] = { ...existing, displayName, donated: newAmount };
-      } else {
-        await appendRow(sheetId, APPEND_RANGE, rowValues);
-        entries.push({ discordId: targetUser.id, displayName, donated: newAmount });
       }
 
       if (subcommand === 'add') {

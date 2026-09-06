@@ -441,26 +441,41 @@ function roleIconOptions(guild, emoji) {
   return { icon: `https://cdn.discordapp.com/emojis/${emoji}.${ext}?size=64` };
 }
 
-// Finds the role, creating it first if it's missing.
+const pendingRoleCreations = new Map(); // `${guildId}:${roleName}` -> in-flight create Promise
+
+// Finds the role, creating it first if it's missing. Two callers racing on the same never-before-used
+// role (e.g. two members toggling it at once) share the same in-flight creation instead of each
+// calling guild.roles.create(), which would otherwise produce duplicate roles.
 async function ensureRoleExists(guild, name) {
   const roleConfig = findRoleConfig(name);
   const existing = findRole(guild, name);
   if (existing) return existing;
 
-  try {
-    const role = await guild.roles.create({
-      name: lfgRoleName(name),
-      mentionable: true,
-      ...(isValidColor(roleConfig?.color) ? { colors: { primaryColor: roleConfig.color } } : {}),
-      ...roleIconOptions(guild, roleConfig?.emoji),
-      reason: 'Auto-created for the LFG system (roleMenu.js CATEGORIES)',
-    });
-    console.log(`[LFG] Created missing role: "${role.name}"`);
-    return role;
-  } catch (err) {
-    console.error(`[LFG] Could not auto-create role "${lfgRoleName(name)}":`, err.message);
-    return null;
-  }
+  const key = `${guild.id}:${lfgRoleName(name)}`;
+  const pending = pendingRoleCreations.get(key);
+  if (pending) return pending;
+
+  const creation = (async () => {
+    try {
+      const role = await guild.roles.create({
+        name: lfgRoleName(name),
+        mentionable: true,
+        ...(isValidColor(roleConfig?.color) ? { colors: { primaryColor: roleConfig.color } } : {}),
+        ...roleIconOptions(guild, roleConfig?.emoji),
+        reason: 'Auto-created for the LFG system (roleMenu.js CATEGORIES)',
+      });
+      console.log(`[LFG] Created missing role: "${role.name}"`);
+      return role;
+    } catch (err) {
+      console.error(`[LFG] Could not auto-create role "${lfgRoleName(name)}":`, err.message);
+      return null;
+    } finally {
+      pendingRoleCreations.delete(key);
+    }
+  })();
+
+  pendingRoleCreations.set(key, creation);
+  return creation;
 }
 
 // Looks up a role's CATEGORIES entry by its base label (e.g. "Yama"), across all categories.

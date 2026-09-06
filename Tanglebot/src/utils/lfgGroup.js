@@ -219,12 +219,29 @@ function formatCapacity(group) {
   return group.sizeCap === Infinity ? 'Mass' : String(group.sizeCap);
 }
 
+// Keeps a section's rendered lines under a character budget so a "Mass" (uncapped) group's roster
+// can't push the whole post past Discord's 2000-char message cap — cutting off whole lines (never
+// mid-mention) and summarizing the rest, rather than letting the post edit/update throw and leave
+// whatever just changed (a join, an accept) un-reflected on the post.
+const MAX_ROSTER_SECTION_CHARS = 800;
+function capMentionLines(lines, maxChars = MAX_ROSTER_SECTION_CHARS) {
+  let total = 0;
+  const kept = [];
+  for (const line of lines) {
+    if (total + line.length + 1 > maxChars) break;
+    kept.push(line);
+    total += line.length + 1;
+  }
+  if (kept.length < lines.length) kept.push(`_…and ${lines.length - kept.length} more_`);
+  return kept.join('\n');
+}
+
 // The entire main post body as plain text — role ping first (so it actually notifies), then the
 // group's details and member list. Edited on every membership change (see updateMainPost /
 // updateGroupMessage in lfgPost.js).
 function buildGroupText(group) {
   const capDisplay = formatCapacity(group);
-  const memberLines = [...group.members].map((id) => `<@${id}>`).join('\n');
+  const memberLines = capMentionLines([...group.members].map((id) => `<@${id}>`));
 
   // group.emoji is validated before the group is created (see lfgPost.js), so it's always set here.
   const pingLine = [`<@&${group.roleId}>`, emojiMarkup(group.emoji)].filter(Boolean).join(' ');
@@ -243,9 +260,9 @@ function buildGroupText(group) {
   // Numbered in join order (group.queue is always FIFO — see advanceQueueOrReopen in lfgPost.js),
   // so position in this list is exactly how many people are ahead of you.
   if (group.queue?.length) {
-    const queueLines = group.queue
-      .map((id, i) => `${i + 1}. <@${id}>${group.pendingOfferUserId === id ? ' 🎟️ _(offer pending)_' : ''}`)
-      .join('\n');
+    const queueLines = capMentionLines(
+      group.queue.map((id, i) => `${i + 1}. <@${id}>${group.pendingOfferUserId === id ? ' 🎟️ _(offer pending)_' : ''}`)
+    );
     lines.push('', `**Queue (${group.queue.length}):**`, queueLines);
   }
 
