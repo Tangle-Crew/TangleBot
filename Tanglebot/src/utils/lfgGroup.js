@@ -219,10 +219,9 @@ function formatCapacity(group) {
   return group.sizeCap === Infinity ? 'Mass' : String(group.sizeCap);
 }
 
-// Keeps a section's rendered lines under a character budget so a "Mass" (uncapped) group's roster
-// can't push the whole post past Discord's 2000-char message cap — cutting off whole lines (never
-// mid-mention) and summarizing the rest, rather than letting the post edit/update throw and leave
-// whatever just changed (a join, an accept) un-reflected on the post.
+// Caps a rendered section to a character budget, dropping whole lines (never mid-mention) and
+// summarizing the rest — keeps a "Mass" (uncapped) group's roster from pushing the whole post
+// past Discord's 2000-char message cap.
 const MAX_ROSTER_SECTION_CHARS = 800;
 function capMentionLines(lines, maxChars = MAX_ROSTER_SECTION_CHARS) {
   let total = 0;

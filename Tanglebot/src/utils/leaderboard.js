@@ -82,9 +82,7 @@ async function findPreviousLeaderboardMessages(channel, botUserId, isOwnLeaderbo
 //   isOwnLeaderboardMessage(firstEmbed) -> bool   identifies this leaderboard's own post during recovery
 //   onDisplayNameChange(entry) -> Promise         (optional) persists a refreshed display name back to the sheet
 async function postLeaderboard(guild, channelId, entries, botUserId, options) {
-  // Serialized per dataFile: two overlapping calls (e.g. two admins editing entries back-to-back)
-  // reading/writing the same stored message-ID file would otherwise race and one write could
-  // silently clobber the other's, orphaning a freshly-sent message.
+  // Serialized per dataFile so two overlapping calls can't race on the stored message-ID file.
   return withFileLock(options.dataFile, () => postLeaderboardLocked(guild, channelId, entries, botUserId, options));
 }
 

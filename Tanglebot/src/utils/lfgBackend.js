@@ -79,8 +79,7 @@ async function syncDiscordCatalog() {
 }
 
 // idempotencyKey should be a stable per-attempt id (the triggering interaction's own id is ideal)
-// so the backend can actually dedupe a redelivered request — falling back to a value that changes
-// every call would make every call look brand new and defeat the point of sending one at all.
+// so the backend can dedupe a redelivered request.
 async function createGroup({ member, categoryKey, activityLabel, description, startTimeIso, maximumPlayers, discordChannelId = null, discordMessageId = null, idempotencyKey = null }) {
   if (!isConfigured()) return null;
 

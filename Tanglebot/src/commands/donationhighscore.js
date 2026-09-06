@@ -53,10 +53,7 @@ function highestTierFor(donated) {
   return DONATION_TIERS.find(t => donated >= t.threshold) || null;
 }
 
-// Parses the row number out of an append response's updatedRange, e.g.
-// "Donations!A15:C15" -> 15. Kept in sync with pethighscore.js's identical helper — an appended
-// entry needs a real rowNumber in case this command is ever changed to cache entries across
-// invocations instead of reloading the sheet every time.
+// Parses the row number out of an append response's updatedRange, e.g. "Donations!A15:C15" -> 15.
 function parseAppendedRowNumber(updatedRange) {
   const match = /![A-Z]+(\d+):/.exec(updatedRange || '');
   return match ? parseInt(match[1], 10) : null;
