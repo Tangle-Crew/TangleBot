@@ -568,6 +568,16 @@ function cleanupStaleGroup(group) {
   tearDownGroup(group);
 }
 
+// Shared handling for a background operation (no interaction to reply through) that touches a
+// group's thread: drop the group if it's actually gone, otherwise just log the failure.
+function cleanupStaleGroupOrLog(group, err, logMessage) {
+  if (isAlreadyGoneError(err)) {
+    cleanupStaleGroup(group);
+  } else {
+    console.error(logMessage, err.message);
+  }
+}
+
 // Decides what happens to a freed spot: if anyone's queued, hold it for whoever's waited longest
 // and start their offer clock (QUEUE_OFFER_TIMEOUT_MS); otherwise reopen to the public Join button.
 // precedingText, if given, folds into the same notice (e.g. "X left" + "offered to Y" as one message).
@@ -624,12 +634,7 @@ async function handleQueueOfferTimeout(client, group) {
     await syncBackendQueueCount(group);
     await advanceQueueOrReopen(client, channel, group, `⌛ <@${skippedUserId}> didn't respond in time and was removed from the queue.`);
   } catch (err) {
-    if (isAlreadyGoneError(err)) {
-      // Thread was deleted out-of-band — drop the group instead of leaking it with dead timers.
-      cleanupStaleGroup(group);
-    } else {
-      console.error(`[LFG] Could not advance queue for group ${group.id}:`, err.message);
-    }
+    cleanupStaleGroupOrLog(group, err, `[LFG] Could not advance queue for group ${group.id}:`);
   }
 }
 
@@ -1031,7 +1036,17 @@ function schedulePostGroupCleanup(client, group, delayMs) {
       // a recurring "why did this take longer than the grace period" report diagnosable.
       if (tookMs > 5000) console.log(`[LFG] Deleted expired post ${group.id}, but it took ${tookMs}ms — likely Discord API rate-limiting, not a bug in the timer.`);
     } catch (err) {
-      if (!isAlreadyGoneError(err)) console.error(`[LFG] Could not delete expired post ${group.id}:`, err.message);
+      if (!isAlreadyGoneError(err)) {
+        // The bot is about to forget this group either way (nothing retries this delete), but a
+        // real failure (permissions, rate limit past retries) leaves the actual thread still up
+        // with no owner left to clean it up — surface that instead of only logging it.
+        console.error(`[LFG] Could not delete expired post ${group.id}:`, err.message);
+        await notifyAdminLog(
+          client,
+          '⚠️ LFG Post Cleanup Failed',
+          `Could not delete the expired post for group **${group.roleLabel}** (thread <#${group.threadId}>): ${err.message}. It will need to be deleted manually.`
+        );
+      }
     }
     tearDownGroup(group);
   }, delayMs);
@@ -1107,12 +1122,7 @@ async function runKeepAliveCheck(client, group) {
     );
     group.keepAliveReplyTimeoutId = setTimeout(() => handleKeepAliveTimeout(client, group), KEEP_ALIVE_REPLY_WINDOW_MS);
   } catch (err) {
-    if (isAlreadyGoneError(err)) {
-      // Thread was deleted out-of-band — drop the group instead of leaking it with dead timers.
-      cleanupStaleGroup(group);
-    } else {
-      console.error(`[LFG] Could not send keep-alive check for group ${group.id}:`, err.message);
-    }
+    cleanupStaleGroupOrLog(group, err, `[LFG] Could not send keep-alive check for group ${group.id}:`);
   }
 }
 
@@ -1141,12 +1151,7 @@ async function handleKeepAliveTimeout(client, group) {
     await beginDisband(client, channel, group, '⌛ No one confirmed this group was still active, so it was automatically disbanded.');
     console.log(`[LFG] Group ${group.id} auto-disbanded after a missed keep-alive check.`);
   } catch (err) {
-    if (isAlreadyGoneError(err)) {
-      // Thread was deleted out-of-band — drop the group instead of leaking it with dead timers.
-      cleanupStaleGroup(group);
-    } else {
-      console.error(`[LFG] Could not auto-disband group ${group.id} after a missed keep-alive check:`, err.message);
-    }
+    cleanupStaleGroupOrLog(group, err, `[LFG] Could not auto-disband group ${group.id} after a missed keep-alive check:`);
   }
 }
 
