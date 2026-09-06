@@ -46,13 +46,14 @@ async function updateRow(sheetId, range, values) {
 
 async function appendRow(sheetId, range, values) {
   const sheets = await getSheetsClient();
-  await sheets.spreadsheets.values.append({
+  const res = await sheets.spreadsheets.values.append({
     spreadsheetId: sheetId,
     range,
     valueInputOption: 'RAW',
     insertDataOption: 'INSERT_ROWS',
     requestBody: { values: [values] },
   });
+  return res.data;
 }
 
 module.exports = { getRows, updateRow, appendRow };

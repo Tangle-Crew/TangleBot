@@ -61,6 +61,14 @@ function ensurePetsLoaded() {
   return petsLoadPromise;
 }
 
+// Parses the row number out of an append response's updatedRange, e.g.
+// "Highscores!A15:C15" -> 15. Needed because entries are cached in memory
+// and later edits (add/remove without a restart) look up this rowNumber.
+function parseAppendedRowNumber(updatedRange) {
+  const match = /![A-Z]+(\d+):/.exec(updatedRange || '');
+  return match ? parseInt(match[1], 10) : null;
+}
+
 function slugify(name) {
   return String(name)
     .toLowerCase()
@@ -513,8 +521,9 @@ module.exports = {
         await updateRow(sheetId, `${SHEET_TAB}!A${existing.rowNumber}:C${existing.rowNumber}`, rowValues);
         entries[existingIndex] = { ...existing, displayName, petKeys: newKeys, count: newKeys.length };
       } else {
-        await appendRow(sheetId, APPEND_RANGE, rowValues);
-        entries.push({ discordId: targetUser.id, displayName, petKeys: newKeys, count: newKeys.length });
+        const appendResult = await appendRow(sheetId, APPEND_RANGE, rowValues);
+        const rowNumber = parseAppendedRowNumber(appendResult?.updates?.updatedRange);
+        entries.push({ discordId: targetUser.id, displayName, petKeys: newKeys, count: newKeys.length, rowNumber });
       }
 
       const appliedNames = toApply.map(p => p.name).join(', ');
