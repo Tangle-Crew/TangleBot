@@ -468,11 +468,14 @@ module.exports = {
 
     const pets = [];
     const unknownInputs = [];
+    const duplicateSlotNames = [];
     for (const input of petInputs) {
       const pet = findPet(input);
       if (!pet) {
         unknownInputs.push(input);
-      } else if (!pets.some(p => p.key === pet.key)) {
+      } else if (pets.some(p => p.key === pet.key)) {
+        duplicateSlotNames.push(pet.name);
+      } else {
         pets.push(pet);
       }
     }
@@ -481,6 +484,14 @@ module.exports = {
       console.warn(`[PHS] ${interaction.user.tag} submitted unknown pet(s) "${unknownInputs.join('", "')}" for /pethighscore ${subcommand}`);
       return interaction.reply({
         content: `Unknown pet${unknownInputs.length === 1 ? '' : 's'} "${unknownInputs.join('", "')}". Pick from the autocomplete suggestions.`,
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+
+    if (duplicateSlotNames.length > 0) {
+      console.warn(`[PHS] ${interaction.user.tag} listed the same pet more than once ("${duplicateSlotNames.join('", "')}") for /pethighscore ${subcommand}`);
+      return interaction.reply({
+        content: `You listed ${duplicateSlotNames.length === 1 ? 'a pet' : 'pets'} more than once: **${duplicateSlotNames.join(', ')}**. Pick each pet in only one slot.`,
         flags: MessageFlags.Ephemeral,
       });
     }
