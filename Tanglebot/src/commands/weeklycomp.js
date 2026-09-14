@@ -215,11 +215,9 @@ module.exports = {
     console.log(`[weeklycomp] ${interaction.user.tag} creating "${name}" (${metric.value}) ${startsAt.toISOString()} -> ${endsAt.toISOString()} in WOM group ${groupId}`);
 
     let competition;
-    let verificationCode;
     try {
       const result = await createGroupCompetition({ title: name, metric: metric.value, startsAt, endsAt, groupId, groupVerificationCode });
       competition = result.competition;
-      verificationCode = result.verificationCode;
     } catch (err) {
       console.error('[weeklycomp] Failed to create WOM competition:', err);
       return interaction.editReply(`Failed to create the Wise Old Man competition: ${err.message}`);
@@ -229,8 +227,8 @@ module.exports = {
     const imageUrl = await resolveMetricImageUrl(metric.value);
 
     const description = [
-      `${metric.name} competition — ${name}`,
-      `Join on Wise Old Man: ${competitionUrl}`,
+      name,
+      `Track on Wise Old Man: ${competitionUrl}`,
     ].join('\n');
 
     let event;
@@ -241,7 +239,7 @@ module.exports = {
         scheduledEndTime: endsAt,
         privacyLevel: GuildScheduledEventPrivacyLevel.GuildOnly,
         entityType: GuildScheduledEventEntityType.External,
-        entityMetadata: { location: competitionUrl },
+        entityMetadata: { location: 'OSRS' },
         description,
         image: imageUrl,
         reason: `Created by /weeklycomp (${interaction.user.tag})`,
@@ -252,10 +250,6 @@ module.exports = {
         `Created the Wise Old Man competition, but failed to create the Discord event: ${err.message}\n` +
         `Competition: ${competitionUrl}`
       );
-      await interaction.followUp({
-        content: `🔒 Verification code for the WOM competition (save this — needed to edit/delete it, and won't be shown again): \`${verificationCode}\``,
-        flags: MessageFlags.Ephemeral,
-      });
       notifyAdminLog(
         interaction.client,
         '⚠️ /weeklycomp: Discord event failed',
@@ -281,11 +275,6 @@ module.exports = {
       .setFooter({ text: `Created by ${interaction.user.username}` });
 
     await interaction.editReply({ embeds: [embed] });
-
-    await interaction.followUp({
-      content: `🔒 Verification code for the WOM competition (save this — needed to edit/delete it, and won't be shown again): \`${verificationCode}\``,
-      flags: MessageFlags.Ephemeral,
-    });
 
     notifyAdminLog(
       interaction.client,
