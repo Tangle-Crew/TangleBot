@@ -367,6 +367,56 @@ Restricted to users with **Manage Server** permission. The command replies ephem
 
 ---
 
+### 🏆 `/weeklycomp` — Discord Event + Wise Old Man Competition
+
+Creates a Discord scheduled event with a linked Wise Old Man competition in one step — the event's cover image and description are generated from the competition automatically.
+
+**When to use it:**
+- Announcing a boss-of-the-week or skilling competition and getting a WOM competition plus a Discord event to RSVP to in one command
+- Giving members a Discord event that links straight to the WOM competition to track progress
+
+**Options:**
+
+| Option | Required | Description |
+|--------|----------|-------------|
+| `name` | Yes | Event / competition name |
+| `metric` | Yes | Boss or skill to track — autocompletes over every boss and skill WOM supports |
+| `start` | Yes | Start date, Eastern Time — `YYYY-MM-DD`, `YYYY/MM/DD`, or `MM/DD/YYYY`, optionally with an hour: `HH` (24-hour) or `H` + `am`/`pm` (also accepts full ISO 8601 with its own offset) |
+| `duration` | No | How many days the competition runs for (1–365, default: 7) |
+| `group_id` | No | WOM group ID — only needed if `WOM_GROUP_ID` isn't set |
+| `verification_code` | No | WOM group verification code — only needed if `WOM_GROUP_VERIFICATION_CODE` isn't set. **Visible to everyone in the channel when used** — prefer the env var. |
+
+Restricted to users with the **Templar** role. The reply is private (only the command runner sees it) — the created Discord event and its WOM link are what members actually see.
+
+<details>
+<summary><strong>Environment variables</strong></summary>
+
+| Variable | Required | Description |
+|---|---|---|
+| `TEMPLAR_ROLE_ID` | Yes | The only role allowed to run `/weeklycomp`. **This check fails closed** — if left unset, no one can use the command. |
+| `WOM_GROUP_ID` | Recommended | Your clan's WOM group ID. If unset, the `group_id` option is required on every use instead. |
+| `WOM_GROUP_VERIFICATION_CODE` | Recommended | Your clan's WOM group verification code (wiseoldman.net → your group → settings → Verification Code). If unset, the `verification_code` option is required on every use instead — but that option is publicly visible when used, so setting this is strongly preferred. |
+| `WOM_API_KEY` | No | Optional personal WOM API key for higher rate limits. |
+| `ADMIN_LOG_CHANNEL_ID` | No | Shared admin alerts channel (also used by `/lfg-roles`, `/lfg-post`, `/pethighscore`, and the honeypot trap) — logs each successful `/weeklycomp`, and warns if the WOM competition was created but the Discord event failed. |
+
+</details>
+
+<details>
+<summary><strong>How it works</strong></summary>
+
+1. Converts the `start` date/hour to UTC, read as Eastern Time (Discord doesn't expose a user's local timezone to bots, so a fixed default is used), correctly accounting for EST/EDT at the given date. Then shows a private confirmation embed with the metric, computed start/end date-time, and duration, alongside **Confirm**/**Cancel** buttons — nothing is created yet. Cancelling, or not responding within 60 seconds, ends the command with no changes made.
+2. On confirm, creates the Wise Old Man competition first, inside the configured (or supplied) WOM group so its members are tracked automatically.
+3. Looks up that metric's official competition background image from Wise Old Man's own site, falling back to their generic icon for the handful of metrics without one.
+4. Creates a Discord scheduled event (External type) with the WOM competition link set as both the event location and appended to the description, and the metric's image as the event's cover.
+5. Replies privately to the command runner with a summary embed and links to both the Discord event and the WOM competition — the event itself (visible in Discord's Events list) is what members see.
+6. Sends the WOM verification code (needed to edit/delete the competition later) back to the command runner only, as a separate private follow-up.
+7. Posts a summary to `ADMIN_LOG_CHANNEL_ID` if configured.
+8. If the WOM competition is created but the Discord event fails to create, the competition and its verification code are still reported back rather than lost, and a warning is posted to the admin log.
+
+</details>
+
+---
+
 ## Message Features
 
 ### KC and Drop Proof Intake
@@ -561,6 +611,7 @@ npm start
 - [gif-encoder-2](https://github.com/benjaminadk/gif-encoder-2) — animated GIF generation
 - [googleapis](https://github.com/googleapis/google-api-nodejs-client) — Google Sheets access for `/donationhighscore` and `/pethighscore`
 - [axios](https://axios-http.com/) — Supabase/LFG backend and proof-intake HTTP calls
+- [@wise-old-man/utils](https://github.com/wise-old-man/wise-old-man) — Wise Old Man API client for `/weeklycomp`
 - [Claude by Anthropic](https://claude.ai/) — AI-assisted development
 
 ---
