@@ -22,6 +22,9 @@ function startLfgDeliveryWorker() {
 
   const config = lfgWorkerConfig();
   let inFlight = false;
+  // Consecutive-failure streak, so a sustained outage logs once instead of once per poll (every
+  // ~15s while the endpoint is down) — only the 1st, 10th, 100th, ... failure gets a log line.
+  let consecutiveFailures = 0;
 
   const tick = async () => {
     if (inFlight) {
@@ -41,6 +44,11 @@ function startLfgDeliveryWorker() {
         }
       );
 
+      if (consecutiveFailures > 0) {
+        console.log(`[LFG] Delivery worker recovered after ${consecutiveFailures} consecutive failure(s).`);
+      }
+      consecutiveFailures = 0;
+
       if (response.data?.processed) {
         console.log(
           `[LFG] Delivery worker processed queue item`
@@ -49,13 +57,21 @@ function startLfgDeliveryWorker() {
         );
       }
     } catch (err) {
-      const status = err?.response?.status;
-      const details =
-        err?.response?.data?.details
-        || err?.response?.data?.error?.details
-        || err?.response?.data?.message
-        || err.message;
-      console.error(`[LFG] Delivery worker error${status ? ` (${status})` : ''}: ${details}`);
+      consecutiveFailures += 1;
+      const shouldLog = consecutiveFailures <= 1
+        || consecutiveFailures % 10 === 0;
+      if (shouldLog) {
+        const status = err?.response?.status;
+        const details =
+          err?.response?.data?.details
+          || err?.response?.data?.error?.details
+          || err?.response?.data?.message
+          || err.message;
+        console.error(
+          `[LFG] Delivery worker error${status ? ` (${status})` : ''}: ${details}`
+          + (consecutiveFailures > 1 ? ` (${consecutiveFailures} consecutive failures)` : '')
+        );
+      }
     } finally {
       inFlight = false;
     }

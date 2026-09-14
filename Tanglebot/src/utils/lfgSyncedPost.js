@@ -202,7 +202,13 @@ async function handleSyncedGroupButtonInteraction(interaction) {
   }
 
   await applySyncedGroupUpdate(interaction, result.group, action);
-  await followUpEphemeral(interaction, `✅ ${result.message ?? 'Group updated.'}`, { autoDelete: true });
+  try {
+    await followUpEphemeral(interaction, `✅ ${result.message ?? 'Group updated.'}`, { autoDelete: true });
+  } catch (err) {
+    // The thread can be deleted (e.g. cleaned up right after a close) between the update above
+    // and this follow-up landing — the group update itself already succeeded, so this is safe to ignore.
+    if (!isAlreadyGoneError(err)) throw err;
+  }
 }
 
 module.exports = {
