@@ -112,22 +112,30 @@ function buildCommandData() {
     );
   });
 
-  return data
-    .addIntegerOption(o =>
-      o.setName('duration')
-        .setDescription('How many days the competition runs for (default: 7)')
-        .setMinValue(1)
-        .setMaxValue(365)
-    )
-    .addIntegerOption(o =>
+  data.addIntegerOption(o =>
+    o.setName('duration')
+      .setDescription('How many days the competition runs for (default: 7)')
+      .setMinValue(1)
+      .setMaxValue(365)
+  );
+
+  // The group ID/verification code options are only offered when the bot config doesn't
+  // already provide them, so they don't clutter the command (or tempt anyone to paste the code).
+  if (!process.env.WOM_GROUP_ID) {
+    data.addIntegerOption(o =>
       o.setName('group_id')
-        .setDescription('WOM group ID (only needed if WOM_GROUP_ID is not set in the bot config)')
+        .setDescription('WOM group ID (WOM_GROUP_ID is not set in the bot config)')
         .setMinValue(1)
-    )
-    .addStringOption(o =>
-      o.setName('verification_code')
-        .setDescription('WOM verification code if not set in config — WARNING: visible to the whole channel')
     );
+  }
+  if (!process.env.WOM_GROUP_VERIFICATION_CODE) {
+    data.addStringOption(o =>
+      o.setName('verification_code')
+        .setDescription('WOM verification code (not set in config) — WARNING: visible to the whole channel')
+    );
+  }
+
+  return data;
 }
 
 module.exports = {

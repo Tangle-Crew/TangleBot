@@ -383,8 +383,8 @@ Creates a Discord scheduled event with a linked Wise Old Man competition in one 
 | `metric` | Yes | Boss or skill to track — autocompletes over every boss and skill WOM supports |
 | `start` | Yes | Start date, Eastern Time — `YYYY-MM-DD`, `YYYY/MM/DD`, or `MM/DD/YYYY`, optionally with an hour: `HH` (24-hour) or `H` + `am`/`pm` (also accepts full ISO 8601 with its own offset) |
 | `duration` | No | How many days the competition runs for (1–365, default: 7) |
-| `group_id` | No | WOM group ID — only needed if `WOM_GROUP_ID` isn't set |
-| `verification_code` | No | WOM group verification code — only needed if `WOM_GROUP_VERIFICATION_CODE` isn't set. **Visible to everyone in the channel when used** — prefer the env var. |
+| `group_id` | No | WOM group ID — only shown (and needed) if `WOM_GROUP_ID` isn't set |
+| `verification_code` | No | WOM group verification code — only shown (and needed) if `WOM_GROUP_VERIFICATION_CODE` isn't set. **Visible to everyone in the channel when used** — prefer the env var. |
 
 Restricted to users with the **Templar** role. The reply is private (only the command runner sees it) — the created Discord event and its WOM link are what members actually see.
 
