@@ -11,7 +11,7 @@ const CHECK_INTERVAL_MS = 15 * 60 * 1000;
 const REMINDER_WINDOW_MS = 60 * 60 * 1000;
 // update all only queues the updates — give WOM a few minutes to work through them before
 // reading the standings, so the top 3 reflect everyone's fresh stats.
-const UPDATE_SETTLE_MS = 3 * 60 * 1000;
+const UPDATE_SETTLE_MS = 5 * 60 * 1000;
 // Reminded competitions are forgotten this long after they end, keeping the data file small.
 const REMINDED_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const REMINDERS_FILE = 'comp-ending-reminders.json';
@@ -143,9 +143,11 @@ function buildReminderEmbed(results, updateStatus) {
 
 async function runUpdateAll(config) {
   if (!config.verificationCode) {
+    console.warn('[CompReminder] Skipping update all: WOM_GROUP_VERIFICATION_CODE is not set.');
     return { status: '⚠️ Skipped update all — `WOM_GROUP_VERIFICATION_CODE` is not set.', queued: 0 };
   }
   try {
+    console.log(`[CompReminder] Running update all on WOM group ${config.groupId}...`);
     const result = await updateAllGroupMembers(config.groupId, config.verificationCode);
     const count = result?.count ?? 0;
     console.log(`[CompReminder] Update all queued ${count} player(s) in WOM group ${config.groupId}.`);
@@ -160,28 +162,48 @@ async function checkEndingCompetitions(client, config) {
   const reminded = readJson(REMINDERS_FILE);
   const now = Date.now();
 
+  console.log(`[CompReminder] Checking WOM group ${config.groupId} for competitions ending within the hour...`);
   const competitions = await getAllGroupCompetitions(config.groupId);
-  const ending = competitions.filter(c => {
-    const startsAt = new Date(c.startsAt).getTime();
-    const endsAt = new Date(c.endsAt).getTime();
-    return !reminded[c.id] && startsAt <= now && endsAt > now && endsAt - now <= REMINDER_WINDOW_MS;
-  });
-  if (ending.length === 0) return;
+  const ongoing = competitions.filter(c => new Date(c.startsAt).getTime() <= now && new Date(c.endsAt).getTime() > now);
+  const inWindow = ongoing.filter(c => new Date(c.endsAt).getTime() - now <= REMINDER_WINDOW_MS);
+  const alreadyReminded = inWindow.filter(c => reminded[c.id]);
+  const ending = inWindow.filter(c => !reminded[c.id]);
 
-  console.log(`[CompReminder] ${ending.length} competition(s) ending within the hour: ${ending.map(c => c.id).join(', ')}`);
+  console.log(
+    `[CompReminder] Found ${competitions.length} competition(s) in the group, ${ongoing.length} ongoing, ` +
+    `${inWindow.length} ending within the hour.`
+  );
+  if (alreadyReminded.length > 0) {
+    console.log(`[CompReminder] Already reminded, skipping: ${alreadyReminded.map(describeCompetition).join(', ')}`);
+  }
+  if (ending.length === 0) {
+    console.log('[CompReminder] Nothing new to remind about.');
+    return;
+  }
+
+  console.log(`[CompReminder] ${ending.length} competition(s) need a reminder: ${ending.map(describeCompetition).join(', ')}`);
 
   // One update all covers every ending comp — they're all group comps, so the group's members
   // are their participants.
   const update = await runUpdateAll(config);
   if (update.queued > 0) {
+    console.log(`[CompReminder] Waiting ${UPDATE_SETTLE_MS / 60000} minutes for WOM to process the updates before reading standings...`);
     await new Promise(resolve => setTimeout(resolve, UPDATE_SETTLE_MS));
+    console.log('[CompReminder] Wait finished, loading standings.');
+  } else {
+    console.log('[CompReminder] No updates queued, loading standings now.');
   }
 
   const results = [];
   for (const competition of ending) {
     try {
       const details = await getCompetitionDetails(competition.id);
-      results.push({ competition, ranked: rankParticipants(details) });
+      const ranked = rankParticipants(details);
+      const leader = ranked[0] ? `${ranked[0].name} (${formatAmount(ranked[0].gained, competition.metric)})` : 'nobody yet';
+      console.log(
+        `[CompReminder] Loaded ${describeCompetition(competition)}: ${ranked.length} participant(s) with progress, leader ${leader}.`
+      );
+      results.push({ competition, ranked });
     } catch (err) {
       console.error(`[CompReminder] Failed to load competition ${competition.id}:`, err.message);
       results.push({ competition, ranked: [], error: err.message });
@@ -195,6 +217,10 @@ async function checkEndingCompetitions(client, config) {
     embeds: [buildReminderEmbed(results, update.status)],
     allowedMentions: { roles: config.templarRoleId ? [config.templarRoleId] : [] },
   });
+  console.log(
+    `[CompReminder] Sent reminder for ${results.length} competition(s) to admin log channel ${config.adminLogChannelId}` +
+    `${config.templarRoleId ? ', pinging Templar' : ' (TEMPLAR_ROLE_ID not set, no ping)'}.`
+  );
 
   // Only recorded once the message is out, so a failed send is retried on the next poll.
   const latest = readJson(REMINDERS_FILE);
@@ -205,6 +231,10 @@ async function checkEndingCompetitions(client, config) {
   writeJson(REMINDERS_FILE, latest);
 }
 
+function describeCompetition(competition) {
+  return `"${competition.title}" (#${competition.id}, ends ${new Date(competition.endsAt).toISOString()})`;
+}
+
 function startCompEndingReminder(client) {
   const config = compConfig();
   if (!config.groupId || !config.adminLogChannelId) {
@@ -212,10 +242,18 @@ function startCompEndingReminder(client) {
     return () => {};
   }
 
+  console.log(
+    `[CompReminder] Enabled for WOM group ${config.groupId}: checking every ${CHECK_INTERVAL_MS / 60000} minutes ` +
+    `(:00/:15/:30/:45), reminding ${REMINDER_WINDOW_MS / 60000} minutes before a competition ends.`
+  );
+
   let inFlight = false;
   const tick = async () => {
     // Skips a check that lands while the previous one is still waiting on update all to settle.
-    if (inFlight) return;
+    if (inFlight) {
+      console.log('[CompReminder] Previous check still running, skipping this one.');
+      return;
+    }
     inFlight = true;
     try {
       await checkEndingCompetitions(client, config);
@@ -231,12 +269,14 @@ function startCompEndingReminder(client) {
   let timer = null;
   const scheduleNext = () => {
     const delay = CHECK_INTERVAL_MS - (Date.now() % CHECK_INTERVAL_MS);
+    console.log(`[CompReminder] Next check at ${new Date(Date.now() + delay).toISOString()}.`);
     timer = setTimeout(() => {
       tick();
       scheduleNext();
     }, delay);
   };
 
+  console.log('[CompReminder] Running startup check.');
   tick();
   scheduleNext();
   return () => clearTimeout(timer);

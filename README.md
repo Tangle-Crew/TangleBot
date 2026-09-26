@@ -420,7 +420,7 @@ Restricted to users with the **Templar** role. The reply is private (only the co
 
 Every 15 minutes, on the clock at :00, :15, :30 and :45 (like a `*/15 * * * *` cron job), the bot checks the WOM group (`WOM_GROUP_ID`) for ongoing competitions ending within the next hour. It also checks once on startup. A competition gets its reminder on the first check inside that hour; `/weeklycomp` competitions end on the hour, so theirs comes right about an hour before the end. When the bot finds any:
 
-1. Runs **update all** on the group once (needs `WOM_GROUP_VERIFICATION_CODE`), no matter how many competitions are ending, then waits a few minutes for WOM to process the updates.
+1. Runs **update all** on the group once (needs `WOM_GROUP_VERIFICATION_CODE`), no matter how many competitions are ending, then waits 5 minutes for WOM to process the updates.
 2. Posts **one** message to `ADMIN_LOG_CHANNEL_ID` pinging `TEMPLAR_ROLE_ID` to make the announcement, listing every ending competition with its top 3.
 3. When two or more ending competitions are in the same category (bossing, skilling, …), it adds a combined top 5 that sums each player's gains across them. Categories are never mixed. For example, a bossing comp and a skilling comp each get only their own top 3.
 
