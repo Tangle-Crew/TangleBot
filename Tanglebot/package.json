@@ -17,8 +17,8 @@
     "@wise-old-man/utils": "^4.0.24",
     "axios": "^1.7.7",
     "discord.js": "^14.16.0",
-    "dotenv": "^16.4.5",
+    "dotenv": "^18.0.4",
     "gif-encoder-2": "^1.0.5",
-    "googleapis": "^144.0.0"
+    "googleapis": "^182.0.0"
   }
 }
