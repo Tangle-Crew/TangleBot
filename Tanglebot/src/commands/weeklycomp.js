@@ -22,6 +22,12 @@ const METRIC_OPTION_NAMES = ['metric', 'metric2', 'metric3', 'metric4'];
 // Time (the clan's default) rather than UTC.
 const DEFAULT_TIME_ZONE = 'America/New_York';
 
+// Event/competition names are just "<prefix> <metric>", with any leading "The " dropped from
+// the metric (e.g. "The Gauntlet" -> "Gauntlet").
+function buildCompTitle(prefix, metric) {
+  return `${prefix} ${metric.name.replace(/^the\s+/i, '')}`;
+}
+
 // Converts a wall-clock date/hour as read in `timeZone` to the UTC instant it represents,
 // accounting for that zone's offset (including DST) at the given date.
 function zonedTimeToUtc(year, month, day, hour, timeZone) {
@@ -88,7 +94,7 @@ function buildCommandData() {
     .setDescription('Create a Discord event with a linked Wise Old Man competition')
     .addStringOption(o =>
       o.setName('prefix')
-        .setDescription('Prefix for the event/competition names, e.g. "BOTW T3" -> "BOTW T3: <metric>"')
+        .setDescription('Prefix for the event/competition names, e.g. "BOTW T3" -> "BOTW T3 <metric>"')
         .setRequired(true)
     )
     .addStringOption(o =>
@@ -222,7 +228,7 @@ module.exports = {
     const metricsLabel = metrics.map(m => m.name).join(', ');
     // The Discord event covers the whole run, so it's named after the prefix + first metric;
     // each WOM competition instead gets its own metric name appended.
-    const eventTitle = `${prefix}: ${metrics[0].name}`;
+    const eventTitle = buildCompTitle(prefix, metrics[0]);
 
     const confirmEmbed = new EmbedBuilder()
       .setColor(DISCORD_GREEN)
@@ -264,11 +270,11 @@ module.exports = {
 
     console.log(`[weeklycomp] ${interaction.user.tag} creating "${prefix}" (${metrics.map(m => m.value).join(', ')}) ${startsAt.toISOString()} -> ${endsAt.toISOString()} in WOM group ${groupId}`);
 
-    // Each metric gets its own WOM competition, named "<prefix>: <metric>" so they read
+    // Each metric gets its own WOM competition, named "<prefix> <metric>" so they read
     // consistently alongside the Discord event (named after the prefix + first metric).
     const created = [];
     for (const metric of metrics) {
-      const title = `${prefix}: ${metric.name}`;
+      const title = buildCompTitle(prefix, metric);
       try {
         const result = await createGroupCompetition({ title, metric: metric.value, startsAt, endsAt, groupId, groupVerificationCode });
         created.push({ metric, title, competition: result.competition, url: `https://wiseoldman.net/competitions/${result.competition.id}` });
