@@ -16,6 +16,10 @@ const UPDATE_SETTLE_MS = 5 * 60 * 1000;
 const REMINDED_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const REMINDERS_FILE = 'comp-ending-reminders.json';
 
+// Competitions reminded while the bot has been running. The data file carries this across
+// restarts, but if saving it fails this still stops a repeat reminder on every later check.
+const remindedIds = new Set();
+
 const REMINDER_COLOR = 0xe67e22;
 const MAX_EMBED_FIELDS = 25;
 const PER_COMP_TOP = 3;
@@ -166,8 +170,9 @@ async function checkEndingCompetitions(client, config) {
   const competitions = await getAllGroupCompetitions(config.groupId);
   const ongoing = competitions.filter(c => new Date(c.startsAt).getTime() <= now && new Date(c.endsAt).getTime() > now);
   const inWindow = ongoing.filter(c => new Date(c.endsAt).getTime() - now <= REMINDER_WINDOW_MS);
-  const alreadyReminded = inWindow.filter(c => reminded[c.id]);
-  const ending = inWindow.filter(c => !reminded[c.id]);
+  const isReminded = c => remindedIds.has(c.id) || Boolean(reminded[c.id]);
+  const alreadyReminded = inWindow.filter(isReminded);
+  const ending = inWindow.filter(c => !isReminded(c));
 
   console.log(
     `[CompReminder] Found ${competitions.length} competition(s) in the group, ${ongoing.length} ongoing, ` +
@@ -210,25 +215,58 @@ async function checkEndingCompetitions(client, config) {
     }
   }
 
-  const channel = await client.channels.fetch(config.adminLogChannelId);
-  const ping = config.templarRoleId ? `<@&${config.templarRoleId}> ` : '';
-  await channel.send({
-    content: `${ping}${results.length === 1 ? 'A WOM competition is' : `${results.length} WOM competitions are`} ending within the hour — please make the announcement.`,
-    embeds: [buildReminderEmbed(results, update.status)],
-    allowedMentions: { roles: config.templarRoleId ? [config.templarRoleId] : [] },
-  });
+  // Recorded before sending rather than after, so nothing that goes wrong once the message is
+  // out (e.g. the data file failing to save) can lead to it being sent again. Only a failed
+  // send undoes the record, so the next check retries it.
+  markReminded(ending, now);
+  try {
+    const channel = await client.channels.fetch(config.adminLogChannelId);
+    const ping = config.templarRoleId ? `<@&${config.templarRoleId}> ` : '';
+    await channel.send({
+      content: `${ping}${results.length === 1 ? 'A WOM competition is' : `${results.length} WOM competitions are`} ending within the hour — please make the announcement.`,
+      embeds: [buildReminderEmbed(results, update.status)],
+      allowedMentions: { roles: config.templarRoleId ? [config.templarRoleId] : [] },
+    });
+  } catch (err) {
+    console.error('[CompReminder] Failed to send the reminder, will retry on the next check:', err.message);
+    unmarkReminded(ending);
+    return;
+  }
   console.log(
     `[CompReminder] Sent reminder for ${results.length} competition(s) to admin log channel ${config.adminLogChannelId}` +
     `${config.templarRoleId ? ', pinging Templar' : ' (TEMPLAR_ROLE_ID not set, no ping)'}.`
   );
+}
 
-  // Only recorded once the message is out, so a failed send is retried on the next poll.
-  const latest = readJson(REMINDERS_FILE);
-  for (const c of ending) latest[c.id] = new Date(c.endsAt).toISOString();
-  for (const [id, endsAt] of Object.entries(latest)) {
-    if (now - new Date(endsAt).getTime() > REMINDED_RETENTION_MS) delete latest[id];
+function markReminded(competitions, now) {
+  for (const c of competitions) remindedIds.add(c.id);
+  saveReminded(saved => {
+    for (const c of competitions) saved[c.id] = new Date(c.endsAt).toISOString();
+    for (const [id, endsAt] of Object.entries(saved)) {
+      if (now - new Date(endsAt).getTime() > REMINDED_RETENTION_MS) delete saved[id];
+    }
+  });
+  console.log(`[CompReminder] Marked as reminded: ${competitions.map(c => `#${c.id}`).join(', ')}`);
+}
+
+function unmarkReminded(competitions) {
+  for (const c of competitions) remindedIds.delete(c.id);
+  saveReminded(saved => {
+    for (const c of competitions) delete saved[c.id];
+  });
+  console.log(`[CompReminder] Unmarked so they're retried: ${competitions.map(c => `#${c.id}`).join(', ')}`);
+}
+
+// A failed save is logged rather than thrown — remindedIds still prevents a repeat for as long
+// as the bot keeps running; only a restart before the file saves could repeat a reminder.
+function saveReminded(mutate) {
+  try {
+    const saved = readJson(REMINDERS_FILE);
+    mutate(saved);
+    writeJson(REMINDERS_FILE, saved);
+  } catch (err) {
+    console.error(`[CompReminder] Could not save ${REMINDERS_FILE} (a restart may repeat a reminder):`, err.message);
   }
-  writeJson(REMINDERS_FILE, latest);
 }
 
 function describeCompetition(competition) {
