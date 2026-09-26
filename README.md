@@ -415,6 +415,19 @@ Restricted to users with the **Templar** role. The reply is private (only the co
 
 </details>
 
+<details>
+<summary><strong>Competition ending reminder (automatic)</strong></summary>
+
+Every 15 minutes, on the clock at :00, :15, :30 and :45 (like a `*/15 * * * *` cron job), the bot checks the WOM group (`WOM_GROUP_ID`) for ongoing competitions ending within the next hour. It also checks once on startup. A competition gets its reminder on the first check inside that hour; `/weeklycomp` competitions end on the hour, so theirs comes right about an hour before the end. When the bot finds any:
+
+1. Runs **update all** on the group once (needs `WOM_GROUP_VERIFICATION_CODE`), no matter how many competitions are ending, then waits a few minutes for WOM to process the updates.
+2. Posts **one** message to `ADMIN_LOG_CHANNEL_ID` pinging `TEMPLAR_ROLE_ID` to make the announcement, listing every ending competition with its top 3.
+3. When two or more ending competitions are in the same category (bossing, skilling, …), it adds a combined top 5 that sums each player's gains across them. Categories are never mixed. For example, a bossing comp and a skilling comp each get only their own top 3.
+
+Each competition is reminded once. Reminded IDs are saved to `data/comp-ending-reminders.json`, so a restart won't send the reminder again. The reminder is disabled if `WOM_GROUP_ID` or `ADMIN_LOG_CHANNEL_ID` is unset.
+
+</details>
+
 ---
 
 ## Message Features

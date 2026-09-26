@@ -42,4 +42,36 @@ async function createGroupCompetition({ title, metric, startsAt, endsAt, groupId
   });
 }
 
-module.exports = { resolveMetricImageUrl, createGroupCompetition };
+// Every competition the group has ever hosted (ongoing, upcoming and finished), paged through
+// since WOM caps each request at 50.
+const GROUP_COMPETITIONS_PAGE_SIZE = 50;
+const GROUP_COMPETITIONS_MAX_PAGES = 20;
+async function getAllGroupCompetitions(groupId) {
+  const all = [];
+  for (let page = 0; page < GROUP_COMPETITIONS_MAX_PAGES; page++) {
+    const batch = await womClient().groups.getGroupCompetitions(groupId, {
+      limit: GROUP_COMPETITIONS_PAGE_SIZE,
+      offset: page * GROUP_COMPETITIONS_PAGE_SIZE,
+    });
+    all.push(...batch);
+    if (batch.length < GROUP_COMPETITIONS_PAGE_SIZE) break;
+  }
+  return all;
+}
+
+// Queues a hiscores update for every outdated member of the group.
+function updateAllGroupMembers(groupId, groupVerificationCode) {
+  return womClient().groups.updateAll(groupId, groupVerificationCode);
+}
+
+function getCompetitionDetails(competitionId) {
+  return womClient().competitions.getCompetitionDetails(competitionId);
+}
+
+module.exports = {
+  resolveMetricImageUrl,
+  createGroupCompetition,
+  getAllGroupCompetitions,
+  updateAllGroupMembers,
+  getCompetitionDetails,
+};
