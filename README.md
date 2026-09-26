@@ -363,68 +363,64 @@ No environment variables are required to load `/submission` itself, but `last` o
 Restricted to users with **Manage Server** permission. The command replies ephemerally with:
 - the channel mention and ID
 - the value to paste into `event_discord_channels.channel_id`
-- a reminder that routing now comes from the web panel / Supabase channel row
+- a note that channel routing is read from the web panel / Supabase channel row
 
 ---
 
 ### 🏆 `/weeklycomp` — Discord Event + Wise Old Man Competition
 
-Creates a Discord scheduled event with a linked Wise Old Man competition in one step — the event's cover image and description are generated from the competition automatically.
-
-**When to use it:**
-- Announcing a boss-of-the-week or skilling competition and getting a WOM competition plus a Discord event to RSVP to in one command
-- Giving members a Discord event that links straight to the WOM competition to track progress
+Creates a Discord scheduled event plus one Wise Old Man competition per boss or skill, in one step.
 
 **Options:**
 
 | Option | Required | Description |
 |--------|----------|-------------|
-| `name` | Yes | Event / competition name |
-| `metric` | Yes | Boss or skill to track — autocompletes over every boss and skill WOM supports |
-| `start` | Yes | Start date, Eastern Time — `YYYY-MM-DD`, `YYYY/MM/DD`, or `MM/DD/YYYY`, optionally with an hour: `HH` (24-hour) or `H` + `am`/`pm` (also accepts full ISO 8601 with its own offset) |
-| `duration` | No | How many days the competition runs for (1–365, default: 7) |
-| `group_id` | No | WOM group ID — only shown (and needed) if `WOM_GROUP_ID` isn't set |
-| `verification_code` | No | WOM group verification code — only shown (and needed) if `WOM_GROUP_VERIFICATION_CODE` isn't set. **Visible to everyone in the channel when used** — prefer the env var. |
+| `prefix` | Yes | Name prefix. Each competition is named `<prefix> <metric>`, e.g. `BOTW T3 Vorkath`, with any leading "The" dropped from the metric. |
+| `metric` | Yes | Boss or skill to track. Autocompletes over everything WOM supports. |
+| `metric2`–`metric4` | No | Extra bosses or skills, each getting its own competition. |
+| `start` | Yes | Start date in Eastern Time: `YYYY-MM-DD`, `YYYY/MM/DD` or `MM/DD/YYYY`, optionally with an hour (`18` or `6pm`). Full ISO 8601 with an offset also works. |
+| `duration` | No | Days the competition runs (1–365, default 7). |
+| `group_id` | No | WOM group ID. Only shown when `WOM_GROUP_ID` isn't set. |
+| `verification_code` | No | WOM group verification code. Only shown when `WOM_GROUP_VERIFICATION_CODE` isn't set. **Visible to everyone in the channel when used.** |
 
-Restricted to users with the **Templar** role. The reply is private (only the command runner sees it) — the created Discord event and its WOM link are what members actually see.
+Restricted to the **Templar** role. The reply is private to whoever runs the command.
 
 <details>
 <summary><strong>Environment variables</strong></summary>
 
 | Variable | Required | Description |
 |---|---|---|
-| `TEMPLAR_ROLE_ID` | Yes | The only role allowed to run `/weeklycomp`. **This check fails closed** — if left unset, no one can use the command. |
-| `WOM_GROUP_ID` | Recommended | Your clan's WOM group ID. If unset, the `group_id` option is required on every use instead. |
-| `WOM_GROUP_VERIFICATION_CODE` | Recommended | Your clan's WOM group verification code (wiseoldman.net → your group → settings → Verification Code). If unset, the `verification_code` option is required on every use instead — but that option is publicly visible when used, so setting this is strongly preferred. |
-| `WOM_API_KEY` | No | Optional personal WOM API key for higher rate limits. |
-| `ADMIN_LOG_CHANNEL_ID` | No | Shared admin alerts channel (also used by `/lfg-roles`, `/lfg-post`, `/pethighscore`, and the honeypot trap) — logs each successful `/weeklycomp`, and warns if the WOM competition was created but the Discord event failed. |
+| `TEMPLAR_ROLE_ID` | Yes | The only role that can run `/weeklycomp`, and the role pinged by the ending reminder. If unset, no one can run the command. |
+| `WOM_GROUP_ID` | Recommended | Your clan's WOM group ID. Also turns on the ending reminder. |
+| `WOM_GROUP_VERIFICATION_CODE` | Recommended | wiseoldman.net → your group → settings → Verification Code. Also used for the reminder's update all. |
+| `WOM_API_KEY` | No | Personal WOM API key for higher rate limits. |
+| `ADMIN_LOG_CHANNEL_ID` | No | Logs each `/weeklycomp` and any creation failures, and receives the ending reminder. Shared with other features. |
 
 </details>
 
 <details>
 <summary><strong>How it works</strong></summary>
 
-1. Converts the `start` date/hour to UTC, read as Eastern Time (Discord doesn't expose a user's local timezone to bots, so a fixed default is used), correctly accounting for EST/EDT at the given date. Then shows a private confirmation embed with the metric, computed start/end date-time, and duration, alongside **Confirm**/**Cancel** buttons — nothing is created yet. Cancelling, or not responding within 60 seconds, ends the command with no changes made.
-2. On confirm, creates the Wise Old Man competition first, inside the configured (or supplied) WOM group so its members are tracked automatically.
-3. Looks up that metric's official competition background image from Wise Old Man's own site, falling back to their generic icon for the handful of metrics without one.
-4. Creates a Discord scheduled event (External type) with the WOM competition link set as both the event location and appended to the description, and the metric's image as the event's cover.
-5. Replies privately to the command runner with a summary embed and links to both the Discord event and the WOM competition — the event itself (visible in Discord's Events list) is what members see.
-6. Sends the WOM verification code (needed to edit/delete the competition later) back to the command runner only, as a separate private follow-up.
-7. Posts a summary to `ADMIN_LOG_CHANNEL_ID` if configured.
-8. If the WOM competition is created but the Discord event fails to create, the competition and its verification code are still reported back rather than lost, and a warning is posted to the admin log.
+1. Reads `start` as Eastern Time (EST/EDT handled) and shows a private confirmation with the metrics, start, end and duration. Nothing is created unless **Confirm** is clicked within 60 seconds.
+2. Creates one WOM competition per metric inside the group, so its members are tracked automatically.
+3. Creates a Discord event named `<prefix> <first metric>`, with each competition's link in the description and the first metric's WOM background image as the cover.
+4. Replies with links to the event and every competition, and logs it to the admin log.
+5. If a competition or the event fails to create, the reply and the admin log list whatever was created.
 
 </details>
 
 <details>
 <summary><strong>Competition ending reminder (automatic)</strong></summary>
 
-Every 15 minutes, on the clock at :00, :15, :30 and :45 (like a `*/15 * * * *` cron job), the bot checks the WOM group (`WOM_GROUP_ID`) for ongoing competitions ending within the next hour. It also checks once on startup. A competition gets its reminder on the first check inside that hour; `/weeklycomp` competitions end on the hour, so theirs comes right about an hour before the end. When the bot finds any:
+At :00, :15, :30 and :45 (and once on startup), the bot checks the WOM group for ongoing competitions ending within the hour. When it finds any, it:
 
-1. Runs **update all** on the group once (needs `WOM_GROUP_VERIFICATION_CODE`), no matter how many competitions are ending, then waits 5 minutes for WOM to process the updates.
-2. Posts **one** message to `ADMIN_LOG_CHANNEL_ID` pinging `TEMPLAR_ROLE_ID` to make the announcement, listing every ending competition with its top 3.
-3. When two or more ending competitions are in the same category (bossing, skilling, …), it adds a combined top 5 that sums each player's gains across them. Categories are never mixed. For example, a bossing comp and a skilling comp each get only their own top 3.
+1. Runs **update all** on the group once, then waits 5 minutes for WOM to process it.
+2. Posts **one** message in `ADMIN_LOG_CHANNEL_ID` pinging `TEMPLAR_ROLE_ID` to make the announcement, with the top 3 for each ending competition.
+3. Adds a combined top 5 for each category (bossing, skilling, …) with two or more ending competitions. Categories are never mixed.
 
-Each competition is reminded once. Nothing is saved to disk, since hosts like DigitalOcean App Platform wipe it on every deploy. Instead, before sending, the bot looks back through the admin log channel for a reminder it already sent for that competition, and skips any it finds. It checks once before update all, so a restart doesn't repeat one. It checks again right before sending, because the old and new bot briefly run side by side during a deploy. The bot needs **Read Message History** in `ADMIN_LOG_CHANNEL_ID`; without it, the check fails and no reminder is sent. The reminder is disabled if `WOM_GROUP_ID` or `ADMIN_LOG_CHANNEL_ID` is unset.
+Each competition is reminded once. The bot searches the admin log channel for its earlier reminders, since files don't survive a deploy. It checks before update all and again right before sending, which covers restarts and the brief overlap of old and new bots during a deploy. The bot needs **Read Message History** in the admin log channel, or no reminder is sent.
+
+Needs `WOM_GROUP_ID` and `ADMIN_LOG_CHANNEL_ID`.
 
 </details>
 
@@ -624,7 +620,7 @@ npm start
 - [gif-encoder-2](https://github.com/benjaminadk/gif-encoder-2) — animated GIF generation
 - [googleapis](https://github.com/googleapis/google-api-nodejs-client) — Google Sheets access for `/donationhighscore` and `/pethighscore`
 - [axios](https://axios-http.com/) — Supabase/LFG backend and proof-intake HTTP calls
-- [@wise-old-man/utils](https://github.com/wise-old-man/wise-old-man) — Wise Old Man API client for `/weeklycomp`
+- [@wise-old-man/utils](https://github.com/wise-old-man/wise-old-man) — Wise Old Man API client for `/weeklycomp` and the competition ending reminder
 - [Claude by Anthropic](https://claude.ai/) — AI-assisted development
 
 ---

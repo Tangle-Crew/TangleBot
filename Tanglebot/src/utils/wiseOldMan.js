@@ -42,9 +42,8 @@ async function createGroupCompetition({ title, metric, startsAt, endsAt, groupId
   });
 }
 
-// Every competition the group has ever hosted (ongoing, upcoming and finished). WOM currently
-// ignores limit/offset on this endpoint and returns the whole list every time, so paging stops
-// as soon as a page brings no new competitions — otherwise each page repeats the same list.
+// Every competition the group has hosted (ongoing, upcoming and finished). WOM ignores
+// limit/offset here and returns the full list, so paging stops once a page adds nothing new.
 const GROUP_COMPETITIONS_PAGE_SIZE = 50;
 const GROUP_COMPETITIONS_MAX_PAGES = 20;
 async function getAllGroupCompetitions(groupId) {

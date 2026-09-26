@@ -3,22 +3,17 @@ const { MetricProps } = require('@wise-old-man/utils');
 const { getAllGroupCompetitions, updateAllGroupMembers, getCompetitionDetails } = require('./wiseOldMan');
 const { truncate } = require('./db');
 
-// Cron-style schedule, equivalent to `*/15 * * * *`: checks run on the clock at :00, :15, :30
-// and :45 rather than every 15 minutes from whenever the bot started.
+// Checks run on the clock at :00, :15, :30 and :45, like a `*/15 * * * *` cron job.
 const CHECK_INTERVAL_MS = 15 * 60 * 1000;
-// A competition gets its reminder on the first check within this long of it ending. Already
-// reminded competitions are skipped by the later checks inside the window.
+// A competition is reminded on the first check within its last hour.
 const REMINDER_WINDOW_MS = 60 * 60 * 1000;
-// update all only queues the updates — give WOM a few minutes to work through them before
-// reading the standings, so the top 3 reflect everyone's fresh stats.
+// Time for WOM to process the queued updates before the standings are read.
 const UPDATE_SETTLE_MS = 5 * 60 * 1000;
-// Competitions reminded while the bot has been running. Nothing written to disk survives a
-// redeploy on DigitalOcean App Platform, so across restarts the admin log channel itself is the
-// record: see findRemindedInChannel.
+// Competitions reminded since the bot started. Files don't survive a deploy on the host, so
+// across restarts the admin log channel is the record (see findRemindedInChannel).
 const remindedIds = new Set();
 
-// How far back through the admin log channel to look for an earlier reminder. A reminder is only
-// ever sent inside a competition's last hour, so the search stops at messages older than that.
+// Limits for searching the admin log channel for an earlier reminder.
 const HISTORY_PAGE_SIZE = 100;
 const HISTORY_MAX_PAGES = 5;
 
@@ -29,8 +24,7 @@ const PER_COMP_TOP = 3;
 const COMBINED_TOP = 5;
 const RANK_LABELS = ['🥇', '🥈', '🥉', '4.', '5.'];
 
-// Comps are only combined with others of the same category — bossing KC is never summed with
-// skilling XP.
+// Only competitions in the same category are combined, so KC and XP are never summed together.
 const CATEGORY_LABELS = {
   boss: 'Bossing',
   skill: 'Skilling',
@@ -111,7 +105,7 @@ function buildReminderEmbed(results, updateStatus) {
     });
   }
 
-  // Combined leaderboard per category, only where that category has more than one comp to add up.
+  // Combined top 5 for each category with two or more competitions.
   const byCategory = new Map();
   for (const r of results) {
     if (r.error) continue;
@@ -132,8 +126,7 @@ function buildReminderEmbed(results, updateStatus) {
     }
     const top = [...totals.values()].sort((a, b) => b.gained - a.gained).slice(0, COMBINED_TOP);
     const label = CATEGORY_LABELS[category] ?? 'Other';
-    // All comps in a category share a unit (bosses are all KC, skills all XP), so any one
-    // comp's metric formats the combined totals.
+    // Every competition in a category shares a unit, so the first one's metric formats the totals.
     fields.push({
       name: truncate(`🧮 Combined ${label} — Top ${COMBINED_TOP}`, 256),
       value: truncate(
@@ -165,8 +158,8 @@ async function runUpdateAll(config) {
   }
 }
 
-// IDs of the given competitions that already have a reminder from this bot in the admin log
-// channel, found by the WOM competition links in the reminder embed's description.
+// IDs of the given competitions this bot has already reminded in the admin log channel, read
+// from the competition links in its reminder embeds. Stops at messages older than the window.
 async function findRemindedInChannel(channel, botUserId, competitions) {
   const ids = new Set(competitions.map(c => c.id));
   const oldestEnd = Math.min(...competitions.map(c => new Date(c.endsAt).getTime()));
@@ -198,8 +191,7 @@ async function findRemindedInChannel(channel, botUserId, competitions) {
   return found;
 }
 
-// Drops competitions that already have a reminder in the channel (remembering them so later
-// checks skip the lookup) and returns the rest.
+// Returns the competitions not yet reminded in the channel, remembering the rest.
 async function withoutChannelReminders(channel, client, competitions, when) {
   const found = await findRemindedInChannel(channel, client.user.id, competitions);
   const alreadySent = competitions.filter(c => found.has(c.id));
@@ -232,9 +224,8 @@ async function checkEndingCompetitions(client, config) {
     return;
   }
 
-  // Checked before update all (so a restart doesn't re-run it for a comp already reminded) and
-  // again right before sending: during a deploy the old and new bot briefly run side by side,
-  // and the other one may have sent the reminder while this one was waiting on update all.
+  // Checked here so a restart doesn't repeat a reminder, and again right before sending in case
+  // another bot instance sent it meanwhile (the old and new bot overlap briefly during a deploy).
   const channel = await client.channels.fetch(config.adminLogChannelId);
   let ending = await withoutChannelReminders(channel, client, candidates, 'from before a restart');
   if (ending.length === 0) {
@@ -244,8 +235,7 @@ async function checkEndingCompetitions(client, config) {
 
   console.log(`[CompReminder] ${ending.length} competition(s) need a reminder: ${ending.map(describeCompetition).join(', ')}`);
 
-  // One update all covers every ending comp — they're all group comps, so the group's members
-  // are their participants.
+  // One update all covers every ending competition, since they're all group competitions.
   const update = await runUpdateAll(config);
   if (update.queued > 0) {
     console.log(`[CompReminder] Waiting ${UPDATE_SETTLE_MS / 60000} minutes for WOM to process the updates before reading standings...`);
@@ -278,8 +268,7 @@ async function checkEndingCompetitions(client, config) {
     return;
   }
 
-  // Remembered before sending so nothing after a successful send can repeat it; a failed send
-  // forgets them again so the next check retries.
+  // Marked before sending; a failed send unmarks them so the next check retries.
   for (const c of ending) remindedIds.add(c.id);
   try {
     const ping = config.templarRoleId ? `<@&${config.templarRoleId}> ` : '';
@@ -317,7 +306,7 @@ function startCompEndingReminder(client) {
 
   let inFlight = false;
   const tick = async () => {
-    // Skips a check that lands while the previous one is still waiting on update all to settle.
+    // The previous check may still be waiting on update all.
     if (inFlight) {
       console.log('[CompReminder] Previous check still running, skipping this one.');
       return;
@@ -332,8 +321,7 @@ function startCompEndingReminder(client) {
     }
   };
 
-  // Rescheduled from the clock each time, rather than setInterval, so checks stay pinned to
-  // the quarter hour instead of drifting.
+  // Scheduled from the clock each time so checks stay on the quarter hour.
   let timer = null;
   const scheduleNext = () => {
     const delay = CHECK_INTERVAL_MS - (Date.now() % CHECK_INTERVAL_MS);

@@ -23,7 +23,7 @@ const { handleSyncedGroupButtonInteraction } = require('../utils/lfgSyncedPost')
 
 // customId-prefix routing tables for InteractionCreate, one per interaction kind. errorReply is
 // optional — omitted for the honeypot button so a mis-click there stays silent instead of
-// tipping off whoever triggered it, matching every route's prior individual behavior.
+// tipping off whoever triggered it.
 const BUTTON_ROUTES = [
   { prefix: 'hp:', handler: handleHoneypotButtonInteraction, errorLabel: 'Honeypot button interaction error:' },
   { prefix: 'roles:', handler: handleRoleMenuButtonInteraction, errorLabel: 'Role menu button interaction error:', errorReply: 'Something went wrong updating your roles.' },
