@@ -8,9 +8,10 @@ const {
   ButtonBuilder,
   ButtonStyle,
 } = require('discord.js');
-const { WOM_METRICS, findMetric } = require('../utils/womMetrics');
+const { WOM_METRICS, findMetric, shortMetricName } = require('../utils/womMetrics');
 const { resolveMetricImageUrl, createGroupCompetition } = require('../utils/wiseOldMan');
 const { notifyAdminLog } = require('../utils/roleMenu');
+const { clearStandingsCache } = require('./weeklycompstats');
 
 const TEMPLAR_ROLE_ID = process.env.TEMPLAR_ROLE_ID;
 const DISCORD_GREEN = 0x1a5c2e;
@@ -22,10 +23,9 @@ const METRIC_OPTION_NAMES = ['metric', 'metric2', 'metric3', 'metric4'];
 // Time (the clan's default) rather than UTC.
 const DEFAULT_TIME_ZONE = 'America/New_York';
 
-// Event/competition names are just "<prefix> <metric>", with any leading "The " dropped from
-// the metric (e.g. "The Gauntlet" -> "Gauntlet").
+// Event/competition names are "<prefix> <metric>", e.g. "BOTW T3 Gauntlet".
 function buildCompTitle(prefix, metric) {
-  return `${prefix} ${metric.name.replace(/^the\s+/i, '')}`;
+  return `${prefix} ${shortMetricName(metric.value)}`;
 }
 
 // Converts a wall-clock date/hour as read in `timeZone` to the UTC instant it represents,
@@ -286,6 +286,7 @@ module.exports = {
       try {
         const result = await createGroupCompetition({ title, metric: metric.value, startsAt, endsAt, groupId, groupVerificationCode });
         created.push({ metric, title, competition: result.competition, url: `https://wiseoldman.net/competitions/${result.competition.id}` });
+        clearStandingsCache();
       } catch (err) {
         console.error(`[weeklycomp] Failed to create WOM competition for ${metric.name}:`, err);
         if (created.length === 0) {

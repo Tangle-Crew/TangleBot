@@ -393,7 +393,7 @@ Restricted to the **Templar** role. The reply is private to whoever runs the com
 | `TEMPLAR_ROLE_ID` | Yes | The only role that can run `/weeklycomp`, and the role pinged by the ending reminder. If unset, no one can run the command. |
 | `WOM_GROUP_ID` | Recommended | Your clan's WOM group ID. Also turns on the ending reminder. |
 | `WOM_GROUP_VERIFICATION_CODE` | Recommended | wiseoldman.net → your group → settings → Verification Code. Also used for the reminder's update all. |
-| `WOM_API_KEY` | No | Personal WOM API key for higher rate limits. |
+| `WOM_API_KEY` | No | Raises the WOM rate limit from 20 to 100 requests a minute. Ask for one on the Wise Old Man Discord. |
 | `ADMIN_LOG_CHANNEL_ID` | No | Logs each `/weeklycomp` and any creation failures, and receives the ending reminder. Shared with other features. |
 
 </details>
@@ -421,6 +421,42 @@ At :00, :15, :30 and :45 (and once on startup), the bot checks the WOM group for
 Each competition is reminded once. The bot searches the admin log channel for its earlier reminders, since files don't survive a deploy. It checks before update all and again right before sending, which covers restarts and the brief overlap of old and new bots during a deploy. The bot needs **Read Message History** in the admin log channel, or no reminder is sent.
 
 Needs `WOM_GROUP_ID` and `ADMIN_LOG_CHANNEL_ID`.
+
+</details>
+
+---
+
+### 📊 `/weeklycompstats` — Competition Leaderboard
+
+Shows the standings for every Wise Old Man competition the group is running right now. Anyone can use it, and the reply is visible to the channel. Each person can run it once a minute.
+
+**Options:**
+
+| Option | Required | Description |
+|--------|----------|-------------|
+| `player` | No | A RuneScape name (up to 12 letters, numbers, spaces, `-` or `_`). Opens on that player's page, highlights their row and shows their rank on each leaderboard. Autocompletes from the last fetched standings. |
+
+<details>
+<summary><strong>Environment variables</strong></summary>
+
+| Variable | Required | Description |
+|---|---|---|
+| `WOM_GROUP_ID` | Yes | Your clan's WOM group ID. The command isn't registered without it. |
+| `WOM_API_KEY` | No | Raises the WOM rate limit from 20 to 100 requests a minute. Ask for one on the Wise Old Man Discord. |
+| `ADMIN_LOG_CHANNEL_ID` | No | Receives an alert, naming who ran the command, when a competition fails to load or the reply fails. Shared with other features. |
+
+</details>
+
+<details>
+<summary><strong>How it works</strong></summary>
+
+1. Lists each running competition on its own line with its total (**Total KC** for bosses, **Total gained** otherwise) and how many participants are active (e.g. `43/264 active`), marking any that end within 24 hours with ⏰. Categories with two or more competitions also get a combined total. Start and end times use Discord timestamps, so everyone sees them in their own timezone.
+2. Competitions in the same category (bossing, skilling, …) are added together per player and sorted by the combined count, with each competition's gains shown under the player. Different categories are never mixed and sit side by side.
+3. Only players who have gained something are listed, 10 per page, with 🥇🥈🥉 for the top 3. Tied players share a rank.
+4. **◀ Prev** / **Next ▶** buttons page through the results for 14 minutes. Only whoever ran the command can use them.
+5. If nothing is running, it says so and names the next competition(s) to start and when. If a competition has no gains yet, it says the competition is active but nothing has been recorded.
+
+WOM allows 20 requests a minute (100 with `WOM_API_KEY`), so standings are fetched at most once every 5 minutes and shared by every run in between. They're fetched sooner when a competition starts or ends or `/weeklycomp` creates one, and 1 minute after an error. Each request times out after 20 seconds. The embed's timestamp shows when the data was fetched. Gains are only as fresh as each player's last WOM update. The command doesn't run update all.
 
 </details>
 

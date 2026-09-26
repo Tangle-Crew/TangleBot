@@ -1,6 +1,13 @@
 const { EmbedBuilder } = require('discord.js');
-const { MetricProps } = require('@wise-old-man/utils');
-const { getAllGroupCompetitions, updateAllGroupMembers, getCompetitionDetails } = require('./wiseOldMan');
+const {
+  getAllGroupCompetitions,
+  updateAllGroupMembers,
+  getCompetitionDetails,
+  isCompetitionOngoing,
+  rankParticipants,
+  competitionUrl,
+} = require('./wiseOldMan');
+const { CATEGORY_LABELS, metricName, metricCategory, formatAmount } = require('./womMetrics');
 const { truncate } = require('./db');
 
 // Checks run on the clock at :00, :15, :30 and :45, like a `*/15 * * * *` cron job.
@@ -24,21 +31,6 @@ const PER_COMP_TOP = 3;
 const COMBINED_TOP = 5;
 const RANK_LABELS = ['🥇', '🥈', '🥉', '4.', '5.'];
 
-// Only competitions in the same category are combined, so KC and XP are never summed together.
-const CATEGORY_LABELS = {
-  boss: 'Bossing',
-  skill: 'Skilling',
-  activity: 'Activities',
-  computed: 'Efficiency',
-};
-
-const MEASURE_UNITS = {
-  experience: 'xp',
-  kills: 'kc',
-  score: 'score',
-  value: '',
-};
-
 function compConfig() {
   return {
     groupId: process.env.WOM_GROUP_ID ? Number(process.env.WOM_GROUP_ID) : null,
@@ -48,32 +40,11 @@ function compConfig() {
   };
 }
 
-function metricCategory(metric) {
-  return MetricProps[metric]?.type ?? 'other';
-}
-
-function formatAmount(amount, metric) {
-  const unit = MEASURE_UNITS[MetricProps[metric]?.measure] ?? '';
-  return `${Math.round(amount).toLocaleString('en-US')}${unit ? ` ${unit}` : ''}`;
-}
-
 function formatStandings(rows, metric) {
   if (rows.length === 0) return 'No progress yet.';
   return rows
     .map((row, i) => `${RANK_LABELS[i]} **${row.name}** — ${formatAmount(row.gained, metric)}`)
     .join('\n');
-}
-
-// Participants with any progress, highest gains first.
-function rankParticipants(details) {
-  return (details.participations ?? [])
-    .filter(p => (p.progress?.gained ?? 0) > 0)
-    .map(p => ({ id: p.player.id, name: p.player.displayName, gained: p.progress.gained }))
-    .sort((a, b) => b.gained - a.gained);
-}
-
-function competitionUrl(id) {
-  return `https://wiseoldman.net/competitions/${id}`;
 }
 
 function discordTimestamp(date, style) {
@@ -130,7 +101,7 @@ function buildReminderEmbed(results, updateStatus) {
     fields.push({
       name: truncate(`🧮 Combined ${label} — Top ${COMBINED_TOP}`, 256),
       value: truncate(
-        `*${group.map(r => MetricProps[r.competition.metric]?.name ?? r.competition.metric).join(' + ')}*\n` +
+        `*${group.map(r => metricName(r.competition.metric)).join(' + ')}*\n` +
         formatStandings(top, group[0].competition.metric),
         1024
       ),
@@ -207,7 +178,7 @@ async function checkEndingCompetitions(client, config) {
 
   console.log(`[CompReminder] Checking WOM group ${config.groupId} for competitions ending within the hour...`);
   const competitions = await getAllGroupCompetitions(config.groupId);
-  const ongoing = competitions.filter(c => new Date(c.startsAt).getTime() <= now && new Date(c.endsAt).getTime() > now);
+  const ongoing = competitions.filter(c => isCompetitionOngoing(c, now));
   const inWindow = ongoing.filter(c => new Date(c.endsAt).getTime() - now <= REMINDER_WINDOW_MS);
   const alreadyReminded = inWindow.filter(c => remindedIds.has(c.id));
   const candidates = inWindow.filter(c => !remindedIds.has(c.id));

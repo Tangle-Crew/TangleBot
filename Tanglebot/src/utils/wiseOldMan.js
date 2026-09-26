@@ -42,8 +42,9 @@ async function createGroupCompetition({ title, metric, startsAt, endsAt, groupId
   });
 }
 
-// Every competition the group has hosted (ongoing, upcoming and finished). WOM ignores
-// limit/offset here and returns the full list, so paging stops once a page adds nothing new.
+// Every competition the group has hosted (ongoing, upcoming and finished). WOM currently ignores
+// limit/offset here and returns the full list in one response (more than a page), so that ends
+// paging; the other checks cover WOM starting to honour them.
 const GROUP_COMPETITIONS_PAGE_SIZE = 50;
 const GROUP_COMPETITIONS_MAX_PAGES = 20;
 async function getAllGroupCompetitions(groupId) {
@@ -55,7 +56,7 @@ async function getAllGroupCompetitions(groupId) {
     });
     const sizeBefore = byId.size;
     for (const competition of batch) byId.set(competition.id, competition);
-    if (batch.length < GROUP_COMPETITIONS_PAGE_SIZE || byId.size === sizeBefore) break;
+    if (batch.length !== GROUP_COMPETITIONS_PAGE_SIZE || byId.size === sizeBefore) break;
   }
   return [...byId.values()];
 }
@@ -69,10 +70,29 @@ function getCompetitionDetails(competitionId) {
   return womClient().competitions.getCompetitionDetails(competitionId);
 }
 
+function isCompetitionOngoing(competition, now = Date.now()) {
+  return new Date(competition.startsAt).getTime() <= now && new Date(competition.endsAt).getTime() > now;
+}
+
+// Participants with any progress, highest gains first.
+function rankParticipants(details) {
+  return (details.participations ?? [])
+    .filter(p => (p.progress?.gained ?? 0) > 0)
+    .map(p => ({ id: p.player.id, name: p.player.displayName, gained: p.progress.gained }))
+    .sort((a, b) => b.gained - a.gained);
+}
+
+function competitionUrl(id) {
+  return `https://wiseoldman.net/competitions/${id}`;
+}
+
 module.exports = {
   resolveMetricImageUrl,
   createGroupCompetition,
   getAllGroupCompetitions,
   updateAllGroupMembers,
   getCompetitionDetails,
+  isCompetitionOngoing,
+  rankParticipants,
+  competitionUrl,
 };
