@@ -15,6 +15,9 @@ const { notifyAdminLog } = require('../utils/roleMenu');
 const TEMPLAR_ROLE_ID = process.env.TEMPLAR_ROLE_ID;
 const DISCORD_GREEN = 0x1a5c2e;
 
+// Metric slots exposed on the command; only the first is required.
+const METRIC_OPTION_NAMES = ['metric', 'metric2', 'metric3', 'metric4'];
+
 // Discord doesn't tell bots a user's local timezone, so bare dates/hours are read as Eastern
 // Time (the clan's default) rather than UTC.
 const DEFAULT_TIME_ZONE = 'America/New_York';
@@ -79,26 +82,31 @@ function parseDateInput(raw) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-module.exports = {
-  data: new SlashCommandBuilder()
+function buildCommandData() {
+  const data = new SlashCommandBuilder()
     .setName('weeklycomp')
     .setDescription('Create a Discord event with a linked Wise Old Man competition')
     .addStringOption(o =>
-      o.setName('name')
-        .setDescription('Event / competition name')
+      o.setName('prefix')
+        .setDescription('Prefix for the event/competition names, e.g. "BOTW T3" -> "BOTW T3: <metric>"')
         .setRequired(true)
-    )
-    .addStringOption(o =>
-      o.setName('metric')
-        .setDescription('Boss or skill to track for the competition')
-        .setRequired(true)
-        .setAutocomplete(true)
     )
     .addStringOption(o =>
       o.setName('start')
         .setDescription('Start date, Eastern Time — YYYY-MM-DD, YYYY/MM/DD, or MM/DD/YYYY (add HH or H[am/pm])')
         .setRequired(true)
-    )
+    );
+
+  METRIC_OPTION_NAMES.forEach((optName, i) => {
+    data.addStringOption(o =>
+      o.setName(optName)
+        .setDescription(i === 0 ? 'Boss or skill to track for the competition' : 'Another boss or skill to track (optional)')
+        .setRequired(i === 0)
+        .setAutocomplete(true)
+    );
+  });
+
+  return data
     .addIntegerOption(o =>
       o.setName('duration')
         .setDescription('How many days the competition runs for (default: 7)')
@@ -113,11 +121,28 @@ module.exports = {
     .addStringOption(o =>
       o.setName('verification_code')
         .setDescription('WOM verification code if not set in config — WARNING: visible to the whole channel')
-    ),
+    );
+}
+
+module.exports = {
+  data: buildCommandData(),
 
   async autocomplete(interaction) {
-    const query = String(interaction.options.getFocused() || '').toLowerCase();
-    const choices = WOM_METRICS.filter(m => m.name.toLowerCase().includes(query)).slice(0, 25);
+    const focused = interaction.options.getFocused(true);
+    const query = String(focused.value || '').toLowerCase();
+
+    // Don't re-suggest a metric already picked in one of this command's other metric slots.
+    const pickedValues = new Set(
+      METRIC_OPTION_NAMES
+        .filter(optName => optName !== focused.name)
+        .map(optName => interaction.options.getString(optName))
+        .filter(Boolean)
+    );
+
+    const choices = WOM_METRICS
+      .filter(m => !pickedValues.has(m.value))
+      .filter(m => m.name.toLowerCase().includes(query))
+      .slice(0, 25);
     await interaction.respond(choices.map(m => ({ name: m.name, value: m.value })));
   },
 
@@ -126,16 +151,36 @@ module.exports = {
       return interaction.reply({ content: 'You need the Templar role to use this command.', flags: MessageFlags.Ephemeral });
     }
 
-    const name = interaction.options.getString('name', true).trim();
-    const metricInput = interaction.options.getString('metric', true);
-    const metric = findMetric(metricInput);
+    const prefix = interaction.options.getString('prefix', true).trim();
+    const metricInputs = METRIC_OPTION_NAMES.map(optName => interaction.options.getString(optName)).filter(Boolean);
 
-    if (!name) {
-      return interaction.reply({ content: 'Event name cannot be empty.', flags: MessageFlags.Ephemeral });
+    if (!prefix) {
+      return interaction.reply({ content: 'Prefix cannot be empty.', flags: MessageFlags.Ephemeral });
     }
-    if (!metric) {
+
+    const metrics = [];
+    const unknownInputs = [];
+    const duplicateNames = [];
+    for (const input of metricInputs) {
+      const metric = findMetric(input);
+      if (!metric) {
+        unknownInputs.push(input);
+      } else if (metrics.some(m => m.value === metric.value)) {
+        duplicateNames.push(metric.name);
+      } else {
+        metrics.push(metric);
+      }
+    }
+
+    if (unknownInputs.length > 0) {
       return interaction.reply({
-        content: `Unknown boss/skill "${metricInput}". Pick one from the autocomplete suggestions.`,
+        content: `Unknown boss/skill${unknownInputs.length === 1 ? '' : 's'} "${unknownInputs.join('", "')}". Pick from the autocomplete suggestions.`,
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+    if (duplicateNames.length > 0) {
+      return interaction.reply({
+        content: `You listed ${duplicateNames.length === 1 ? 'a metric' : 'metrics'} more than once: **${duplicateNames.join(', ')}**. Pick each boss/skill in only one slot.`,
         flags: MessageFlags.Ephemeral,
       });
     }
@@ -174,15 +219,20 @@ module.exports = {
 
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
+    const metricsLabel = metrics.map(m => m.name).join(', ');
+    // The Discord event covers the whole run, so it's named after the prefix + first metric;
+    // each WOM competition instead gets its own metric name appended.
+    const eventTitle = `${prefix}: ${metrics[0].name}`;
+
     const confirmEmbed = new EmbedBuilder()
       .setColor(DISCORD_GREEN)
-      .setTitle(`Confirm: ${name}`)
+      .setTitle(`Confirm: ${eventTitle}`)
       .setDescription(
-        `**Metric:** ${metric.name}\n` +
+        `**Metric${metrics.length === 1 ? '' : 's'}:** ${metricsLabel}\n` +
         `**Starts:** <t:${Math.floor(startsAt.getTime() / 1000)}:F>\n` +
         `**Ends:** <t:${Math.floor(endsAt.getTime() / 1000)}:F>\n` +
         `**Duration:** ${durationDays} day${durationDays === 1 ? '' : 's'}\n\n` +
-        'This creates a public Discord event and a Wise Old Man competition. Confirm?'
+        `This creates a public Discord event and ${metrics.length === 1 ? 'a Wise Old Man competition' : `${metrics.length} Wise Old Man competitions`}. Confirm?`
       );
 
     const confirmRow = new ActionRowBuilder().addComponents(
@@ -208,33 +258,53 @@ module.exports = {
     }
 
     await confirmation.update({
-      embeds: [EmbedBuilder.from(confirmEmbed).setTitle(`Creating: ${name}`).setDescription('Creating the competition and event…')],
+      embeds: [EmbedBuilder.from(confirmEmbed).setTitle(`Creating: ${eventTitle}`).setDescription('Creating the competition and event…')],
       components: [],
     });
 
-    console.log(`[weeklycomp] ${interaction.user.tag} creating "${name}" (${metric.value}) ${startsAt.toISOString()} -> ${endsAt.toISOString()} in WOM group ${groupId}`);
+    console.log(`[weeklycomp] ${interaction.user.tag} creating "${prefix}" (${metrics.map(m => m.value).join(', ')}) ${startsAt.toISOString()} -> ${endsAt.toISOString()} in WOM group ${groupId}`);
 
-    let competition;
-    try {
-      const result = await createGroupCompetition({ title: name, metric: metric.value, startsAt, endsAt, groupId, groupVerificationCode });
-      competition = result.competition;
-    } catch (err) {
-      console.error('[weeklycomp] Failed to create WOM competition:', err);
-      return interaction.editReply(`Failed to create the Wise Old Man competition: ${err.message}`);
+    // Each metric gets its own WOM competition, named "<prefix>: <metric>" so they read
+    // consistently alongside the Discord event (named after the prefix + first metric).
+    const created = [];
+    for (const metric of metrics) {
+      const title = `${prefix}: ${metric.name}`;
+      try {
+        const result = await createGroupCompetition({ title, metric: metric.value, startsAt, endsAt, groupId, groupVerificationCode });
+        created.push({ metric, title, competition: result.competition, url: `https://wiseoldman.net/competitions/${result.competition.id}` });
+      } catch (err) {
+        console.error(`[weeklycomp] Failed to create WOM competition for ${metric.name}:`, err);
+        if (created.length === 0) {
+          return interaction.editReply(`Failed to create the Wise Old Man competition: ${err.message}`);
+        }
+        const createdLines = created.map(c => `${c.title}: ${c.url}`).join('\n');
+        await interaction.editReply(
+          `Created ${created.length} of ${metrics.length} Wise Old Man competitions before **${metric.name}** failed: ${err.message}\n\n` +
+          `Created so far:\n${createdLines}`
+        );
+        notifyAdminLog(
+          interaction.client,
+          '⚠️ /weeklycomp: Partial competition creation',
+          `${interaction.user} ran /weeklycomp for **${prefix}** — created ${created.length}/${metrics.length} competitions before **${metric.name}** failed: ${err.message}\n${createdLines}`,
+          [],
+          0xc0392b
+        );
+        return;
+      }
     }
 
-    const competitionUrl = `https://wiseoldman.net/competitions/${competition.id}`;
-    const imageUrl = await resolveMetricImageUrl(metric.value);
+    const imageUrl = await resolveMetricImageUrl(metrics[0].value);
 
     const description = [
-      name,
-      `Track on Wise Old Man: ${competitionUrl}`,
+      eventTitle,
+      '',
+      ...created.map(c => `${c.title}: ${c.url}`),
     ].join('\n');
 
     let event;
     try {
       event = await interaction.guild.scheduledEvents.create({
-        name,
+        name: eventTitle,
         scheduledStartTime: startsAt,
         scheduledEndTime: endsAt,
         privacyLevel: GuildScheduledEventPrivacyLevel.GuildOnly,
@@ -246,30 +316,32 @@ module.exports = {
       });
     } catch (err) {
       console.error('[weeklycomp] Failed to create Discord event:', err);
+      const createdLines = created.map(c => `${c.title}: ${c.url}`).join('\n');
       await interaction.editReply(
-        `Created the Wise Old Man competition, but failed to create the Discord event: ${err.message}\n` +
-        `Competition: ${competitionUrl}`
+        `Created the Wise Old Man competition${created.length === 1 ? '' : 's'}, but failed to create the Discord event: ${err.message}\n\n` +
+        `${createdLines}`
       );
       notifyAdminLog(
         interaction.client,
         '⚠️ /weeklycomp: Discord event failed',
-        `${interaction.user} created the WOM competition **${name}** (${metric.name}) but the Discord event failed to create: ${err.message}\n[WOM Competition](${competitionUrl})`,
+        `${interaction.user} created the WOM competition${created.length === 1 ? '' : 's'} for **${prefix}** (${metricsLabel}) but the Discord event failed to create: ${err.message}\n${createdLines}`,
         [],
         0xc0392b
       );
       return;
     }
 
-    console.log(`[weeklycomp] Created event ${event.id} and WOM competition ${competition.id}`);
+    console.log(`[weeklycomp] Created event ${event.id} and WOM competition${created.length === 1 ? '' : 's'} ${created.map(c => c.competition.id).join(', ')}`);
 
     const embed = new EmbedBuilder()
       .setColor(DISCORD_GREEN)
-      .setTitle(`📅 ${name}`)
+      .setTitle(`📅 ${eventTitle}`)
       .setDescription(
-        `**Metric:** ${metric.name}\n` +
+        `**Metric${metrics.length === 1 ? '' : 's'}:** ${metricsLabel}\n` +
         `**Starts:** <t:${Math.floor(startsAt.getTime() / 1000)}:F>\n` +
         `**Ends:** <t:${Math.floor(endsAt.getTime() / 1000)}:F>\n\n` +
-        `[Discord Event](${event.url}) • [WOM Competition](${competitionUrl})`
+        `[Discord Event](${event.url})\n` +
+        created.map(c => `[${c.title}](${c.url})`).join('\n')
       )
       .setImage(imageUrl)
       .setFooter({ text: `Created by ${interaction.user.username}` });
@@ -279,7 +351,7 @@ module.exports = {
     notifyAdminLog(
       interaction.client,
       '📅 Event Created',
-      `${interaction.user} created **${name}** (${metric.name}) via /weeklycomp.\n[Discord Event](${event.url}) • [WOM Competition](${competitionUrl})`,
+      `${interaction.user} created **${prefix}** (${metricsLabel}) via /weeklycomp.\n[Discord Event](${event.url})\n${created.map(c => `[${c.title}](${c.url})`).join('\n')}`,
       [],
       DISCORD_GREEN
     );
