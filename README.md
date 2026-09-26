@@ -424,7 +424,7 @@ Every 15 minutes, on the clock at :00, :15, :30 and :45 (like a `*/15 * * * *` c
 2. Posts **one** message to `ADMIN_LOG_CHANNEL_ID` pinging `TEMPLAR_ROLE_ID` to make the announcement, listing every ending competition with its top 3.
 3. When two or more ending competitions are in the same category (bossing, skilling, …), it adds a combined top 5 that sums each player's gains across them. Categories are never mixed. For example, a bossing comp and a skilling comp each get only their own top 3.
 
-Each competition is reminded once. Reminded IDs are saved to `data/comp-ending-reminders.json`, so a restart won't send the reminder again. The reminder is disabled if `WOM_GROUP_ID` or `ADMIN_LOG_CHANNEL_ID` is unset.
+Each competition is reminded once. Nothing is saved to disk, since hosts like DigitalOcean App Platform wipe it on every deploy. Instead, before sending, the bot looks back through the admin log channel for a reminder it already sent for that competition, and skips any it finds. It checks once before update all, so a restart doesn't repeat one. It checks again right before sending, because the old and new bot briefly run side by side during a deploy. The bot needs **Read Message History** in `ADMIN_LOG_CHANNEL_ID`; without it, the check fails and no reminder is sent. The reminder is disabled if `WOM_GROUP_ID` or `ADMIN_LOG_CHANNEL_ID` is unset.
 
 </details>
 

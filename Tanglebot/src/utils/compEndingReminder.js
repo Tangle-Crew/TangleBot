@@ -1,7 +1,7 @@
 const { EmbedBuilder } = require('discord.js');
 const { MetricProps } = require('@wise-old-man/utils');
 const { getAllGroupCompetitions, updateAllGroupMembers, getCompetitionDetails } = require('./wiseOldMan');
-const { readJson, writeJson, truncate } = require('./db');
+const { truncate } = require('./db');
 
 // Cron-style schedule, equivalent to `*/15 * * * *`: checks run on the clock at :00, :15, :30
 // and :45 rather than every 15 minutes from whenever the bot started.
@@ -12,14 +12,17 @@ const REMINDER_WINDOW_MS = 60 * 60 * 1000;
 // update all only queues the updates — give WOM a few minutes to work through them before
 // reading the standings, so the top 3 reflect everyone's fresh stats.
 const UPDATE_SETTLE_MS = 5 * 60 * 1000;
-// Reminded competitions are forgotten this long after they end, keeping the data file small.
-const REMINDED_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
-const REMINDERS_FILE = 'comp-ending-reminders.json';
-
-// Competitions reminded while the bot has been running. The data file carries this across
-// restarts, but if saving it fails this still stops a repeat reminder on every later check.
+// Competitions reminded while the bot has been running. Nothing written to disk survives a
+// redeploy on DigitalOcean App Platform, so across restarts the admin log channel itself is the
+// record: see findRemindedInChannel.
 const remindedIds = new Set();
 
+// How far back through the admin log channel to look for an earlier reminder. A reminder is only
+// ever sent inside a competition's last hour, so the search stops at messages older than that.
+const HISTORY_PAGE_SIZE = 100;
+const HISTORY_MAX_PAGES = 5;
+
+const REMINDER_TITLE_PREFIX = '⏰ WOM Competition';
 const REMINDER_COLOR = 0xe67e22;
 const MAX_EMBED_FIELDS = 25;
 const PER_COMP_TOP = 3;
@@ -87,7 +90,7 @@ function buildReminderEmbed(results, updateStatus) {
   const endsAtList = [...new Set(results.map(r => discordTimestamp(r.competition.endsAt, 'R')))];
   const embed = new EmbedBuilder()
     .setColor(REMINDER_COLOR)
-    .setTitle(`⏰ WOM Competition${results.length === 1 ? '' : 's'} Ending Soon`)
+    .setTitle(`${REMINDER_TITLE_PREFIX}${results.length === 1 ? '' : 's'} Ending Soon`)
     .setDescription(truncate(
       `${results.length === 1 ? 'This competition ends' : `These ${results.length} competitions end`} ${endsAtList.join(' / ')} — time to make the announcement!\n\n` +
       results.map(r => `• [${r.competition.title}](${competitionUrl(r.competition.id)})`).join('\n') +
@@ -162,17 +165,60 @@ async function runUpdateAll(config) {
   }
 }
 
+// IDs of the given competitions that already have a reminder from this bot in the admin log
+// channel, found by the WOM competition links in the reminder embed's description.
+async function findRemindedInChannel(channel, botUserId, competitions) {
+  const ids = new Set(competitions.map(c => c.id));
+  const oldestEnd = Math.min(...competitions.map(c => new Date(c.endsAt).getTime()));
+  const since = oldestEnd - REMINDER_WINDOW_MS;
+  const found = new Set();
+
+  let before;
+  for (let page = 0; page < HISTORY_MAX_PAGES; page++) {
+    let messages;
+    try {
+      messages = await channel.messages.fetch({ limit: HISTORY_PAGE_SIZE, ...(before ? { before } : {}) });
+    } catch (err) {
+      throw new Error(`could not read the admin log channel's history (the bot needs Read Message History there): ${err.message}`);
+    }
+    for (const message of messages.values()) {
+      if (message.author?.id !== botUserId || message.createdTimestamp < since) continue;
+      for (const embed of message.embeds) {
+        if (!embed.title?.startsWith(REMINDER_TITLE_PREFIX)) continue;
+        for (const match of (embed.description ?? '').matchAll(/wiseoldman\.net\/competitions\/(\d+)/g)) {
+          const id = Number(match[1]);
+          if (ids.has(id)) found.add(id);
+        }
+      }
+    }
+    const oldest = messages.last();
+    if (messages.size < HISTORY_PAGE_SIZE || !oldest || oldest.createdTimestamp < since) break;
+    before = oldest.id;
+  }
+  return found;
+}
+
+// Drops competitions that already have a reminder in the channel (remembering them so later
+// checks skip the lookup) and returns the rest.
+async function withoutChannelReminders(channel, client, competitions, when) {
+  const found = await findRemindedInChannel(channel, client.user.id, competitions);
+  const alreadySent = competitions.filter(c => found.has(c.id));
+  if (alreadySent.length > 0) {
+    for (const c of alreadySent) remindedIds.add(c.id);
+    console.log(`[CompReminder] Found a reminder already in the admin log ${when}, skipping: ${alreadySent.map(describeCompetition).join(', ')}`);
+  }
+  return competitions.filter(c => !found.has(c.id));
+}
+
 async function checkEndingCompetitions(client, config) {
-  const reminded = readJson(REMINDERS_FILE);
   const now = Date.now();
 
   console.log(`[CompReminder] Checking WOM group ${config.groupId} for competitions ending within the hour...`);
   const competitions = await getAllGroupCompetitions(config.groupId);
   const ongoing = competitions.filter(c => new Date(c.startsAt).getTime() <= now && new Date(c.endsAt).getTime() > now);
   const inWindow = ongoing.filter(c => new Date(c.endsAt).getTime() - now <= REMINDER_WINDOW_MS);
-  const isReminded = c => remindedIds.has(c.id) || Boolean(reminded[c.id]);
-  const alreadyReminded = inWindow.filter(isReminded);
-  const ending = inWindow.filter(c => !isReminded(c));
+  const alreadyReminded = inWindow.filter(c => remindedIds.has(c.id));
+  const candidates = inWindow.filter(c => !remindedIds.has(c.id));
 
   console.log(
     `[CompReminder] Found ${competitions.length} competition(s) in the group, ${ongoing.length} ongoing, ` +
@@ -181,6 +227,16 @@ async function checkEndingCompetitions(client, config) {
   if (alreadyReminded.length > 0) {
     console.log(`[CompReminder] Already reminded, skipping: ${alreadyReminded.map(describeCompetition).join(', ')}`);
   }
+  if (candidates.length === 0) {
+    console.log('[CompReminder] Nothing new to remind about.');
+    return;
+  }
+
+  // Checked before update all (so a restart doesn't re-run it for a comp already reminded) and
+  // again right before sending: during a deploy the old and new bot briefly run side by side,
+  // and the other one may have sent the reminder while this one was waiting on update all.
+  const channel = await client.channels.fetch(config.adminLogChannelId);
+  let ending = await withoutChannelReminders(channel, client, candidates, 'from before a restart');
   if (ending.length === 0) {
     console.log('[CompReminder] Nothing new to remind about.');
     return;
@@ -215,58 +271,32 @@ async function checkEndingCompetitions(client, config) {
     }
   }
 
-  // Recorded before sending rather than after, so nothing that goes wrong once the message is
-  // out (e.g. the data file failing to save) can lead to it being sent again. Only a failed
-  // send undoes the record, so the next check retries it.
-  markReminded(ending, now);
+  ending = await withoutChannelReminders(channel, client, ending, 'sent while this check was waiting');
+  const toSend = results.filter(r => ending.includes(r.competition));
+  if (toSend.length === 0) {
+    console.log('[CompReminder] Nothing left to remind about.');
+    return;
+  }
+
+  // Remembered before sending so nothing after a successful send can repeat it; a failed send
+  // forgets them again so the next check retries.
+  for (const c of ending) remindedIds.add(c.id);
   try {
-    const channel = await client.channels.fetch(config.adminLogChannelId);
     const ping = config.templarRoleId ? `<@&${config.templarRoleId}> ` : '';
     await channel.send({
-      content: `${ping}${results.length === 1 ? 'A WOM competition is' : `${results.length} WOM competitions are`} ending within the hour — please make the announcement.`,
-      embeds: [buildReminderEmbed(results, update.status)],
+      content: `${ping}${toSend.length === 1 ? 'A WOM competition is' : `${toSend.length} WOM competitions are`} ending within the hour — please make the announcement.`,
+      embeds: [buildReminderEmbed(toSend, update.status)],
       allowedMentions: { roles: config.templarRoleId ? [config.templarRoleId] : [] },
     });
   } catch (err) {
+    for (const c of ending) remindedIds.delete(c.id);
     console.error('[CompReminder] Failed to send the reminder, will retry on the next check:', err.message);
-    unmarkReminded(ending);
     return;
   }
   console.log(
-    `[CompReminder] Sent reminder for ${results.length} competition(s) to admin log channel ${config.adminLogChannelId}` +
+    `[CompReminder] Sent reminder for ${toSend.length} competition(s) to admin log channel ${config.adminLogChannelId}` +
     `${config.templarRoleId ? ', pinging Templar' : ' (TEMPLAR_ROLE_ID not set, no ping)'}.`
   );
-}
-
-function markReminded(competitions, now) {
-  for (const c of competitions) remindedIds.add(c.id);
-  saveReminded(saved => {
-    for (const c of competitions) saved[c.id] = new Date(c.endsAt).toISOString();
-    for (const [id, endsAt] of Object.entries(saved)) {
-      if (now - new Date(endsAt).getTime() > REMINDED_RETENTION_MS) delete saved[id];
-    }
-  });
-  console.log(`[CompReminder] Marked as reminded: ${competitions.map(c => `#${c.id}`).join(', ')}`);
-}
-
-function unmarkReminded(competitions) {
-  for (const c of competitions) remindedIds.delete(c.id);
-  saveReminded(saved => {
-    for (const c of competitions) delete saved[c.id];
-  });
-  console.log(`[CompReminder] Unmarked so they're retried: ${competitions.map(c => `#${c.id}`).join(', ')}`);
-}
-
-// A failed save is logged rather than thrown — remindedIds still prevents a repeat for as long
-// as the bot keeps running; only a restart before the file saves could repeat a reminder.
-function saveReminded(mutate) {
-  try {
-    const saved = readJson(REMINDERS_FILE);
-    mutate(saved);
-    writeJson(REMINDERS_FILE, saved);
-  } catch (err) {
-    console.error(`[CompReminder] Could not save ${REMINDERS_FILE} (a restart may repeat a reminder):`, err.message);
-  }
 }
 
 function describeCompetition(competition) {
