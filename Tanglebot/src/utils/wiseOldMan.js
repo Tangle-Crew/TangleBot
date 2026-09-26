@@ -42,21 +42,23 @@ async function createGroupCompetition({ title, metric, startsAt, endsAt, groupId
   });
 }
 
-// Every competition the group has ever hosted (ongoing, upcoming and finished), paged through
-// since WOM caps each request at 50.
+// Every competition the group has ever hosted (ongoing, upcoming and finished). WOM currently
+// ignores limit/offset on this endpoint and returns the whole list every time, so paging stops
+// as soon as a page brings no new competitions — otherwise each page repeats the same list.
 const GROUP_COMPETITIONS_PAGE_SIZE = 50;
 const GROUP_COMPETITIONS_MAX_PAGES = 20;
 async function getAllGroupCompetitions(groupId) {
-  const all = [];
+  const byId = new Map();
   for (let page = 0; page < GROUP_COMPETITIONS_MAX_PAGES; page++) {
     const batch = await womClient().groups.getGroupCompetitions(groupId, {
       limit: GROUP_COMPETITIONS_PAGE_SIZE,
       offset: page * GROUP_COMPETITIONS_PAGE_SIZE,
     });
-    all.push(...batch);
-    if (batch.length < GROUP_COMPETITIONS_PAGE_SIZE) break;
+    const sizeBefore = byId.size;
+    for (const competition of batch) byId.set(competition.id, competition);
+    if (batch.length < GROUP_COMPETITIONS_PAGE_SIZE || byId.size === sizeBefore) break;
   }
-  return all;
+  return [...byId.values()];
 }
 
 // Queues a hiscores update for every outdated member of the group.
