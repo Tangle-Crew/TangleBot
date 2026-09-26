@@ -18,6 +18,7 @@ const { refreshLeaderboardOnStartup: refreshPetLeaderboardOnStartup } = require(
 const { refreshLeaderboardOnStartup: refreshDonationLeaderboardOnStartup } = require('../commands/donationhighscore');
 const { syncDiscordCatalog, isConfigured: isLfgBackendConfigured } = require('../utils/lfgBackend');
 const { startLfgDeliveryWorker } = require('../utils/lfgDeliveryWorker');
+const { startCompEndingReminder } = require('../utils/compEndingReminder');
 const { handleSyncedGroupButtonInteraction } = require('../utils/lfgSyncedPost');
 
 // customId-prefix routing tables for InteractionCreate, one per interaction kind. errorReply is
@@ -51,6 +52,7 @@ async function dispatchByCustomIdPrefix(interaction, routes) {
 
 function loadEvents(client) {
   let stopLfgDeliveryWorker = null;
+  let stopCompEndingReminder = null;
   const submissionConfig = loadSubmissionConfig();
   client.submissionConfig = submissionConfig;
   if (submissionConfig.enabled) {
@@ -81,6 +83,7 @@ function loadEvents(client) {
       }
     }
     stopLfgDeliveryWorker = startLfgDeliveryWorker();
+    stopCompEndingReminder = startCompEndingReminder(client);
 
     try {
       await sendHoneypotStartupMessage(client, honeypotConfig);
@@ -201,6 +204,10 @@ function loadEvents(client) {
       console.log('[LFG] Stopping delivery worker on client destroy');
       stopLfgDeliveryWorker();
       stopLfgDeliveryWorker = null;
+    }
+    if (stopCompEndingReminder) {
+      stopCompEndingReminder();
+      stopCompEndingReminder = null;
     }
   });
 }
