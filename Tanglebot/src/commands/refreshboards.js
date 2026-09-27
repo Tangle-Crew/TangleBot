@@ -22,8 +22,7 @@ module.exports = {
 
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-    // Each refresh no-ops (and logs) on its own if its env vars aren't set, so
-    // one missing/misconfigured board doesn't stop the other from refreshing.
+    // A board without its env vars set is skipped.
     await Promise.all([
       refreshPetLeaderboard(interaction.client),
       refreshDonationLeaderboard(interaction.client),

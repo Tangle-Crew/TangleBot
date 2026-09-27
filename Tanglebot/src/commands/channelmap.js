@@ -25,7 +25,7 @@ module.exports = {
         `- \`channel_id\`: \`${channel.id}\``,
         '- `channel_kind`: `submission` or `approval`',
         '',
-        'Set those values on the matching `event_discord_channels` row in the web panel. The bot now reads channel routing from Supabase at runtime.',
+        'Set those values on the matching `event_discord_channels` row in the web panel. The bot reads channel routing from Supabase.',
       ].join('\n'),
       flags: MessageFlags.Ephemeral,
     });

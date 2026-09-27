@@ -19,17 +19,15 @@ const DISCORD_GREEN = 0x1a5c2e;
 // Metric slots exposed on the command; only the first is required.
 const METRIC_OPTION_NAMES = ['metric', 'metric2', 'metric3', 'metric4'];
 
-// Discord doesn't tell bots a user's local timezone, so bare dates/hours are read as Eastern
-// Time (the clan's default) rather than UTC.
+// Bots can't see a user's timezone, so dates are read as Eastern Time.
 const DEFAULT_TIME_ZONE = 'America/New_York';
 
-// Event/competition names are "<prefix> <metric>", e.g. "BOTW T3 Gauntlet".
+// "<prefix> <metric>", e.g. "BOTW T3 Gauntlet".
 function buildCompTitle(prefix, metric) {
   return `${prefix} ${shortMetricName(metric.value)}`;
 }
 
-// Converts a wall-clock date/hour as read in `timeZone` to the UTC instant it represents,
-// accounting for that zone's offset (including DST) at the given date.
+// A wall-clock date and hour in timeZone (DST included) as a Date.
 function zonedTimeToUtc(year, month, day, hour, timeZone) {
   const utcGuess = Date.UTC(year, month - 1, day, hour, 0, 0);
   if (timeZone === 'UTC') return new Date(utcGuess);
@@ -49,20 +47,16 @@ function zonedTimeToUtc(year, month, day, hour, timeZone) {
   return new Date(utcGuess - (asIfLocal - utcGuess));
 }
 
-// A bare date in YYYY-MM-DD, YYYY/MM/DD, or MM/DD/YYYY — optionally followed by an hour, either
-// 24-hour (0-23) or 12-hour with am/pm — has no timezone of its own and is read as a wall-clock
-// time in DEFAULT_TIME_ZONE. Anything else (full ISO 8601 with an offset/Z, etc.) already carries
-// its own timezone and is passed straight to Date.
-// A trailing ":mm" on the hour is tolerated and discarded, rather than falling through to Date's
-// own parsing of a bare "date hour:mm" string — which it reads as the bot host's local time.
+// YYYY-MM-DD, YYYY/MM/DD or MM/DD/YYYY, optionally with an hour (24-hour, or with am/pm), read in
+// DEFAULT_TIME_ZONE. A ":mm" after the hour is accepted and ignored. Anything else, such as ISO 8601
+// with an offset, goes to Date.
 const DATE_PATTERNS = [
   { re: /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{1,2})(?::\d{2})?\s*([AaPp][Mm])?)?$/, order: 'ymd' },
   { re: /^(\d{4})\/(\d{1,2})\/(\d{1,2})(?:[ T](\d{1,2})(?::\d{2})?\s*([AaPp][Mm])?)?$/, order: 'ymd' },
   { re: /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T](\d{1,2})(?::\d{2})?\s*([AaPp][Mm])?)?$/, order: 'mdy' },
 ];
 
-// 12-hour "12am"/"12pm" follow clock convention (12am = hour 0, 12pm = hour 12); without am/pm,
-// the hour is read as-is (24-hour).
+// 12am is hour 0 and 12pm is hour 12; without am/pm the hour is 24-hour.
 function normalizeHour(hourStr, meridiem) {
   let hour = Number(hourStr ?? 0);
   if (meridiem) {
@@ -119,8 +113,7 @@ function buildCommandData() {
       .setMaxValue(365)
   );
 
-  // The group ID/verification code options are only offered when the bot config doesn't
-  // already provide them, so they don't clutter the command (or tempt anyone to paste the code).
+  // Only offered when not set in the bot config.
   if (!process.env.WOM_GROUP_ID) {
     data.addIntegerOption(o =>
       o.setName('group_id')
@@ -234,8 +227,7 @@ module.exports = {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const metricsLabel = metrics.map(m => m.name).join(', ');
-    // The Discord event covers the whole run, so it's named after the prefix + first metric;
-    // each WOM competition instead gets its own metric name appended.
+    // The event is named after the first metric; each competition after its own.
     const eventTitle = buildCompTitle(prefix, metrics[0]);
 
     const confirmEmbed = new EmbedBuilder()
@@ -278,8 +270,7 @@ module.exports = {
 
     console.log(`[weeklycomp] ${interaction.user.tag} creating "${prefix}" (${metrics.map(m => m.value).join(', ')}) ${startsAt.toISOString()} -> ${endsAt.toISOString()} in WOM group ${groupId}`);
 
-    // Each metric gets its own WOM competition, named "<prefix> <metric>" so they read
-    // consistently alongside the Discord event (named after the prefix + first metric).
+    // One WOM competition per metric.
     const created = [];
     for (const metric of metrics) {
       const title = buildCompTitle(prefix, metric);

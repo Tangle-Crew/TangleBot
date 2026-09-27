@@ -56,7 +56,7 @@ function hasHoneypotAdminAccess(member, env = process.env) {
 
 async function clearHoneypotChannel(channel) {
   let totalDeleted = 0;
-  // Bounded loop: a honeypot channel should be near-empty, this just guards against runaway scans.
+  // Bounded; a trap channel should be nearly empty.
   for (let i = 0; i < 20; i += 1) {
     const messages = await channel.messages.fetch({ limit: TRAP_MESSAGE_FETCH_LIMIT });
     if (messages.size === 0) break;
@@ -65,7 +65,7 @@ async function clearHoneypotChannel(channel) {
     totalDeleted += deleted.size;
 
     if (deleted.size < messages.size) {
-      // Remaining messages are older than 14 days and weren't bulk-deletable; remove individually.
+      // Messages over 14 days old can't be bulk-deleted.
       const remaining = messages.filter(msg => !deleted.has(msg.id));
       for (const msg of remaining.values()) {
         try {
@@ -125,8 +125,7 @@ function findImageAttachments(message) {
 async function downloadImageAttachment(attachment, index) {
   try {
     const response = await axios.get(attachment.url, { responseType: 'arraybuffer', timeout: 10000 });
-    // Deterministic, ASCII-safe name - avoids attachment://-reference mismatches from special
-    // characters or duplicate original filenames (e.g. multiple screenshots both named "image.png").
+    // Unique, ASCII-safe names, since several images can share a filename.
     const ext = IMAGE_EXTENSIONS_BY_CONTENT_TYPE[attachment.contentType] || 'png';
     const name = `honeypot-image-${index}.${ext}`;
     return new AttachmentBuilder(Buffer.from(response.data), { name });
@@ -171,9 +170,7 @@ function buildAdminLogEmbeds({ message, testMode }) {
     });
   }
 
-  // Images are sent as plain attachments (see handleHoneypotMessage), not referenced from the
-  // embed - Discord natively grids multiple image attachments together, and this avoids the
-  // embed `attachment://` + shared-url gallery trick misbehaving on the post-button-click edit.
+  // Images go as plain attachments (see handleHoneypotMessage), not in the embed.
   return [embed];
 }
 
@@ -214,7 +211,7 @@ async function handleHoneypotMessage(message, config, client) {
     }
   }
 
-  // Download before deleting the trap message, since its CDN links aren't guaranteed to work afterward.
+  // Download first; the CDN links may stop working once the message is deleted.
   const imageAttachments = findImageAttachments(message);
   const imageFiles = imageAttachments.length ? await downloadImageAttachments(imageAttachments) : [];
 
@@ -245,11 +242,11 @@ const REQUIRED_DELETE_PERMISSIONS = [
   PermissionFlagsBits.ManageMessages,
 ];
 
-// Discord error codes for channels the bot can't act in (private channels, threads it's not in, etc.) - expected, not a failure.
+// Missing Access / Missing Permissions: expected for channels the bot can't use.
 const ACCESS_DENIED_CODES = new Set([50001, 50013]);
 
 function canScanChannel(channel, botMember) {
-  if (!botMember) return true; // no cached bot member to check against; let the API call decide
+  if (!botMember) return true; // can't check; let the API decide
   const perms = channel.permissionsFor(botMember);
   const allowed = !!perms && perms.has(REQUIRED_DELETE_PERMISSIONS);
   if (!allowed) {

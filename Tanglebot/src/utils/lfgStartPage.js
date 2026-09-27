@@ -3,26 +3,23 @@ const { readJson, writeJson, truncate } = require('./db');
 const { CATEGORIES, emojiLabel, isAlreadyGoneError, notifyAdminLog } = require('./roleMenu');
 const { DEFAULT_EMBED_COLOR } = require('./embedColor');
 
-// Same forum /lfg-post creates group threads in — the start page lives there too.
+// The /lfg-post forum; the start page is pinned there.
 const FORUM_CHANNEL_ID = process.env.LFG_FORUM_CHANNEL_ID;
 
 const START_POST_DATA_FILE = 'lfg-start-post.json';
 
-// Doubles as the fallback match target for findExistingStartThread — keep stable.
+// Also used to find the post again, so keep it stable.
 const START_POST_TITLE = '📌 Start Here — How to Use LFG';
 
-// Discord embed caps (25 fields, 1024 chars/value) — keeps a huge CATEGORIES edit from erroring.
+// Discord embed limits.
 const MAX_EMBED_FIELDS = 25;
 const MAX_FIELD_VALUE_LENGTH = 1024;
 
-// Shared accent color for all three embeds, so they read as one post despite being built separately.
 const EMBED_COLOR = DEFAULT_EMBED_COLOR;
 
-// Thin rule separating a category's name from its activity list — see buildActivitiesEmbed.
 const FIELD_DIVIDER = '─'.repeat(20);
 
-// Pulled from the repo's main branch (not a pinned commit) so pushing a new gif there
-// updates the embed automatically — no redeploy or code change needed.
+// From the main branch, so pushing a new gif updates the post without a redeploy.
 const HOW_TO_GIF_URL = 'https://raw.githubusercontent.com/Tangle-Crew/TangleBot/main/assets/lfg-tour.gif';
 
 function buildInstructionsEmbed() {
@@ -43,8 +40,7 @@ function buildInstructionsEmbed() {
     .setColor(EMBED_COLOR);
 }
 
-// Covers the automatic/behind-the-scenes behavior that isn't a button someone clicks — worth
-// surfacing on its own so a group closing (or getting pinged) on its own doesn't look like a bug.
+// Explains what happens without a button click, so it doesn't look like a bug.
 function buildAutomationEmbed() {
   return new EmbedBuilder()
     .setTitle('⏱️ Automations')
@@ -62,7 +58,7 @@ function buildAutomationEmbed() {
     .setColor(EMBED_COLOR);
 }
 
-// Reads categories/activities live from CATEGORIES — a new one shows up on the next restart.
+// Built from CATEGORIES on each startup.
 function buildActivitiesEmbed() {
   const activityFields = Object.values(CATEGORIES)
     .slice(0, MAX_EMBED_FIELDS)
@@ -73,8 +69,6 @@ function buildActivitiesEmbed() {
       );
       return {
         name: emojiLabel(category.buttonEmoji, category.label),
-        // A thin rule under the category name — addFields' name/value gap alone reads too
-        // cramped once the value is a long, comma-packed activity list.
         value: `${FIELD_DIVIDER}\n${roleList}`,
       };
     });
@@ -90,8 +84,7 @@ function buildStartPageEmbeds() {
   return [buildInstructionsEmbed(), buildAutomationEmbed(), buildActivitiesEmbed()];
 }
 
-// Every active + archived thread in the forum, as one list — shared by both fallback lookups
-// below so a missing/stale stored id only costs one pair of fetches, not two.
+// Every active and archived thread in the forum.
 async function fetchAllThreads(forumChannel) {
   console.log('[LFG] Fetching active + archived forum threads to locate the start post');
   const [active, archived] = await Promise.all([
@@ -101,21 +94,17 @@ async function fetchAllThreads(forumChannel) {
   return [...(active?.threads.values() ?? []), ...(archived?.threads.values() ?? [])];
 }
 
-// Fallback for a missing/stale stored id — finds a bot-owned thread with our title.
-// Ownership check stops it from adopting an unrelated thread that shares the title.
+// A bot-owned thread with the start page title.
 function findExistingStartThread(threads, botUserId) {
   return threads.find((t) => t.ownerId === botUserId && t.name === START_POST_TITLE) ?? null;
 }
 
-// Last resort: forums only allow a small, fixed number of pinned posts, so creating a fresh
-// thread and pinning it fails once that cap is already taken by something else. Rather than
-// erroring out, adopt whatever's already pinned — only its starter message gets replaced, so any
-// replies already in that thread are left alone.
+// Last resort: a forum allows only one pinned post, so reuse the one already pinned.
 function findAnyPinnedThread(threads) {
   return threads.find((t) => t.flags?.has(ChannelFlags.Pinned)) ?? null;
 }
 
-// Creates a fresh start post and remembers its id so future restarts don't duplicate it.
+// Creates and pins the start post and stores its id.
 async function createStartPost(forumChannel, embeds) {
   const thread = await forumChannel.threads.create({
     name: START_POST_TITLE,
@@ -126,8 +115,7 @@ async function createStartPost(forumChannel, embeds) {
   console.log(`[LFG] Created start page post: thread ${thread.id}`);
 }
 
-// Called on ClientReady — reuses an existing thread if found, otherwise creates one.
-// Never throws, so eventHandler.js calls it unwrapped, like sendHoneypotStartupMessage.
+// Called on startup: updates the existing start post, or creates one.
 async function ensureLfgStartPost(client) {
   if (!FORUM_CHANNEL_ID) return;
 
@@ -171,14 +159,12 @@ async function ensureLfgStartPost(client) {
       return;
     } catch (err) {
       if (!isAlreadyGoneError(err)) {
-        // Not "already gone" — the post still exists but is now stale (old embeds) until the next
-        // restart retries this. Surface it rather than failing silently, since there's no other
-        // retry path in between.
+        // The post exists but is stale until the next restart.
         console.error('[LFG] Could not update existing start page post:', err.message);
         await notifyAdminLog(client, '⚠️ LFG Start Page Update Failed', `The LFG start page post exists but couldn't be updated: ${err.message}`);
         return;
       }
-      // Thread or starter message was deleted out-of-band — recreate instead of leaving no post.
+      // The thread or its starter message was deleted; recreate it below.
     }
   }
 

@@ -6,7 +6,7 @@ const {
 const { CATEGORIES, emojiMarkup } = require('./roleMenu');
 const { truncate } = require('./db');
 
-// Top-level accordion categories for the /lfg-post dropdown, derived from roleMenu.js's CATEGORIES.
+// /lfg-post categories, from roleMenu.js CATEGORIES.
 const CATEGORY_OPTIONS = Object.entries(CATEGORIES).map(([key, c]) => ({
   key,
   label: c.label,
@@ -28,7 +28,7 @@ function findSizeOption(activityOption, value) {
   return activityOption.sizeOptions.find((o) => o.value === value);
 }
 
-// Short descriptor shown next to an activity in the picker, e.g. "2-5" or "2-5, Mass".
+// Size summary shown in the activity picker, e.g. "2-5" or "2-5, Mass".
 function describeSizeOptions(activityOption) {
   const numeric = activityOption.sizeOptions.filter((o) => /^\d+$/.test(o.value)).map((o) => o.value);
   const special = activityOption.sizeOptions.filter((o) => !/^\d+$/.test(o.value)).map((o) => o.label);
@@ -36,14 +36,12 @@ function describeSizeOptions(activityOption) {
   return [rangeText, ...special].filter(Boolean).join(', ');
 }
 
-// A non-numeric size value (currently just "mass") means uncapped.
+// "mass" means uncapped.
 function parseSizeCap(value) {
   return /^\d+$/.test(value) ? parseInt(value, 10) : Infinity;
 }
 
-// An offset from now (in minutes), not an absolute clock time — sidesteps timezone ambiguity, since
-// "1 Hour from now" means the same thing to everyone. Resolved fresh at post-creation time
-// (resolveTimeEpoch); Discord's <t:...> format then auto-localizes it per viewer.
+// Minutes from now, so there's no timezone to get wrong. Resolved when the post is created.
 const TIME_OFFSET_OPTIONS = [
   { value: '0', label: 'Now' },
   { value: '15', label: '15 Min' },
@@ -60,9 +58,8 @@ function findTimeOption(value) {
   return TIME_OFFSET_OPTIONS.find((o) => o.value === value);
 }
 
-// Thread titles cannot use Discord's live relative timestamp formatter, so choose the closest
-// human label ourselves. Switching at the midpoint between neighboring labels keeps the title in
-// line with the main post's own <t:...:R> wording instead of leaving "2 Hours" up until the exact 60m mark.
+// Thread titles can't use Discord's live timestamps, so the countdown uses the nearest of these
+// labels, switching halfway between neighbors.
 const COUNTDOWN_BUCKETS = [
   { minutes: 5, label: '5 Min' },
   ...TIME_OFFSET_OPTIONS.filter((o) => parseInt(o.value, 10) >= 15).map((o) => ({ minutes: parseInt(o.value, 10), label: o.label })),
@@ -85,9 +82,7 @@ function resolveCountdownBucket(minutesRemaining) {
   return bestBucket;
 }
 
-// A live "Start:" label for the post title. The bucket is chosen by nearest label rather than the
-// next-highest label so "in 2 Hours" flips to "in 1 Hour" around the same point Discord's
-// relative timestamp does.
+// "in <label>" for the thread title, or "Started".
 function describeStartCountdown(timeEpoch) {
   const minutesRemaining = Math.ceil((timeEpoch * 1000 - Date.now()) / 60000);
   if (minutesRemaining <= 0) return 'Started';
@@ -95,8 +90,7 @@ function describeStartCountdown(timeEpoch) {
   return `in ${bucket.label}`;
 }
 
-// Delay (ms) until the nearest bucket would change. Midpoint boundaries keep title changes aligned
-// with the chosen labels without polling continuously. Returns null once the start time has passed.
+// Milliseconds until the countdown label changes, or null once the start time has passed.
 function computeCountdownRefreshDelay(timeEpoch) {
   const minutesRemaining = Math.ceil((timeEpoch * 1000 - Date.now()) / 60000);
   if (minutesRemaining <= 0) return null;
@@ -119,29 +113,21 @@ function computeCountdownRefreshDelay(timeEpoch) {
   return Math.max(timeEpoch * 1000 - nextBoundaryMinutes * 60000 - Date.now(), 1000);
 }
 
-// Resolved at creation time (not when the dropdown was rendered), so a slow-to-decide creator
-// still gets an accurate "X from now".
+// Resolved at creation time, not when the dropdown was shown.
 function resolveTimeEpoch(offsetMinutesValue) {
   return Math.floor(Date.now() / 1000) + parseInt(offsetMinutesValue, 10) * 60;
 }
 
-// True only when every spot is actually occupied — not the same as status === 'closed', which also
-// covers a spot held for the queue (see advanceQueueOrReopen in lfgPost.js). During that reservation
-// window there IS an open spot, just not a public one, so it shouldn't read as full.
+// Every spot taken. Not the same as status 'closed', which also covers a spot held for the queue.
 function isGroupFull(group) {
   return group.sizeCap !== Infinity && group.members.size >= group.sizeCap;
 }
 
 // ---- Group post building blocks, used by lfgPost.js ----
-// status: 'open' | 'closed' (auto-closed once full) | 'disbanded'. Anyone can Join/Leave; Disband
-// and Start Now are limited to group members or Coordinator/Owner staff (see canManageGroup).
+// status: 'open' | 'closed' (full, or a spot held for the queue) | 'disbanded'.
 
-// customId prefix for these buttons — handleLfgPostGroupButtonInteraction in lfgPost.js parses it back out.
 const GROUP_BUTTON_PREFIX = 'lfgpostgroup';
 
-// Lets the group start before its scheduled time (see handleStartNowButton in lfgPost.js) —
-// shown regardless of open/closed status, since a full group waiting on its start time still benefits
-// from starting early just as much as one still recruiting.
 function buildStartNowButton(groupId) {
   return new ButtonBuilder()
     .setCustomId(`${GROUP_BUTTON_PREFIX}:startnow:${groupId}`)
@@ -149,9 +135,7 @@ function buildStartNowButton(groupId) {
     .setStyle(ButtonStyle.Primary);
 }
 
-// Join always uses this same button regardless of status — handleJoinButton in lfgPost.js decides
-// whether that means joining directly or joining the queue (see group.queue), so the label
-// never has to change out from under people.
+// The same Join button whether open or full; a full group queues the clicker.
 function buildJoinButton(groupId) {
   return new ButtonBuilder()
     .setCustomId(`${GROUP_BUTTON_PREFIX}:join:${groupId}`)
@@ -159,9 +143,7 @@ function buildJoinButton(groupId) {
     .setStyle(ButtonStyle.Success);
 }
 
-// Disband is available regardless of open/closed status — a full (or queue-reserved) group is still
-// a group someone might need to shut down, not just a recruiting one. The row is otherwise identical
-// either way, so unlike buildGroupText this doesn't need the group's status at all.
+// Same row regardless of status.
 function buildGroupRow(groupId) {
   const join = buildJoinButton(groupId);
   const startNow = buildStartNowButton(groupId);
@@ -177,11 +159,7 @@ function buildGroupRow(groupId) {
   return new ActionRowBuilder().addComponents(join, leave, startNow, disband);
 }
 
-// Shown on the group's activity notice when a spot opens up and is being held for
-// whoever's next in line (see advanceQueueOrReopen in lfgPost.js) — Accept joins them immediately,
-// Decline removes them from the queue entirely. Missing the response window isn't a Decline though —
-// see handleQueueOfferTimeout in lfgPost.js, which cycles a late person to the back of the queue
-// instead of dropping them, so there's no separate "rejoin" button to offer.
+// Offer to the front of the queue. Decline, or not answering in time, removes them from the queue.
 function buildQueueOfferRow(groupId) {
   const accept = new ButtonBuilder()
     .setCustomId(`${GROUP_BUTTON_PREFIX}:queueaccept:${groupId}`)
@@ -194,8 +172,7 @@ function buildQueueOfferRow(groupId) {
   return new ActionRowBuilder().addComponents(accept, decline);
 }
 
-// Shown on the "disbanding in 1 minute" notice (see handleDisbandButton in lfgPost.js) — lets
-// anyone with standing (a member, someone queued, or staff) call it off before the grace period ends.
+// Shown during the disband grace period.
 function buildCancelDisbandRow(groupId) {
   const cancel = new ButtonBuilder()
     .setCustomId(`${GROUP_BUTTON_PREFIX}:canceldisband:${groupId}`)
@@ -204,9 +181,7 @@ function buildCancelDisbandRow(groupId) {
   return new ActionRowBuilder().addComponents(cancel);
 }
 
-// Shown on the periodic "is this group still active?" check (see runKeepAliveCheck in lfgPost.js) —
-// confirms the group is still in use and resets the 2-hour check timer, instead of letting it
-// silently auto-disband after the reply window.
+// Shown on the "still active?" check.
 function buildKeepAliveRow(groupId) {
   const stillHere = new ButtonBuilder()
     .setCustomId(`${GROUP_BUTTON_PREFIX}:keepalive:${groupId}`)
@@ -215,15 +190,12 @@ function buildKeepAliveRow(groupId) {
   return new ActionRowBuilder().addComponents(stillHere);
 }
 
-// "Mass" for an uncapped group, otherwise the numeric cap.
 function formatCapacity(group) {
   return group.sizeCap === Infinity ? 'Mass' : String(group.sizeCap);
 }
 
-// Caps a rendered section to a character budget, dropping whole lines (never mid-mention) and
-// summarizing the rest — keeps a "Mass" (uncapped) group's roster from pushing the whole post
-// past Discord's 2000-char message cap, even with the roster, queue, and description all maxed
-// out at once.
+// Keeps whole lines up to maxChars and summarizes the rest ("…and N more"), so a Mass group's
+// roster can't push the post past Discord's 2000-char cap.
 const MAX_ROSTER_SECTION_CHARS = 550;
 const MAX_DESCRIPTION_CHARS = 150;
 function capMentionLines(lines, maxChars = MAX_ROSTER_SECTION_CHARS) {
@@ -236,7 +208,7 @@ function capMentionLines(lines, maxChars = MAX_ROSTER_SECTION_CHARS) {
   }
   if (kept.length === lines.length) return kept.join('\n');
 
-  // The summary line itself counts against the budget too — drop kept lines until it fits.
+  // The summary line counts against the budget too.
   let summary = `_…and ${lines.length - kept.length} more_`;
   while (kept.length > 0 && total + summary.length + 1 > maxChars) {
     total -= kept[kept.length - 1].length + 1;
@@ -247,14 +219,12 @@ function capMentionLines(lines, maxChars = MAX_ROSTER_SECTION_CHARS) {
   return kept.join('\n');
 }
 
-// The entire main post body as plain text — role ping first (so it actually notifies), then the
-// group's details and member list. Edited on every membership change (see updateMainPost /
-// updateGroupMessage in lfgPost.js).
+// The main post body: role ping first so it notifies, then details, members and queue.
 function buildGroupText(group) {
   const capDisplay = formatCapacity(group);
   const memberLines = capMentionLines([...group.members].map((id) => `<@${id}>`));
 
-  // group.emoji is validated before the group is created (see lfgPost.js), so it's always set here.
+  // group.emoji is validated before the group is created.
   const pingLine = [`<@&${group.roleId}>`, emojiMarkup(group.emoji)].filter(Boolean).join(' ');
   const headline = isGroupFull(group) ? '🔒 **Looking For Group — Full**' : '**Looking For Group**';
 
@@ -268,8 +238,7 @@ function buildGroupText(group) {
   if (group.description) lines.push('**Description:**', truncate(group.description, MAX_DESCRIPTION_CHARS));
   lines.push('', `**Members (${group.members.size}/${capDisplay}):**`, memberLines || '_none yet_');
 
-  // Numbered in join order (group.queue is always FIFO — see advanceQueueOrReopen in lfgPost.js),
-  // so position in this list is exactly how many people are ahead of you.
+  // Numbered in queue order.
   if (group.queue?.length) {
     const queueLines = capMentionLines(
       group.queue.map((id, i) => `${i + 1}. <@${id}>${group.pendingOfferUserId === id ? ' 🎟️ _(offer pending)_' : ''}`)
@@ -278,8 +247,7 @@ function buildGroupText(group) {
   }
 
   lines.push('', `_Started by ${group.creatorTag}_`);
-  // Per-section caps above keep this well under Discord's 2000-char message cap in practice;
-  // this is a last-resort backstop against edge cases they don't account for.
+  // Backstop; the section caps above normally keep this well under 2000.
   return truncate(lines.join('\n'), 1900);
 }
 
@@ -288,7 +256,6 @@ function makeGroupId() {
 }
 
 module.exports = {
-  // Shared building blocks used by lfgPost.js.
   CATEGORY_OPTIONS,
   findCategoryOption,
   getActivityOptions,

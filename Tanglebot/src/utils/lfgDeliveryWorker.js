@@ -22,8 +22,7 @@ function startLfgDeliveryWorker() {
 
   const config = lfgWorkerConfig();
   let inFlight = false;
-  // Consecutive-failure streak, so a sustained outage logs once instead of once per poll (every
-  // ~15s while the endpoint is down) — only the 1st, 10th, 100th, ... failure gets a log line.
+  // During an outage, only the 1st failure and every 10th after it are logged.
   let consecutiveFailures = 0;
 
   const tick = async () => {

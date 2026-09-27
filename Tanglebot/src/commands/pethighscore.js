@@ -9,14 +9,10 @@ const TEMPLAR_ROLE_ID = process.env.TEMPLAR_ROLE_ID;
 const OWNER_ROLE_ID = process.env.OWNER_ROLE_ID;
 const PET_MASTER_THRESHOLD = parseInt(process.env.PET_MASTER_THRESHOLD ?? '10', 10);
 
-// Lock key for withFileLock — not a real data file, just a namespace serializing add/remove
-// against the pet highscores sheet, so two concurrent edits for the same member can't both read
-// the same "before" pet list and clobber each other's write (or append duplicate rows for a new entry).
+// withFileLock key (not a file) serializing edits to the pet sheet.
 const PET_LOCK_KEY = 'pethighscores-sheet';
 
-// Fixed tab names matching Tanglebot/example/pethighscores_template.xlsx —
-// the setup docs have users copy that file as their sheet, so these aren't
-// configurable.
+// Tab names from Tanglebot/example/pethighscores_template.xlsx.
 const SHEET_TAB = 'Highscores';
 const DATA_RANGE = `${SHEET_TAB}!A2:C`;
 const APPEND_RANGE = `${SHEET_TAB}!A:C`;
@@ -32,7 +28,7 @@ let PETS = [];
 const PET_BY_KEY = new Map();
 const PET_ORDER = new Map();
 
-// New pets are appended to the end of PETS, so indexes need refreshing.
+// Rebuild after PETS changes.
 function rebuildPetIndexes() {
   PET_BY_KEY.clear();
   PET_ORDER.clear();
@@ -42,8 +38,7 @@ function rebuildPetIndexes() {
   });
 }
 
-// Cached so autocomplete keystrokes and command runs reuse the same PETS
-// array instead of re-fetching; a restart re-reads from the sheet.
+// The pet catalog, loaded once and shared by autocomplete and commands.
 let petsLoadPromise = null;
 function ensurePetsLoaded() {
   if (!petsLoadPromise) {
@@ -91,13 +86,13 @@ function findPet(input) {
   return PETS.find(p => p.name.toLowerCase() === lower) || null;
 }
 
-// Placeholder emoji if the pet's EmojiID isn't set yet on the Pets tab.
+// ❔ if the pet has no EmojiID yet.
 function petEmoji(pet) {
   if (!pet || !pet.emojiId) return '❔';
   return `<:${pet.key}:${pet.emojiId}>`;
 }
 
-// Keeps each member's pets ordered per the Pets tab, not logging order.
+// Orders pet keys as on the Pets tab.
 function sortPetKeys(keys) {
   return [...keys].sort((a, b) => (PET_ORDER.get(a) ?? 999) - (PET_ORDER.get(b) ?? 999));
 }
@@ -108,7 +103,7 @@ const HEADER_TITLE = `${ROCK_EMOJI} How to Get on the Leaderboard ${ROCK_EMOJI}`
 const EMBED_COLOR = DEFAULT_EMBED_COLOR;
 const RANK_MEDALS = ['🥇', '🥈', '🥉'];
 
-// Static instructions embed, prepended to the leaderboard on every post.
+// Instructions embed shown above the leaderboard.
 function buildHeaderEmbed() {
   const templarMention = TEMPLAR_ROLE_ID ? `<@&${TEMPLAR_ROLE_ID}>` : '@Templar';
   const masterRoleId = process.env.PET_MASTER_ROLE_ID;
@@ -131,7 +126,7 @@ function buildHeaderEmbed() {
     .setColor(EMBED_COLOR);
 }
 
-// The "# " markdown heading renders emoji noticeably larger than plain text.
+// Each member's emoji row is a "# " heading so the emoji render larger.
 function buildEmbeds(entries) {
   const header = buildHeaderEmbed();
 
@@ -145,9 +140,7 @@ function buildEmbeds(entries) {
     ];
   }
 
-  // entries is already sorted highest-first. Rank is based on distinct pet
-  // counts (dense ranking) so tied members share the same medal instead of
-  // one getting bumped to a lower spot by array position.
+  // entries is sorted highest first. Dense ranking, so ties share a medal.
   let rank = 0;
   let prevCount = null;
   const blocks = entries.map((entry) => {
@@ -185,8 +178,7 @@ function buildEmbeds(entries) {
   ];
 }
 
-// Identifies this leaderboard's own post during history-scan recovery — message 0 leads with the
-// header embed instead of the leaderboard title, so both are matched.
+// Recognizes this leaderboard's messages by the header or leaderboard title.
 function isOwnLeaderboardMessage(embed) {
   const title = embed?.title;
   return title === HEADER_TITLE || title?.startsWith(LEADERBOARD_TITLE);
@@ -218,7 +210,7 @@ async function fetchEntries() {
   const rows = await getRows(process.env.PET_HIGHSCORES_SHEET_ID, DATA_RANGE);
   return rows
     .map((r, i) => ({
-      rowNumber: i + 2, // +2: header row + 1-indexed; kept pre-filter so blank rows don't shift it
+      rowNumber: i + 2, // header row + 1-indexed; set before filtering out blank rows
       discordId: r[0] ? String(r[0]).trim() : '',
       displayName: r[1] ? String(r[1]).trim() : '',
       petKeys: r[2] ? String(r[2]).split(',').map(k => k.trim()).filter(Boolean) : [],
@@ -227,8 +219,7 @@ async function fetchEntries() {
     .map(e => ({ ...e, count: e.petKeys.length }));
 }
 
-// Cached like PETS: fetched once and reused by autocomplete and command runs, kept in
-// sync in place after writes; a restart re-reads from the sheet.
+// Member rows, loaded once and updated in place after writes.
 let entriesLoadPromise = null;
 function ensureEntriesLoaded() {
   if (!entriesLoadPromise) {
@@ -247,10 +238,7 @@ function sortedForDisplay(entries) {
     .sort((a, b) => b.count - a.count || a.displayName.localeCompare(b.displayName));
 }
 
-// Reposts the leaderboard once on bot startup, so manual edits to the
-// Highscores sheet (bulk imports, fixes, etc.) show up after a restart
-// without needing a throwaway /pethighscore add or remove. Checks the same
-// vars as requiredEnv, since this runs outside commandHandler.
+// Reposts the leaderboard. Runs on startup and from /refreshboards.
 async function refreshLeaderboardOnStartup(client) {
   const channelId = process.env.PET_HIGHSCORES_CHANNEL_ID;
   if (!process.env.PET_HIGHSCORES_SHEET_ID || !channelId || !process.env.GOOGLE_SERVICE_ACCOUNT_JSON) return;
@@ -258,8 +246,7 @@ async function refreshLeaderboardOnStartup(client) {
   try {
     await ensurePetsLoaded();
     const guild = await client.guilds.fetch(process.env.CLAN_ID);
-    // Locked like add/remove — postLeaderboard's display-name refresh writes rows too, and would
-    // otherwise race an add/remove happening at the same time (e.g. right after a bot restart).
+    // Locked because the display-name refresh writes rows too.
     await withFileLock(PET_LOCK_KEY, async () => {
       const entries = await ensureEntriesLoaded();
       await postLeaderboard(guild, channelId, sortedForDisplay(entries), client.user.id);
@@ -534,16 +521,11 @@ module.exports = {
           const appendResult = await appendRow(sheetId, APPEND_RANGE, rowValues);
           const rowNumber = parseAppendedRowNumber(appendResult?.updates?.updatedRange);
           entries.push({ discordId: targetUser.id, displayName, petKeys: newKeys, count: newKeys.length, rowNumber });
-          // rowNumber feeds this entry's next update range — entries is cached across commands
-          // (see ensureEntriesLoaded), so a failure to parse it can't be left cached as null. Drop
-          // the whole cache instead, forcing a fresh reload next time that recovers the real value
-          // straight from the sheet.
+          // Without a row number this entry can't be updated later; reload from the sheet next time.
           if (rowNumber == null) entriesLoadPromise = null;
         }
 
-        // Posted inside the lock so overlapping commands' leaderboard updates land in sheet-write
-        // order. A posting failure is caught here rather than aborting the command — the sheet
-        // write already succeeded, so Pet Master role sync and the reply still need to happen.
+        // Inside the lock so posts land in write order. A failed post doesn't abort the command.
         try {
           await postLeaderboard(guild, channelId, sortedForDisplay(entries), interaction.client.user.id);
         } catch (err) {

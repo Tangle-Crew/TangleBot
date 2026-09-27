@@ -14,8 +14,7 @@ function womClient() {
   return client;
 }
 
-// Not every metric has a background image on WOM's site (e.g. Mimic); fall back to their generic
-// icon rather than hand Discord a 404 page as image data.
+// Not every metric has a background image (e.g. Mimic); use WOM's generic icon then.
 async function resolveMetricImageUrl(metric) {
   const url = `${WOM_ASSETS_BASE_URL}/backgrounds/${metric}.png`;
   try {
@@ -42,9 +41,8 @@ async function createGroupCompetition({ title, metric, startsAt, endsAt, groupId
   });
 }
 
-// Every competition the group has hosted (ongoing, upcoming and finished). WOM currently ignores
-// limit/offset here and returns the full list in one response (more than a page), so that ends
-// paging; the other checks cover WOM starting to honour them.
+// Every competition the group has hosted. WOM currently ignores limit/offset and returns them all
+// at once, which ends the loop; paging covers it if WOM starts honouring them.
 const GROUP_COMPETITIONS_PAGE_SIZE = 50;
 const GROUP_COMPETITIONS_MAX_PAGES = 20;
 async function getAllGroupCompetitions(groupId) {

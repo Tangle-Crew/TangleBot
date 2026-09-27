@@ -1,8 +1,6 @@
 const { readJson, writeJson, withFileLock } = require('./db');
 
-// Discord caps a message at 10 embeds and ~6000 chars combined (separate from each embed's own
-// ~4096 description cap, enforced by the caller's buildEmbeds). Packing must respect both or a
-// big leaderboard gets rejected outright.
+// Discord's per-message limits: 10 embeds and 6000 characters (kept under, to be safe).
 const MAX_EMBEDS_PER_MESSAGE = 10;
 const MAX_MESSAGE_TOTAL_CHARS = 5800;
 
@@ -10,9 +8,8 @@ function mentionOrName(entry) {
   return `**${entry.displayName}**`;
 }
 
-// Refreshes each entry's display name from the guild so nickname changes show up without a
-// throwaway add/remove. Departed members keep their last stored name. onNameChange, if given, is
-// awaited per changed entry so the caller can persist it back to its sheet row.
+// Updates display names from the server; members who left keep their stored name. onNameChange
+// is awaited for each changed entry so the caller can save it to the sheet.
 async function refreshDisplayNames(guild, entries, onNameChange) {
   console.log(`Refreshing display names for ${entries.length} leaderboard entrie(s)`);
   const fetchedMembers = await guild.members.fetch().catch(() => null);
@@ -61,10 +58,8 @@ function packEmbedsIntoMessages(embeds) {
   return messages;
 }
 
-// Fallback for stale stored message IDs (message deleted, data file reset by a redeploy, etc.) —
-// scans recent channel history for the bot's own previous leaderboard post(s) so we can edit in
-// place instead of spamming. isOwnLeaderboardMessage(firstEmbed) tells a leaderboard's own post
-// apart from any other message the bot has sent in the channel.
+// Finds the bot's previous leaderboard messages in recent history, for when the stored IDs are
+// missing or stale, so they're edited instead of reposted.
 async function findPreviousLeaderboardMessages(channel, botUserId, isOwnLeaderboardMessage) {
   const fetched = await channel.messages.fetch({ limit: 50 });
   return [...fetched.values()]
@@ -72,9 +67,7 @@ async function findPreviousLeaderboardMessages(channel, botUserId, isOwnLeaderbo
     .sort((a, b) => a.createdTimestamp - b.createdTimestamp);
 }
 
-// entries is the FULL, freshly re-sorted leaderboard each run — message index i always gets
-// whatever lands there this time, so a member moving between embeds just shows up correctly next
-// post; no per-member state to patch.
+// Posts the full leaderboard, editing the previous messages in place.
 //
 // options:
 //   buildEmbeds(entries) -> Embed[]              builds this leaderboard's embeds
@@ -83,7 +76,7 @@ async function findPreviousLeaderboardMessages(channel, botUserId, isOwnLeaderbo
 //   isOwnLeaderboardMessage(firstEmbed) -> bool   identifies this leaderboard's own post during recovery
 //   onDisplayNameChange(entry) -> Promise         (optional) persists a refreshed display name back to the sheet
 async function postLeaderboard(guild, channelId, entries, botUserId, options) {
-  // Serialized per dataFile so two overlapping calls can't race on the stored message-ID file.
+  // One post at a time per leaderboard.
   return withFileLock(options.dataFile, () => postLeaderboardLocked(guild, channelId, entries, botUserId, options));
 }
 
@@ -97,10 +90,7 @@ async function postLeaderboardLocked(guild, channelId, entries, botUserId, { bui
 
   let prevMessages = await Promise.all(prevIds.map((id) => channel.messages.fetch(id).catch(() => null)));
 
-  // Any stored ID coming back stale triggers a rescan — the per-index loop below would otherwise
-  // send a brand-new message for a gap it can't fill, landing after the untouched survivors and
-  // visibly reordering the leaderboard. findPreviousLeaderboardMessages recovers survivors in
-  // original send order instead, so gaps only ever land at the tail.
+  // Rescan if any stored ID is stale; filling a gap with a new message would reorder the board.
   if (!(prevIds.length > 0 && prevMessages.every((m) => m))) {
     console.log(`[${logPrefix}] Stored leaderboard message ID(s) missing or stale — scanning channel history to recover`);
     const recovered = await findPreviousLeaderboardMessages(channel, botUserId, isOwnLeaderboardMessage);
@@ -123,7 +113,7 @@ async function postLeaderboardLocked(guild, channelId, entries, botUserId, { bui
     newIds.push(sent.id);
   }
 
-  // Delete any leftover messages from a previous run that had more chunks.
+  // Delete leftover messages from a longer previous post.
   for (let i = groups.length; i < prevMessages.length; i++) {
     const leftover = prevMessages[i];
     if (!leftover) continue;

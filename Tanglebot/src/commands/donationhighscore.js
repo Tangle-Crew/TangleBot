@@ -7,16 +7,12 @@ const { notifyAdminLog } = require('../utils/roleMenu');
 
 const TEMPLAR_ROLE_ID = process.env.TEMPLAR_ROLE_ID;
 
-// Fixed tab name matching Tanglebot/example/donationhighscores_template.xlsx —
-// the setup docs have users copy that file as their sheet, so this isn't configurable.
+// Tab name from Tanglebot/example/donationhighscores_template.xlsx.
 const SHEET_TAB = 'Donations';
 const DATA_RANGE = `${SHEET_TAB}!A2:C`;
 const APPEND_RANGE = `${SHEET_TAB}!A:C`;
 
-// Donation tiers ordered highest → lowest so the first match is always the
-// highest tier a total qualifies for; tiers below it stack (a Zenyte donor
-// also keeps Onyx/Dragonstone/Diamond/Ruby). Thresholds are read from env at
-// startup; defaults match the values already set in production.
+// Highest tier first, so the first match is a total's highest tier. Tiers below it stack.
 const DONATION_TIERS = [
   {
     name:      'Zenyte',
@@ -54,14 +50,10 @@ function highestTierFor(donated) {
   return DONATION_TIERS.find(t => donated >= t.threshold) || null;
 }
 
-// Lock key for withFileLock — not a real data file, just a namespace serializing add/remove
-// against the donations sheet, so two concurrent edits for the same donor can't both read the
-// same "before" total and clobber each other's write (or append duplicate rows for a new donor).
+// withFileLock key (not a file) serializing edits to the donations sheet.
 const DONATION_LOCK_KEY = 'donations-sheet';
 
-// Handles raw numbers, "300M", "150m", "75,000,000", "10.1m", etc. Returns
-// null (rather than 0) for unparseable input so callers can tell "no amount"
-// apart from a genuine zero.
+// Parses "300M", "10.1m", "75,000,000", etc. Returns null if unreadable.
 function parseDonationAmount(raw) {
   const str = String(raw).trim().toUpperCase().replace(/,/g, '');
   const m = str.match(/^([\d.]+)([KMBT]?)$/);
@@ -84,17 +76,14 @@ const COINS_EMOJI = '<:coins:1534943128145105158>';
 const HEADER_TITLE = `${COINS_EMOJI} How to Get on the Leaderboard ${COINS_EMOJI}`;
 const EMBED_COLOR = DEFAULT_EMBED_COLOR;
 
-// The badge shown next to a donor's mention on the leaderboard: their
-// highest earned tier's emoji, or nothing if they haven't reached one.
+// The donor's highest tier emoji, or '' if none.
 function donorBadge(entry) {
   const tier = highestTierFor(entry.donated);
   return tier ? tier.emoji : '';
 }
 
-// Static instructions embed, prepended to the leaderboard on every post.
-// The title lives as a "# " heading in the description rather than the
-// embed's .setTitle() — that field is plain text only, no markdown, so it
-// can't be rendered any larger than Discord's fixed title size.
+// Instructions embed shown above the leaderboard. The title is a "# " heading in the description
+// so it renders larger than an embed title can.
 function buildHeaderEmbed() {
   const templarMention = TEMPLAR_ROLE_ID ? `<@&${TEMPLAR_ROLE_ID}>` : '@Templar';
 
@@ -111,8 +100,7 @@ function buildHeaderEmbed() {
     .setColor(EMBED_COLOR);
 }
 
-// The leaderboard's heading is the combined total rather than a static
-// "Donation High Scores" label — same "# " size, just the more useful number.
+// The leaderboard heading shows the combined total.
 function totalDonatedHeading(totalDonated) {
   return `${COINS_EMOJI} Total Donated: ${formatGP(totalDonated)} ${COINS_EMOJI}`;
 }
@@ -132,9 +120,7 @@ function buildEmbeds(entries) {
   const totalDonated = entries.reduce((sum, e) => sum + e.donated, 0);
   const heading = totalDonatedHeading(totalDonated);
 
-  // entries is already sorted highest-first — the top donor's line gets the
-  // full "# " heading size, everyone else gets the smaller "### " heading
-  // (still bigger than plain text, without every mention looking oversized).
+  // entries is sorted highest first; the top donor gets "# ", everyone else "### ".
   const blocks = entries.map((entry, i) => {
     const badge = donorBadge(entry);
     const namePart = mentionOrName(entry);
@@ -167,9 +153,7 @@ function buildEmbeds(entries) {
   ];
 }
 
-// Identifies this leaderboard's own post during history-scan recovery — both the header and
-// leaderboard embeds lead with a "# " heading wrapping the coins emoji, and the leaderboard
-// heading's exact text varies with the total, so match on that shared, stable prefix.
+// Recognizes this leaderboard's messages: both embeds start with "# " and the coins emoji.
 function isOwnLeaderboardMessage(embed) {
   return embed?.description?.startsWith(`# ${COINS_EMOJI}`);
 }
@@ -200,7 +184,7 @@ async function loadEntries() {
   const rows = await getRows(process.env.DONATIONS_SHEET_ID, DATA_RANGE);
   return rows
     .map((r, i) => ({
-      rowNumber: i + 2, // +2: header row + 1-indexed; kept pre-filter so blank rows don't shift it
+      rowNumber: i + 2, // header row + 1-indexed; set before filtering out blank rows
       discordId: r[0] ? String(r[0]).trim() : '',
       displayName: r[1] ? String(r[1]).trim() : '',
       donated: r[2] ? parseInt(String(r[2]).replace(/,/g, '').trim(), 10) || 0 : 0,
@@ -214,18 +198,14 @@ function sortedForDisplay(entries) {
     .sort((a, b) => b.donated - a.donated || a.displayName.localeCompare(b.displayName));
 }
 
-// Reposts the leaderboard once on bot startup, so manual edits to the
-// Donations sheet (bulk imports, fixes, etc.) show up after a restart
-// without needing a throwaway /donationhighscore add or remove. Checks the
-// same vars as requiredEnv, since this runs outside commandHandler.
+// Reposts the leaderboard from the sheet. Runs on startup and from /refreshboards.
 async function refreshLeaderboardOnStartup(client) {
   const channelId = process.env.DONATIONS_CHANNEL_ID;
   if (!process.env.DONATIONS_SHEET_ID || !channelId || !process.env.GOOGLE_SERVICE_ACCOUNT_JSON) return;
 
   try {
     const guild = await client.guilds.fetch(process.env.CLAN_ID);
-    // Locked like add/remove — postLeaderboard's display-name refresh writes rows too, and would
-    // otherwise race an add/remove happening at the same time (e.g. right after a bot restart).
+    // Locked because the display-name refresh writes rows too.
     await withFileLock(DONATION_LOCK_KEY, async () => {
       const entries = await loadEntries();
       await postLeaderboard(guild, channelId, sortedForDisplay(entries), client.user.id);
@@ -235,10 +215,8 @@ async function refreshLeaderboardOnStartup(client) {
   }
 }
 
-// Assigns every tier role the member's new total qualifies for and removes
-// any tier role they no longer qualify for (tiers stack, so more than one
-// role can change in a single call). Returns { tier } if their highest tier
-// changed (tier is null if they now qualify for none), or null if unchanged.
+// Grants the tier roles the new total qualifies for and removes the rest. Returns { tier } if the
+// highest tier changed (tier null if none now), otherwise null.
 async function syncDonationRoles(guild, discordId, previousDonated, newDonated) {
   const member = await guild.members.fetch(discordId).catch(() => null);
   if (!member) {
@@ -369,9 +347,7 @@ module.exports = {
           loadedEntries.push({ discordId: targetUser.id, displayName, donated: newAmount, rowNumber });
         }
 
-        // Posted inside the lock so overlapping commands' leaderboard updates land in sheet-write
-        // order. A posting failure is caught here rather than aborting the command — the sheet
-        // write already succeeded, so tier role sync and the reply still need to happen.
+        // Inside the lock so posts land in write order. A failed post doesn't abort the command.
         try {
           await postLeaderboard(guild, channelId, sortedForDisplay(loadedEntries), interaction.client.user.id);
         } catch (err) {

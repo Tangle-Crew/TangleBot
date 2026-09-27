@@ -78,8 +78,7 @@ async function syncDiscordCatalog() {
   return response.data;
 }
 
-// idempotencyKey should be a stable per-attempt id (the triggering interaction's own id is ideal)
-// so the backend can dedupe a redelivered request.
+// idempotencyKey lets the backend dedupe retries; the interaction id works well.
 async function createGroup({ member, categoryKey, activityLabel, description, startTimeIso, maximumPlayers, discordChannelId = null, discordMessageId = null, idempotencyKey = null }) {
   if (!isConfigured()) return null;
 
@@ -123,7 +122,7 @@ async function createGroup({ member, categoryKey, activityLabel, description, st
   return response.data ?? null;
 }
 
-// idempotencyKey — see createGroup's comment above.
+// idempotencyKey: see createGroup.
 async function actOnGroupDetailed({ member, groupId, action, idempotencyKey = null }) {
   if (!isConfigured() || !groupId) return null;
 

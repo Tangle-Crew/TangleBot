@@ -22,8 +22,8 @@ const { truncate } = require('../utils/db');
 const { notifyAdminLog } = require('../utils/roleMenu');
 
 const PAGE_SIZE = 10;
-// WOM allows 20 requests a minute (100 with an API key), and a load costs one plus one per running
-// competition, so every run shares one load, refreshed at most this often.
+// WOM allows 20 requests a minute (100 with a key). A load costs 1 + 1 per running competition,
+// so runs share one load, refreshed at most this often.
 const CACHE_TTL_MS = 5 * 60 * 1000;
 // A load that hit an error is retried sooner.
 const FAILED_CACHE_TTL_MS = 60 * 1000;

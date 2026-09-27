@@ -7,21 +7,20 @@ const COORDINATOR_ROLE_ID = process.env.COORDINATOR_ROLE_ID;
 const DISCORD_GREEN  = 0x1a5c2e;
 const DISCORD_PURPLE = 0x4a235a;
 
-// GIF timing constants (must match createSpinGif frame counts / delays)
+// GIF timing, used by createSpinGif.
 const SPIN_FRAMES    = 72;
 const SPIN_MS        = 50;
 const FLASH_FRAMES   = 10;
 const FLASH_MS       = 100;
 const HOLD_FRAMES    = 5;
 const HOLD_MS        = 500;
-// Total GIF play time + buffer for Discord upload latency
+// GIF play time plus a buffer for upload latency.
 const GIF_TOTAL_MS   = SPIN_FRAMES * SPIN_MS + FLASH_FRAMES * FLASH_MS + HOLD_FRAMES * HOLD_MS + 800;
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-// Alternating dark purple / dark green for every slice pair
 const SLICE_COLORS = ['#3a0e54', '#0d3320'];
-const WINNER_COLOR  = '#c8960c';  // dark gold for winner highlight
+const WINNER_COLOR  = '#c8960c';
 const SILVER_RING   = '#b0b0bc';
 const SILVER_SPOKE  = '#c8c8d4';
 const SILVER_HUB    = '#d0d0dc';
@@ -35,9 +34,7 @@ function shuffle(arr) {
   return a;
 }
 
-// Expand entries, supporting numeric ranges like "1-10" mixed with plain tokens.
-// Stops as soon as `cap` is exceeded so a fat-fingered range like "1-100000000"
-// can't block the event loop or exhaust memory building a huge array.
+// Splits entries, expanding ranges like "1-10". Stops once past cap, so "1-100000000" is cheap.
 function parseEntries(raw, cap) {
   const out = [];
   for (const token of raw.split(',').map(s => s.trim()).filter(Boolean)) {
@@ -212,7 +209,7 @@ function createSpinGif(entries, winnerIdx) {
   const theta0      = Math.random() * 2 * Math.PI;
   const winnerAngle = winnerIdx * sliceAngle;
 
-  // 8 full rotations + land exactly on winner
+  // 8 full turns, ending on the winner.
   let thetaFinal = theta0 + 8 * 2 * Math.PI;
   thetaFinal += ((winnerAngle - thetaFinal) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
 
@@ -240,7 +237,7 @@ function createSpinGif(entries, winnerIdx) {
     encoder.addFrame(ctx.getImageData(0, 0, SIZE, SIZE).data);
   }
 
-  // Hold phase — winner visible, GIF pauses here since it plays once
+  // Hold phase — the GIF plays once and stops here
   encoder.setDelay(HOLD_MS);
   drawWheelFrame(ctx, SIZE, entries, thetaFinal, true);
   for (let h = 0; h < HOLD_FRAMES; h++) {
@@ -346,8 +343,7 @@ module.exports = {
     // Step 2 — wait for the GIF to finish playing
     await sleep(GIF_TOTAL_MS);
 
-    // Step 3 — edit the same message to reveal the winner
-    // (Discord keeps the existing attachment when no files are included in the edit)
+    // Step 3 — edit the message to reveal the winner (the GIF attachment is kept)
     const isSingle = winners.length === 1;
     const winText  = winners
       .map((w, i) => {
@@ -370,8 +366,7 @@ module.exports = {
 
     await interaction.editReply({ embeds: [resultEmbed] });
 
-    // Step 4 — Discord only sends @here / @everyone notifications on NEW messages, not edits.
-    // Send a minimal follow-up that contains only the ping so notifications fire.
+    // Step 4 — edits don't ping, so send the ping as a new message
     if (ping) {
       await interaction.followUp({
         content:         ping,

@@ -6,24 +6,19 @@ const {
   MessageFlags,
 } = require('discord.js');
 
-// How long the ephemeral role menus stay open before auto-deleting; already-assigned roles aren't affected.
+// How long the private role menus stay up. Roles already picked are kept.
 const MENU_MESSAGE_LIFETIME_MS = 60 * 1000;
 
-// Roles this system manages get this prefix (e.g. "LFG-Yama") so they're easy to spot in the role list.
+// Prefix for the roles this manages, e.g. "LFG-Yama".
 const ROLE_PREFIX = 'LFG-';
 
 function lfgRoleName(baseName) {
   return `${ROLE_PREFIX}${baseName}`;
 }
 
-// Default color for admin log embeds — red, signaling an operational issue that needs attention.
 const ADMIN_LOG_ALERT_COLOR = 0xed4245;
 
-// Reports something to ADMIN_LOG_CHANNEL_ID as an embed. Silently skipped if unset.
-// fields is optional — pass named {name, value, inline} entries for structured details (e.g.
-// "Suggested By", "Changes") instead of cramming everything into description, matching the field-
-// based embeds honeypot.js's admin alerts already use.
-// color defaults to red (an alert); pass a different color for non-alert notices (e.g. suggestions).
+// Posts an embed to ADMIN_LOG_CHANNEL_ID, if set. color defaults to alert red.
 async function notifyAdminLog(client, title, description, fields = [], color = ADMIN_LOG_ALERT_COLOR) {
   const adminLogChannelId = process.env.ADMIN_LOG_CHANNEL_ID;
   if (!adminLogChannelId) return;
@@ -43,19 +38,17 @@ async function notifyAdminLog(client, title, description, fields = [], color = A
   }
 }
 
-// Shorthand for the ephemeral status reply shape, so {content, flags: Ephemeral} only needs to change in one place.
 function replyEphemeral(interaction, content) {
   return interaction.reply({ content, flags: MessageFlags.Ephemeral });
 }
 
-// autoDelete removes the follow-up after MENU_MESSAGE_LIFETIME_MS, for confirmations that don't need to stick around.
+// autoDelete removes the follow-up after MENU_MESSAGE_LIFETIME_MS.
 function followUpEphemeral(interaction, content, { autoDelete = false } = {}) {
   const promise = interaction.followUp({ content, flags: MessageFlags.Ephemeral });
   if (autoDelete) {
     promise.then((message) => {
       setTimeout(() => {
-        // Not message.delete() — resolving message.channel needs the client's channel cache,
-        // which fails for a thread that's since fallen out of it. The webhook needs no channel lookup.
+        // Via the webhook: message.delete() fails once the thread leaves the channel cache.
         interaction.webhook.deleteMessage(message.id).catch((err) => {
           if (!isAlreadyGoneError(err)) console.error('Could not delete ephemeral follow-up:', err.message);
         });
@@ -65,25 +58,20 @@ function followUpEphemeral(interaction, content, { autoDelete = false } = {}) {
   return promise;
 }
 
-// Reports an issue to admin log, then replies to the user with an ephemeral, ⚠️-prefixed message.
-// Shared by every /lfg-roles failure path, so the pairing only needs to change in one place.
+// Reports to the admin log, then replies privately to the user.
 async function notifyAdminLogAndReply(interaction, title, adminMessage, userMessage) {
   console.warn(`[LFG] ${title}`);
   await notifyAdminLog(interaction.client, title, adminMessage);
   return replyEphemeral(interaction, userMessage);
 }
 
-// Discord's "Unknown Message" (10008) and "Unknown Channel" (10003) — thrown when the message or
-// thread/channel was already gone (dismissed, auto-cleaned, manually deleted, etc.) before this
-// call got to it. Covers both since callers delete/rename/update either a reply message or
-// a forum thread, depending on which cleanup path hit them.
+// Discord's Unknown Channel (10003) and Unknown Message (10008): the target was already deleted.
 const ALREADY_GONE_ERROR_CODES = new Set([10003, 10008]);
 function isAlreadyGoneError(err) {
   return ALREADY_GONE_ERROR_CODES.has(err?.code);
 }
 
-// Deletes interaction's reply after delayMs. An already-gone reply (dismissed, or already cleaned
-// up elsewhere) is expected and isn't logged; anything else is a real error.
+// Deletes the interaction's reply after delayMs.
 function scheduleReplyCleanup(interaction, delayMs, logLabel) {
   setTimeout(() => {
     interaction.deleteReply().catch((err) => {
@@ -93,7 +81,7 @@ function scheduleReplyCleanup(interaction, delayMs, logLabel) {
   }, delayMs);
 }
 
-// Builds the default 2..max size-options list, for activities with no "Mass" option.
+// Size options 2..max.
 function sizeRange(max) {
   const options = [];
   for (let n = 2; n <= max; n++) {
@@ -102,7 +90,7 @@ function sizeRange(max) {
   return options;
 }
 
-// Builds a size-options list of 2..max players, plus an appended "Mass" option (for "N/mass" activities).
+// Size options 2..max plus Mass.
 function sizeRangeWithMass(max) {
   const options = [];
   for (let n = 2; n <= max; n++) {
@@ -112,7 +100,7 @@ function sizeRangeWithMass(max) {
   return options;
 }
 
-// Builds a size-options list with exactly one choice — for activities that need an exact player count
+// A single fixed size.
 function sizeFixed(n) {
   return [{ value: String(n), label: `${n} Players (Fixed)` }];
 }
@@ -128,8 +116,7 @@ function summarizeSizeOptions(sizeOptions = []) {
   };
 }
 
-// Derives a role's stable identifier (used in customIds and select-menu values) from its
-// display label, e.g. "Royal Titans" -> "royal_titans", "Vet'ion" -> "vetion".
+// Stable id for customIds and select values, e.g. "Royal Titans" -> "royal_titans".
 function slugify(label) {
   return label
     .toLowerCase()
@@ -139,22 +126,15 @@ function slugify(label) {
 }
 
 // ---- Category definitions ----
-// Feeds /lfg-roles (buttons) and the /lfg-post Category -> Activity accordion.
-// Missing roles are auto-created as "LFG-<label>" on first use (see ensureRoleExists below).
-// Rename any pre-existing plain-named role to add the "LFG-" prefix so it's reused, not duplicated.
-// label doubles as the exact Discord role name — spell it how the role should read (e.g. "Royal Titans", not "Titans").
+// Used by /lfg-roles, /lfg-post and the start page. Each role is auto-created as "LFG-<label>" on
+// first use, so label is the role name. An activity without a valid color and emoji can't be posted.
 //
-// ---- Copy/paste template ----
 // New role:
-//   { label: 'Display Name', emoji: 'PUT_EMOJI_ID_HERE', color: '#006400', sizeOptions: sizeRange(N) },
-// A missing/invalid color or emoji isn't defaulted — /lfg-post will refuse to post that activity
-// and alert ADMIN_LOG_CHANNEL_ID instead (see isValidColor/isValidEmoji below).
+//   { label: 'Display Name', emoji: 'EMOJI_ID', color: '#006400', sizeOptions: sizeRange(N) },
 //
 // New category:
 //   new_key: {
-//     // label is lowercased into the picker prompt's noun (e.g. "Pick the bosses...") —
-//     // spell it as a plural noun, not a gerund (e.g. "Bosses", not "Bossing").
-//     label: 'Label',
+//     label: 'Label', // plural noun, e.g. "Bosses"; used in "Pick the bosses..."
 //     buttonEmoji: '🔥',
 //     buttonStyle: ButtonStyle.Primary, // optional, defaults to Primary
 //     roles: [ /* role entries above */ ],
@@ -208,10 +188,7 @@ const CATEGORIES = {
   },
 };
 
-// Derives each role's `value` and each category's `activityNoun` now, so the rest of the codebase can just read them.
-// Roles are sorted alphabetically by label here too, so every consumer that iterates
-// category.roles (role-menu buttons, the /lfg-post activity picker, the LFG start page list,
-// the exported catalog, ...) lists activities in alphabetical order without having to sort itself.
+// Adds each role's value and category's activityNoun, and sorts roles alphabetically.
 for (const category of Object.values(CATEGORIES)) {
   category.activityNoun = category.label.toLowerCase();
   category.roles.sort((a, b) => a.label.localeCompare(b.label));
@@ -245,19 +222,17 @@ function buildDiscordLfgCatalog() {
   }));
 }
 
-// customId scheme used for all buttons here:
-//   "roles:category:<categoryKey>"          — top-level category button (Bosses, Raids, etc.)
-//   "roles:toggle:<categoryKey>:<roleValue>" — a specific boss/raid toggle
-//   "roles:clearall"                         — removes every LFG- role the member has
-// eventHandler.js routes any button whose customId starts with "roles:" here.
+// Button customIds:
+//   "roles:category:<categoryKey>"
+//   "roles:toggle:<categoryKey>:<roleValue>"
+//   "roles:clearall"
 
-// Joins display labels into "A", "A or B", or "A, B, or C" — used to list categories in prose.
+// "A", "A or B", or "A, B, or C".
 function joinWithOr(items) {
   if (items.length <= 2) return items.join(' or ');
   return `${items.slice(0, -1).join(', ')}, or ${items[items.length - 1]}`;
 }
 
-// Shared submenu prompt text, parameterized by each category's activityNoun (e.g. "bosses", "raids").
 function categoryPrompt(activityNoun) {
   return `Pick the ${activityNoun} you want to be pingable for. Selected ones turn red and stay red until you click them again.`;
 }
@@ -301,8 +276,6 @@ function buildClearAllRow() {
 
 function buildCategoryButtonRows(categoryKey, member) {
   const category = CATEGORIES[categoryKey];
-  // One pass over the member's small role list, rather than scanning the whole guild's role cache
-  // per category role (up to 15x per render).
   const memberRoleNames = new Set(member.roles.cache.filter((r) => r.name.startsWith(ROLE_PREFIX)).map((r) => r.name));
 
   const buttons = category.roles.map((r) => {
@@ -330,7 +303,6 @@ async function sendCategoryMenu(interaction, categoryKey, isUpdate) {
     await interaction.reply(payload);
   }
 
-  // Auto-delete this submenu after 60 seconds. Roles already picked stay assigned.
   scheduleReplyCleanup(interaction, MENU_MESSAGE_LIFETIME_MS, 'role submenu message');
 }
 
@@ -370,7 +342,7 @@ async function handleRoleToggle(interaction, categoryKey, value) {
     );
   }
 
-  // Re-render the same ephemeral menu with the button now toggled red/grey
+  // Re-render with the button toggled.
   return sendCategoryMenu(interaction, categoryKey, true);
 }
 
@@ -397,9 +369,8 @@ async function handleClearAllRoles(interaction) {
   return replyEphemeral(interaction, `✅ Cleared ${lfgRoles.size} LFG role(s).`);
 }
 
-// Entry point called from eventHandler.js for any button customId starting with "roles:"
 async function handleRoleMenuButtonInteraction(interaction) {
-  const parts = interaction.customId.split(':'); // ["roles", "category"|"toggle"|"clearall", ...]
+  const parts = interaction.customId.split(':');
   const kind = parts[1];
   console.log(`[LFG] Role menu button interaction: ${interaction.customId}`);
 
@@ -419,24 +390,18 @@ async function handleRoleMenuButtonInteraction(interaction) {
   }
 }
 
-// Looks up the prefixed role for a base name (e.g. "Yama" -> "LFG-Yama").
+// "Yama" -> the LFG-Yama role.
 function findRole(guild, name) {
   return guild.roles.cache.find((r) => r.name === lfgRoleName(name));
 }
 
-// Role icons (the little emoji shown next to a role's name) require the ROLE_ICONS guild feature,
-// which is only granted at Boost Level 2+. Checking the feature flag directly (rather than
-// guild.premiumTier >= 2) covers servers that have it via other means (e.g. partnered).
+// Role icons need the ROLE_ICONS feature (Boost Level 2+, or partnered).
 function guildSupportsRoleIcons(guild) {
   return guild.features.includes('ROLE_ICONS');
 }
 
-// Builds the {icon, unicodeEmoji} fields for a role create/edit call. Custom emoji (snowflake IDs)
-// go through `icon` as a CDN image URL — discord.js's `icon` option only accepts a Buffer, data URI,
-// http(s) URL, or local file path, so the bare snowflake ID must be turned into a URL first (passing
-// it directly makes discord.js treat it as a relative file path and fail with ENOENT).
-// Plain unicode emoji go through `unicodeEmoji`. Omitted entirely if the guild can't support icons,
-// so the call succeeds with no icon rather than erroring on an unsupported field.
+// {icon} or {unicodeEmoji} for a role create/edit, or {} if the server can't have role icons.
+// A custom emoji ID must be passed as a CDN URL; discord.js reads a bare ID as a file path.
 function roleIconOptions(guild, emoji) {
   if (!guildSupportsRoleIcons(guild) || !isValidEmoji(emoji)) return {};
   if (!isSnowflakeEmoji(emoji)) return { unicodeEmoji: emoji };
@@ -446,9 +411,7 @@ function roleIconOptions(guild, emoji) {
 
 const pendingRoleCreations = new Map(); // `${guildId}:${roleName}` -> in-flight create Promise
 
-// Finds the role, creating it first if it's missing. Two callers racing on the same never-before-used
-// role (e.g. two members toggling it at once) share the same in-flight creation instead of each
-// calling guild.roles.create(), which would otherwise produce duplicate roles.
+// Finds the role, creating it if missing. Concurrent callers share one creation, so no duplicates.
 async function ensureRoleExists(guild, name) {
   const roleConfig = findRoleConfig(name);
   const existing = findRole(guild, name);
@@ -481,7 +444,7 @@ async function ensureRoleExists(guild, name) {
   return creation;
 }
 
-// Looks up a role's CATEGORIES entry by its base label (e.g. "Yama"), across all categories.
+// The CATEGORIES entry for a label, e.g. "Yama".
 function findRoleConfig(name) {
   for (const category of Object.values(CATEGORIES)) {
     const match = category.roles.find((r) => r.label === name);
@@ -490,10 +453,8 @@ function findRoleConfig(name) {
   return null;
 }
 
-// Backfills color + icon onto every already-created LFG- role so pre-existing roles pick up
-// changes made to CATEGORIES after they were first created (ensureRoleExists only runs the
-// create path once, on first use). Safe to call repeatedly — a role already matching is skipped.
-// Returns a summary so callers (e.g. an admin command) can report what happened.
+// Applies CATEGORIES colors and icons to existing LFG- roles, so later edits reach them.
+// Returns { updated, skipped, failed } role labels.
 async function syncRoleAppearance(guild) {
   const supportsIcons = guildSupportsRoleIcons(guild);
   const results = { updated: [], skipped: [], failed: [] };
@@ -532,27 +493,23 @@ async function syncRoleAppearance(guild) {
   return results;
 }
 
-// A real Discord snowflake ID is a string of digits (typically 17-20 long).
+// A custom emoji ID (a Discord snowflake).
 function isSnowflakeEmoji(emoji) {
   return typeof emoji === 'string' && /^\d{15,25}$/.test(emoji);
 }
 
-// Accepts either a custom emoji's snowflake ID or a plain unicode emoji character.
-// Placeholders like "PUT_EMOJI_ID_HERE" are plain ASCII text (not digits, not a real emoji glyph),
-// so they fall through and get rejected here instead of silently failing when sent to Discord.
+// A custom emoji ID or a unicode emoji. Rejects ASCII placeholders like "EMOJI_ID".
 function isValidEmoji(emoji) {
   if (typeof emoji !== 'string' || emoji.length === 0) return false;
   return isSnowflakeEmoji(emoji) || /[^\x00-\x7F]/.test(emoji);
 }
 
-// A real color is a 6-digit hex string like "#006400" — rejects placeholders, empty strings, and anything left unset.
+// A "#rrggbb" hex color.
 function isValidColor(color) {
   return typeof color === 'string' && /^#[0-9A-Fa-f]{6}$/.test(color);
 }
 
-// Renders a role's emoji as inline markup usable in message/embed text (e.g. a title).
-// Custom emoji need Discord's <:_:ID> markup to resolve by ID; unicode emoji render as-is.
-// Returns null if there's no valid emoji, so callers can omit it instead of rendering broken markup.
+// Inline emoji markup for message text, or null if the emoji isn't valid.
 function emojiMarkup(emoji) {
   if (!isValidEmoji(emoji)) return null;
   return isSnowflakeEmoji(emoji) ? `<:_:${emoji}>` : emoji;

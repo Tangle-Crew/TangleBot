@@ -2,8 +2,7 @@ const { google } = require('googleapis');
 
 let cachedAuth = null;
 
-// Reads the full service-account JSON key (as downloaded from Google Cloud
-// Console, minified to one line) out of GOOGLE_SERVICE_ACCOUNT_JSON.
+// Auth from the service account key in GOOGLE_SERVICE_ACCOUNT_JSON.
 function getAuth() {
   if (cachedAuth) return cachedAuth;
 
@@ -60,9 +59,7 @@ async function appendRow(sheetId, range, values) {
   return res.data;
 }
 
-// Parses the row number out of an append response's updatedRange, e.g. "Sheet!A15:C15" -> 15.
-// A caller that caches the result long-term should treat a null return as a real failure, not
-// silently store it — a row number that's missing or wrong breaks the next edit to that row.
+// The row number from an append's updatedRange, e.g. "Sheet!A15:C15" -> 15, or null.
 function parseAppendedRowNumber(updatedRange) {
   const match = /![A-Z]+(\d+):/.exec(updatedRange || '');
   if (!match) console.warn(`Could not parse a row number out of updatedRange: "${updatedRange}"`);

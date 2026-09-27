@@ -10,8 +10,7 @@ const { capMentionLines } = require('./lfgGroup');
 
 const SYNCED_GROUP_BUTTON_PREFIX = 'lfgsyncgroup';
 
-// FULL is included here too — the backend's `join` action already queues the caller instead of
-// erroring once a group is full, so Join Group is the only button needed either way.
+// Includes FULL: the backend's join action queues the caller once a group is full.
 function isJoinableStatus(status) {
   return status === 'OPEN' || status === 'FULL' || status === 'STARTED';
 }
@@ -205,8 +204,7 @@ async function handleSyncedGroupButtonInteraction(interaction) {
   try {
     await followUpEphemeral(interaction, `✅ ${result.message ?? 'Group updated.'}`, { autoDelete: true });
   } catch (err) {
-    // The thread can be deleted (e.g. cleaned up right after a close) between the update above
-    // and this follow-up landing — the group update itself already succeeded, so this is safe to ignore.
+    // The thread can be deleted right after a close; the update already succeeded.
     if (!isAlreadyGoneError(err)) throw err;
   }
 }

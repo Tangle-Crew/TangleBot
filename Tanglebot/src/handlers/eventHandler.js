@@ -21,9 +21,8 @@ const { startLfgDeliveryWorker } = require('../utils/lfgDeliveryWorker');
 const { startCompEndingReminder } = require('../utils/compEndingReminder');
 const { handleSyncedGroupButtonInteraction } = require('../utils/lfgSyncedPost');
 
-// customId-prefix routing tables for InteractionCreate, one per interaction kind. errorReply is
-// optional — omitted for the honeypot button so a mis-click there stays silent instead of
-// tipping off whoever triggered it.
+// customId prefix -> handler, per interaction kind. The honeypot route has no errorReply, so its
+// failures stay silent.
 const BUTTON_ROUTES = [
   { prefix: 'hp:', handler: handleHoneypotButtonInteraction, errorLabel: 'Honeypot button interaction error:' },
   { prefix: 'roles:', handler: handleRoleMenuButtonInteraction, errorLabel: 'Role menu button interaction error:', errorReply: 'Something went wrong updating your roles.' },
@@ -37,8 +36,7 @@ const MODAL_ROUTES = [
   { prefix: 'lfgpost:', handler: handleLfgPostModalSubmit, errorLabel: '[LFG] Post modal submit error:', errorReply: 'Something went wrong creating your LFG post.' },
 ];
 
-// Finds the route whose prefix matches this interaction's customId (if any) and runs it, logging
-// and optionally replying on failure — the shared shape every button/select/modal route above needs.
+// Runs the route matching the customId, logging (and optionally replying) on failure.
 async function dispatchByCustomIdPrefix(interaction, routes) {
   const route = routes.find((r) => interaction.customId.startsWith(r.prefix));
   if (!route) return;
@@ -121,8 +119,7 @@ function loadEvents(client) {
       }
     }
 
-    // Sent last, after every other startup step above has finished (or failed) — this is the
-    // signal that the bot is actually ready to use, not just that it's started connecting.
+    // Sent last, once every startup step has finished.
     const adminLogChannelId = process.env.ADMIN_LOG_CHANNEL_ID;
     const ownerRoleId = process.env.OWNER_ROLE_ID;
     if (adminLogChannelId) {

@@ -3,8 +3,7 @@ const path = require('path');
 
 const DATA_DIR = path.join(__dirname, '..', '..', 'data');
 
-// A corrupt file (e.g. from a crash mid-write) is treated as empty rather than taking down
-// whatever called this.
+// A missing or corrupt file reads as {}.
 function readJson(filename) {
   const filePath = path.join(DATA_DIR, filename);
   if (!fs.existsSync(filePath)) return {};
@@ -16,16 +15,14 @@ function readJson(filename) {
   }
 }
 
-// Writes to a temp file and renames it into place so a crash mid-write can never leave a
-// truncated, unparseable file behind — the rename is atomic on the same filesystem.
+// Writes a temp file and renames it into place, so a crash can't leave a truncated file.
 let writeCounter = 0;
 
 function writeJson(filename, data) {
   const filePath = path.join(DATA_DIR, filename);
   console.log(`Writing data file: ${filename}`);
   fs.mkdirSync(DATA_DIR, { recursive: true });
-  // Unique per call, not just per-process — two unlocked concurrent writes to the same filename
-  // would otherwise share one temp path and race each other's write/rename.
+  // Unique per call, so concurrent writes don't share a temp file.
   const tempPath = `${filePath}.${process.pid}.${++writeCounter}.tmp`;
   try {
     fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), 'utf8');
@@ -38,9 +35,8 @@ function writeJson(filename, data) {
 
 const fileLocks = new Map(); // filename -> tail of its pending operation chain
 
-// Serializes async read-modify-write sequences against the same key within this process, so
-// concurrent callers can't interleave and clobber each other's write. Never await a call using
-// the same key from inside another call's callback — the two would wait on each other forever.
+// Runs fn after every earlier call with the same key has finished. Don't nest calls with the same
+// key; they would wait on each other forever.
 function withFileLock(filename, fn) {
   const previous = fileLocks.get(filename) || Promise.resolve();
   const run = previous.then(fn, fn);
@@ -48,16 +44,14 @@ function withFileLock(filename, fn) {
   return run;
 }
 
-// Shared text-truncation helper — anything displayed back to Discord (embed fields/values,
-// message content) that could exceed a length cap needs this.
+// Cuts text to max characters, ending with "…".
 function truncate(text, max) {
   if (!text) return text;
   if (max <= 0) return '';
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
-// True if `member` has any of the given role IDs — used to gate staff/admin-only actions.
-// Falsy entries in roleIds (an unset env var) are ignored rather than matched.
+// True if member has any of roleIds. Unset (falsy) IDs are ignored.
 function hasAnyRole(member, roleIds) {
   if (!member) return false;
   return roleIds.filter(Boolean).some((roleId) => member.roles?.cache?.has(roleId));

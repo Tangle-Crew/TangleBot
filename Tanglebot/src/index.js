@@ -23,8 +23,7 @@ const client = new Client({
 
 client.commands = new Collection();
 
-// Last-resort safety net: log and keep running instead of letting a missed
-// await/catch anywhere in the codebase take down the whole bot.
+// Log a missed rejection instead of crashing the bot.
 process.on('unhandledRejection', (err) => {
   console.error('Unhandled promise rejection:', err);
 });
