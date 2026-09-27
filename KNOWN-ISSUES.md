@@ -4,11 +4,11 @@ Open issues from the September 2026 audit, each with a possible fix. Submission 
 
 ## Bugs
 
-### 1. Donation amounts accept junk input
+### 1. Donation amounts misread a decimal comma
 
-**Issue:** `parseDonationAmount` ([donationhighscore.js:57](Tanglebot/src/commands/donationhighscore.js#L57)) matches `[\d.]+`, so `1.2.3m` is read as 1.2m instead of being rejected.
+**Issue:** `parseDonationAmount` ([donationhighscore.js:57](Tanglebot/src/commands/donationhighscore.js#L57)) removes every comma before reading the number, so a European-style `1,5m` (meaning 1.5m) is logged as 15,000,000 without any warning.
 
-**Possible fix:** Match `^\d+(\.\d+)?([KMBT]?)$` instead.
+**Possible fix:** Only allow commas as thousands separators, in groups of exactly three digits (`75,000,000`, `1,500k`), and reject anything else, such as `1,5m` or `10,00,000`, with the existing "Couldn't read a donation amount" message.
 
 ### 2. LFG start page can adopt a post it can't edit
 

@@ -56,7 +56,8 @@ const DONATION_LOCK_KEY = 'donations-sheet';
 // Parses "300M", "10.1m", "75,000,000", etc. Returns null if unreadable.
 function parseDonationAmount(raw) {
   const str = String(raw).trim().toUpperCase().replace(/,/g, '');
-  const m = str.match(/^([\d.]+)([KMBT]?)$/);
+  // At most one decimal point, so typos like "1.2.3m" or "1.500.000" are rejected, not misread.
+  const m = str.match(/^(\d+(?:\.\d+)?)([KMBT]?)$/);
   if (!m) return null;
   const n = parseFloat(m[1]);
   if (Number.isNaN(n)) return null;
