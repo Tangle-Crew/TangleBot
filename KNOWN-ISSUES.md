@@ -23,9 +23,3 @@ Open issues from the September 2026 audit, each with a possible fix. Submission 
 **Issue:** When `LFG_DELIVERY_SECRET` is set, the worker calls the Supabase delivery function every 3 seconds ([lfgDeliveryWorker.js:3](Tanglebot/src/utils/lfgDeliveryWorker.js#L3)), about 29,000 requests a day, even when nothing is queued.
 
 **Possible fix:** Poll less often (e.g. 10–15 seconds), back off while the queue is empty, or have Supabase push to the bot instead.
-
-### 4. State files may not survive a deploy
-
-**Issue:** `Tanglebot/data/` holds the leaderboard message IDs, the LFG start post ID and honeypot test mode. The Docker Compose file keeps it between restarts, but a code comment says files don't survive a deploy on the current host. If so, test mode resets to off on every deploy. The leaderboards and start post find their messages again.
-
-**Possible fix:** Mount `Tanglebot/data/` as a persistent volume on the host.

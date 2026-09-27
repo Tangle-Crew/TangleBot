@@ -16,8 +16,8 @@ const CHECK_INTERVAL_MS = 15 * 60 * 1000;
 const REMINDER_WINDOW_MS = 60 * 60 * 1000;
 // Time for WOM to process the queued updates before the standings are read.
 const UPDATE_SETTLE_MS = 5 * 60 * 1000;
-// Competitions reminded since the bot started. Files don't survive a deploy on the host, so
-// across restarts the admin log channel is the record (see findRemindedInChannel).
+// Competitions reminded since the bot started. Across restarts, the admin log channel is the
+// record (see findRemindedInChannel).
 const remindedIds = new Set();
 
 // Limits for searching the admin log channel for an earlier reminder.
