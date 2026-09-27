@@ -12,14 +12,14 @@ Open issues from the September 2026 audit, each with a possible fix. Submission 
 
 ## Limitations
 
-### 2. LFG groups missing from the save file aren't restored
-
-**Issue:** Groups are restored on startup from `data/lfg-groups.json` ([lfgPost.js](Tanglebot/src/utils/lfgPost.js), `restoreLfgGroups`). If that file is missing or damaged, buttons on existing posts reply "This group no longer exists", and those posts never auto-close.
-
-**Possible fix:** On startup, scan the forum for the bot's posts that aren't in the file and rebuild each group from its post. Posts that can't be read get their buttons removed.
-
-### 3. LFG delivery worker polls every 3 seconds
+### 2. LFG delivery worker polls every 3 seconds
 
 **Issue:** When `LFG_DELIVERY_SECRET` is set, the worker calls the Supabase delivery function every 3 seconds ([lfgDeliveryWorker.js:3](Tanglebot/src/utils/lfgDeliveryWorker.js#L3)), about 29,000 requests a day, even when nothing is queued.
 
 **Possible fix:** Poll less often (e.g. 10–15 seconds), back off while the queue is empty, or have Supabase push to the bot instead.
+
+### 3. LFG groups rebuilt from their posts lose a little
+
+**Issue:** When the save file is missing, groups are rebuilt from their forum posts ([lfgPost.js](Tanglebot/src/utils/lfgPost.js), `recoverFromPost`). A post doesn't hold the shared-backend link, so those groups stop syncing to the RuneLite plugin, and players hidden by "…and N more" (past about 70 people) are lost. The admin log lists affected groups.
+
+**Possible fix:** Look the backend group up by its Discord thread ID, if the LFG backend can support that (ask Zach). Only groups over about 70 people can lose players.

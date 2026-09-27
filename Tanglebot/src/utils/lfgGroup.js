@@ -233,6 +233,7 @@ function splitRosterBudget(memberLines, queueLines, budget) {
 }
 
 // The main post body: role ping first so it notifies, then details, members and queue.
+// parseGroupText reads it back, so keep the two in step.
 function buildGroupText(group) {
   // group.emoji is validated before the group is created.
   const pingLine = [`<@&${group.roleId}>`, emojiMarkup(group.emoji)].filter(Boolean).join(' ');
@@ -266,6 +267,76 @@ function buildGroupText(group) {
   return truncate(text, MAX_POST_CHARS);
 }
 
+const MEMBERS_HEADER = /^\*\*Members \(\d+\/(?:\d+|Mass)\):\*\*$/;
+const QUEUE_HEADER = /^\*\*Queue \(\d+\):\*\*$/;
+const MORE_LINE = /^_…and (\d+) more_$/;
+
+// Reads a post written by buildGroupText back into its fields, or null if it doesn't match.
+// hiddenMembers/hiddenQueued count people cut off by "…and N more", who can't be recovered.
+function parseGroupText(content) {
+  const lines = String(content ?? '').split('\n');
+  const value = (i, label) => (lines[i]?.startsWith(`**${label}:** `) ? lines[i].slice(label.length + 6) : null);
+  const roleId = lines[0]?.match(/^<@&(\d+)>/)?.[1];
+  const roleLabel = value(2, 'Activity');
+  const timeEpoch = Number(value(3, 'Start')?.match(/^<t:(\d+):t>/)?.[1]);
+  const sizeLabel = value(4, 'Group Size');
+  // Searched from the end: only mentions follow it, while the description could contain anything.
+  const membersAt = lines.findLastIndex((line) => MEMBERS_HEADER.test(line));
+  if (!roleId || !roleLabel || !timeEpoch || !sizeLabel || membersAt === -1) return null;
+
+  // A section runs from the line after its header to the next blank line.
+  const section = (headerAt) => {
+    const end = lines.indexOf('', headerAt + 1);
+    return lines.slice(headerAt + 1, end === -1 ? lines.length : end);
+  };
+  const members = [];
+  let hiddenMembers = 0;
+  for (const line of section(membersAt)) {
+    const id = line.match(/^<@(\d+)>$/)?.[1];
+    if (id) members.push(id);
+    hiddenMembers += Number(line.match(MORE_LINE)?.[1] ?? 0);
+  }
+
+  const queue = [];
+  let hiddenQueued = 0;
+  let pendingOfferUserId = null;
+  const queueAt = lines.findIndex((line, i) => i > membersAt && QUEUE_HEADER.test(line));
+  if (queueAt !== -1) {
+    for (const line of section(queueAt)) {
+      const match = line.match(/^\d+\. <@(\d+)>( 🎟️ _\(offer pending\)_)?$/);
+      if (match) {
+        queue.push(match[1]);
+        if (match[2]) pendingOfferUserId = match[1];
+      }
+      hiddenQueued += Number(line.match(MORE_LINE)?.[1] ?? 0);
+    }
+  }
+
+  return {
+    roleId,
+    roleLabel,
+    timeEpoch,
+    sizeLabel,
+    // Lines between the Description header and the blank line before Members.
+    description: lines[5] === '**Description:**' ? lines.slice(6, membersAt - 1).join('\n') : null,
+    members,
+    hiddenMembers,
+    queue,
+    hiddenQueued,
+    pendingOfferUserId,
+    creatorTag: lines[lines.length - 1].match(/^_Started by (.*)_$/)?.[1] ?? 'unknown',
+  };
+}
+
+// The activity for a post's "Category: Activity" label, e.g. "Bosses: Yama".
+function findActivityByRoleLabel(roleLabel) {
+  for (const category of CATEGORY_OPTIONS) {
+    const activity = getActivityOptions(category.key).find((r) => `${category.label}: ${r.label}` === roleLabel);
+    if (activity) return activity;
+  }
+  return null;
+}
+
 function makeGroupId() {
   return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 }
@@ -284,6 +355,8 @@ module.exports = {
   describeStartCountdown,
   computeCountdownRefreshDelay,
   buildGroupText,
+  parseGroupText,
+  findActivityByRoleLabel,
   capMentionLines,
   buildGroupRow,
   buildQueueOfferRow,

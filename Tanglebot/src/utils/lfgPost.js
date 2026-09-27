@@ -20,6 +20,8 @@ const {
   findTimeOption,
   resolveTimeEpoch,
   buildGroupText,
+  parseGroupText,
+  findActivityByRoleLabel,
   capMentionLines,
   buildGroupRow,
   buildQueueOfferRow,
@@ -1170,7 +1172,8 @@ async function resumeGroup(client, channel, group) {
   }
 }
 
-// Called on startup: brings back the groups saved in GROUPS_DATA_FILE whose posts still exist.
+// Called on startup: brings back the groups saved in GROUPS_DATA_FILE whose posts still exist,
+// then rebuilds any other group posts from the forum.
 async function restoreLfgGroups(client) {
   if (!FORUM_CHANNEL_ID) return;
 
@@ -1209,6 +1212,106 @@ async function restoreLfgGroups(client) {
       truncate(`These groups couldn't be restored after the restart, so their buttons won't work:\n${failed.join('\n')}`, 4096)
     );
   }
+
+  await recoverFromForum(client);
+}
+
+// Rebuilds groups from their posts when the save file didn't have them, e.g. if it was lost.
+async function recoverFromForum(client) {
+  const forum = await client.channels.fetch(FORUM_CHANNEL_ID).catch(() => null);
+  if (forum?.type !== ChannelType.GuildForum) return;
+
+  const { threads } = await forum.threads.fetchActive();
+  const known = new Set([...activeGroups.values()].map((g) => g.threadId));
+  const rebuilt = [];
+  const unreadable = [];
+  for (const thread of threads.values()) {
+    if (thread.ownerId !== client.user.id || known.has(thread.id)) continue;
+    try {
+      const result = await recoverFromPost(client, thread);
+      if (result?.unreadable) {
+        unreadable.push(`<#${thread.id}>`);
+      } else if (result) {
+        const lost = result.hidden ? ` — ${result.hidden} player(s) hidden by "…and N more" couldn't be recovered` : '';
+        rebuilt.push(`<#${thread.id}> (**${result.group.roleLabel}**)${lost}`);
+      }
+    } catch (err) {
+      console.error(`[LFG] Could not rebuild group from post ${thread.id}:`, err.message);
+      unreadable.push(`<#${thread.id}>: ${err.message}`);
+    }
+  }
+  if (rebuilt.length === 0 && unreadable.length === 0) return;
+  console.log(`[LFG] Rebuilt ${rebuilt.length} group(s) from forum posts; ${unreadable.length} couldn't be read.`);
+
+  const sections = [];
+  if (rebuilt.length) {
+    sections.push(`Rebuilt from their posts, since the save file didn't have them:\n${rebuilt.join('\n')}`);
+    if (isLfgBackendConfigured()) {
+      sections.push('These groups no longer sync to the RuneLite plugin (the backend link was only in the save file).');
+    }
+  }
+  if (unreadable.length) sections.push(`Couldn't be restored, so their buttons were removed:\n${unreadable.join('\n')}`);
+  await notifyAdminLog(client, 'ℹ️ LFG Groups Rebuilt From Posts', truncate(sections.join('\n\n'), 4096));
+}
+
+// Rebuilds one group from its post. Returns null for posts that aren't /lfg-post groups with
+// buttons (the start page, plugin posts, or a group already closing), { unreadable: true } if the
+// post can't be read (its buttons are removed), or { group, hidden }.
+async function recoverFromPost(client, thread) {
+  const starter = await thread.messages.fetch(thread.id);
+  const groupId = starter.components
+    .flatMap((row) => row.components)
+    .map((component) => component.customId ?? '')
+    .find((customId) => customId.startsWith('lfgpostgroup:'))
+    ?.split(':')[2];
+  if (!groupId) return null;
+
+  const parsed = parseGroupText(starter.content);
+  const activity = parsed && findActivityByRoleLabel(parsed.roleLabel);
+  const sizeOption = activity?.sizeOptions.find((o) => o.label === parsed.sizeLabel);
+  if (!sizeOption) {
+    await starter.edit({ components: [] });
+    await thread.send('⚠️ This group couldn\'t be restored after the bot restarted. Start a new one with `/lfg-post`.');
+    return { unreadable: true };
+  }
+
+  // The newest notice, so the next one replaces it as usual.
+  const recent = await thread.messages.fetch({ limit: 20 });
+  const latestNotice = recent.find((m) => m.author.id === client.user.id && m.id !== thread.id);
+
+  const group = newGroupState({
+    id: groupId,
+    creatorId: null,
+    creatorTag: parsed.creatorTag,
+    roleLabel: parsed.roleLabel,
+    roleId: parsed.roleId,
+    color: activity.color,
+    emoji: activity.emoji,
+    timeEpoch: parsed.timeEpoch,
+    sizeLabel: parsed.sizeLabel,
+    sizeCap: parseSizeCap(sizeOption.value),
+    description: parsed.description,
+    members: parsed.members,
+    status: 'open',
+    threadId: thread.id,
+    activityMessageId: latestNotice?.id ?? null,
+    queue: parsed.queue,
+    pendingOfferUserId: parsed.pendingOfferUserId,
+    backendGroupId: null,
+  });
+  // Full, or holding a spot for the queue.
+  group.status = isGroupFull(group) || group.queue.length > 0 ? 'closed' : 'open';
+
+  activeGroups.set(group.id, group);
+  try {
+    await resumeGroup(client, thread, group);
+  } catch (err) {
+    if (group.cleanupTimeoutId) clearTimeout(group.cleanupTimeoutId);
+    tearDownGroup(group);
+    throw err;
+  }
+  console.log(`[LFG] Rebuilt group ${group.id} from post ${thread.id}`);
+  return { group, hidden: parsed.hiddenMembers + parsed.hiddenQueued };
 }
 
 // ---- Entry points called from eventHandler.js ----
