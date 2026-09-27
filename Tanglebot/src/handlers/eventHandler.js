@@ -17,7 +17,7 @@ const {
 const { ensureLfgStartPost } = require('../utils/lfgStartPage');
 const { refreshLeaderboard: refreshPetLeaderboard } = require('../commands/pethighscore');
 const { refreshLeaderboard: refreshDonationLeaderboard } = require('../commands/donationhighscore');
-const { handleStaleMembersButton, start: startStaleMembers } = require('../commands/stalemembers');
+const { handleStaleMembersButton, handleStaleMembersSelect, start: startStaleMembers } = require('../commands/stalemembers');
 const { syncDiscordCatalog, isConfigured: isLfgBackendConfigured } = require('../utils/lfgBackend');
 const { startLfgDeliveryWorker } = require('../utils/lfgDeliveryWorker');
 const { startCompEndingReminder } = require('../utils/compEndingReminder');
@@ -34,6 +34,7 @@ const BUTTON_ROUTES = [
 ];
 const SELECT_ROUTES = [
   { prefix: 'lfgpost:', handler: handleLfgPostSelectInteraction, errorLabel: '[LFG] Post select interaction error:', errorReply: 'Something went wrong updating your LFG post setup.' },
+  { prefix: 'stalemembers:', handler: handleStaleMembersSelect, errorLabel: '[StaleMembers] Rank picker interaction error:', errorReply: 'Something went wrong with the rank picker.' },
 ];
 const MODAL_ROUTES = [
   { prefix: 'lfgpost:', handler: handleLfgPostModalSubmit, errorLabel: '[LFG] Post modal submit error:', errorReply: 'Something went wrong creating your LFG post.' },
