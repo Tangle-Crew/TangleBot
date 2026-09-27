@@ -11,7 +11,7 @@ function mentionOrName(entry) {
 // Updates display names from the server; members who left keep their stored name. onNameChange
 // is awaited for each changed entry so the caller can save it to the sheet.
 async function refreshDisplayNames(guild, entries, onNameChange) {
-  console.log(`[Leaderboard] Refreshing display names for ${entries.length} leaderboard entrie(s)`);
+  console.log(`[Leaderboard] Refreshing display names for ${entries.length} leaderboard entries`);
   const fetchedMembers = await guild.members.fetch().catch(() => null);
   if (!fetchedMembers) return entries;
 
