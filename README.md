@@ -243,7 +243,7 @@ Creates a forum post where members can join a group for an activity, with a role
 7. Every 2 hours, starting no earlier than the start time, the group is asked if it's still active. No **Still Here** click within 10 minutes disbands it.
 8. On startup the bot posts or updates a pinned **Start Here** post in the forum explaining all of this.
 
-Groups are kept in memory, so buttons on posts made before a restart stop working.
+Groups survive restarts: each change is saved to `Tanglebot/data/lfg-groups.json`, and on startup the bot restores them and restarts their timers from that moment. A group that was closing gets a fresh 1-minute countdown with **Cancel Disband**, an empty one a fresh 15 minutes, and a spot held for the queue is offered again.
 
 </details>
 
@@ -526,7 +526,7 @@ The bot registers its slash commands with your server each time it starts. `npm 
 
 To run with Docker instead, use `docker compose up -d --build` from the repo root. It reads `Tanglebot/.env` and keeps `Tanglebot/data/` between restarts.
 
-`Tanglebot/data/` holds small state files: leaderboard message IDs, the LFG start post ID, honeypot test mode, the intake URL override, and the last accepted submission.
+`Tanglebot/data/` holds small state files: leaderboard message IDs, open LFG groups, the LFG start post ID, honeypot test mode, the intake URL override, and the last accepted submission.
 
 ---
 

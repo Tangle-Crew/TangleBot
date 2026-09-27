@@ -7,7 +7,7 @@ const {
   MessageFlags,
   ChannelType,
 } = require('discord.js');
-const { truncate, hasAnyRole } = require('./db');
+const { readJson, writeJson, truncate, hasAnyRole } = require('./db');
 const {
   CATEGORY_OPTIONS,
   findCategoryOption,
@@ -70,9 +70,66 @@ const KEEP_ALIVE_REPLY_WINDOW_MS = 10 * 60 * 1000;
 // Retry delay when a keep-alive check was skipped for a pending queue offer.
 const KEEP_ALIVE_RETRY_DELAY_MS = 15 * 60 * 1000;
 
-// In-memory only; lost on restart.
-const setupSessions = new Map(); // userId -> { category, activity, size, time }
-const activeGroups = new Map(); // groupId -> group state
+const setupSessions = new Map(); // userId -> { category, activity, size, time }; not saved
+const activeGroups = new Map(); // groupId -> group state; saved to GROUPS_DATA_FILE
+
+// Groups are saved here and restored on startup (see restoreLfgGroups).
+const GROUPS_DATA_FILE = 'lfg-groups.json';
+// Waits briefly before writing, so the several changes one click makes are saved together.
+const SAVE_DELAY_MS = 500;
+let saveTimeoutId = null;
+
+function scheduleSave() {
+  if (saveTimeoutId) return;
+  saveTimeoutId = setTimeout(() => {
+    saveTimeoutId = null;
+    const groups = [...activeGroups.values()].filter((g) => g.threadId).map(serializeGroup);
+    try {
+      writeJson(GROUPS_DATA_FILE, { groups });
+    } catch (err) {
+      console.error('[LFG] Could not save groups:', err.message);
+    }
+  }, SAVE_DELAY_MS);
+}
+
+// The fields worth saving; timers are rebuilt on restore.
+function serializeGroup(group) {
+  return {
+    id: group.id,
+    creatorId: group.creatorId,
+    creatorTag: group.creatorTag,
+    roleLabel: group.roleLabel,
+    roleId: group.roleId,
+    color: group.color,
+    emoji: group.emoji,
+    timeEpoch: group.timeEpoch,
+    sizeLabel: group.sizeLabel,
+    sizeCap: Number.isFinite(group.sizeCap) ? group.sizeCap : null, // null = Mass
+    description: group.description,
+    members: [...group.members],
+    status: group.status,
+    threadId: group.threadId,
+    activityMessageId: group.activityMessageId,
+    queue: [...group.queue],
+    pendingOfferUserId: group.pendingOfferUserId,
+    backendGroupId: group.backendGroupId,
+  };
+}
+
+// A group's in-memory state from saved (or parsed) fields, with no timers running yet.
+function newGroupState(fields) {
+  return {
+    ...fields,
+    sizeCap: fields.sizeCap ?? Infinity,
+    members: new Set(fields.members),
+    queue: [...fields.queue],
+    cleanupTimeoutId: null,
+    countdownTimeoutId: null,
+    pendingOfferTimeoutId: null,
+    keepAliveTimeoutId: null,
+    keepAliveReplyTimeoutId: null,
+  };
+}
 
 async function syncBackendQueueCount(group) {
   if (!group?.backendGroupId || !isLfgBackendConfigured()) {
@@ -405,6 +462,7 @@ async function handleDescriptionModalSubmit(interaction) {
   scheduleCountdownRefresh(interaction.client, group);
   scheduleKeepAliveCheck(interaction.client, group);
   setupSessions.delete(interaction.user.id);
+  scheduleSave();
 
   const threadLink = `https://discord.com/channels/${interaction.guildId}/${thread.id}`;
   await interaction.editReply({
@@ -438,6 +496,7 @@ async function renameThreadChannel(channel, group) {
 
 // Re-renders the main post for flows that have no interaction on it to .update().
 async function updateMainPost(channel, group, components = [buildGroupRow(group.id)]) {
+  scheduleSave();
   try {
     // A forum thread's starter message has the thread's id, so it can be edited without a fetch.
     await channel.messages.edit(channel.id, { content: buildGroupText(group), embeds: [], components });
@@ -503,6 +562,7 @@ async function sendOrEditActivity(channel, group, text, components = []) {
   // A Mass group's mentions can exceed Discord's 2000-char cap.
   const message = await channel.send({ content: truncate(text, 2000), components });
   group.activityMessageId = message.id;
+  scheduleSave();
 }
 
 // Returns the group, or replies "no longer exists" and returns null if it's gone or disbanding.
@@ -528,6 +588,7 @@ function tearDownGroup(group) {
   stopCountdownRefresh(group);
   stopKeepAliveCheck(group);
   activeGroups.delete(group.id);
+  scheduleSave();
 }
 
 // The post is gone, so drop the group.
@@ -602,6 +663,7 @@ async function handleQueueOfferTimeout(client, group) {
 // Re-renders the post through the button interaction. Pass components [] to remove the buttons.
 // Returns false (caller should stop) if the post no longer exists.
 async function updateGroupMessage(interaction, group, components = [buildGroupRow(group.id)]) {
+  scheduleSave();
   try {
     await interaction.update({ content: buildGroupText(group), embeds: [], components });
     return true;
@@ -1069,6 +1131,86 @@ async function handleKeepAliveButton(interaction, groupId) {
   });
 }
 
+// ---- Restoring groups after a restart ----
+
+// Restarts a restored group's timers from now, as if its current state had just begun.
+async function resumeGroup(client, channel, group) {
+  // The title's countdown or Open/Full may have changed while the bot was down.
+  if (channel.name !== buildThreadName(group, statusWordFor(group))) await renameThreadChannel(channel, group);
+
+  if (group.status === 'disbanded') {
+    const closesAtEpoch = Math.floor((Date.now() + DISBAND_DELAY_MS) / 1000);
+    await sendOrEditActivity(
+      channel,
+      group,
+      `🛑 This group was closing when the bot restarted. It will close <t:${closesAtEpoch}:R>.`,
+      [buildCancelDisbandRow(group.id)]
+    );
+    schedulePostGroupCleanup(client, group, DISBAND_DELAY_MS);
+    return;
+  }
+
+  scheduleCountdownRefresh(client, group);
+
+  if (group.members.size === 0) {
+    const closesAtEpoch = Math.floor((Date.now() + EMPTY_GROUP_CLEANUP_DELAY_MS) / 1000);
+    await sendOrEditActivity(
+      channel,
+      group,
+      `💤 **This group is empty.** It will automatically close <t:${closesAtEpoch}:R> unless someone rejoins.`
+    );
+    schedulePostGroupCleanup(client, group, EMPTY_GROUP_CLEANUP_DELAY_MS);
+    return;
+  }
+
+  scheduleKeepAliveCheck(client, group);
+  // A spot was being held for the queue: offer it again with a fresh window.
+  if (group.status === 'closed' && !isGroupFull(group)) {
+    await advanceQueueOrReopen(client, channel, group);
+  }
+}
+
+// Called on startup: brings back the groups saved in GROUPS_DATA_FILE whose posts still exist.
+async function restoreLfgGroups(client) {
+  if (!FORUM_CHANNEL_ID) return;
+
+  const saved = readJson(GROUPS_DATA_FILE).groups;
+  const failed = [];
+  let restored = 0;
+  for (const fields of Array.isArray(saved) ? saved : []) {
+    let group = null;
+    try {
+      const channel = await client.channels.fetch(fields.threadId);
+      group = newGroupState(fields);
+      activeGroups.set(group.id, group);
+      await resumeGroup(client, channel, group);
+      restored += 1;
+    } catch (err) {
+      if (group) {
+        if (group.cleanupTimeoutId) clearTimeout(group.cleanupTimeoutId);
+        tearDownGroup(group);
+      }
+      if (isAlreadyGoneError(err)) {
+        console.log(`[LFG] Not restoring group ${fields.id}: its post was deleted.`);
+      } else {
+        console.error(`[LFG] Could not restore group ${fields.id}:`, err.message);
+        failed.push(`<#${fields.threadId}> (**${fields.roleLabel}**): ${err.message}`);
+      }
+    }
+  }
+  // Drops groups whose posts are gone from the file.
+  scheduleSave();
+  console.log(`[LFG] Restored ${restored} group(s) from ${GROUPS_DATA_FILE}.`);
+
+  if (failed.length) {
+    await notifyAdminLog(
+      client,
+      '⚠️ LFG Groups Not Restored',
+      truncate(`These groups couldn't be restored after the restart, so their buttons won't work:\n${failed.join('\n')}`, 4096)
+    );
+  }
+}
+
 // ---- Entry points called from eventHandler.js ----
 async function handleLfgPostSelectInteraction(interaction) {
   const field = interaction.customId.split(':')[2]; // "lfgpost:select:<field>"
@@ -1113,4 +1255,5 @@ module.exports = {
   handleLfgPostSelectInteraction,
   handleLfgPostModalSubmit,
   handleLfgPostGroupButtonInteraction,
+  restoreLfgGroups,
 };

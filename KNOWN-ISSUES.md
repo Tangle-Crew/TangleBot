@@ -12,11 +12,11 @@ Open issues from the September 2026 audit, each with a possible fix. Submission 
 
 ## Limitations
 
-### 2. LFG groups don't survive a restart
+### 2. LFG groups missing from the save file aren't restored
 
-**Issue:** Groups are only kept in memory ([lfgPost.js:73](Tanglebot/src/utils/lfgPost.js#L73)). After a restart or deploy, buttons on older posts reply "This group no longer exists", and those posts never auto-close.
+**Issue:** Groups are restored on startup from `data/lfg-groups.json` ([lfgPost.js](Tanglebot/src/utils/lfgPost.js), `restoreLfgGroups`). If that file is missing or damaged, buttons on existing posts reply "This group no longer exists", and those posts never auto-close.
 
-**Possible fix:** Save each group's state (members, queue, status, times) to a data file or Supabase when it changes, and restore groups and their timers on startup. A smaller step: on startup, close or delete forum posts the bot doesn't know about, so none are left with dead buttons.
+**Possible fix:** On startup, scan the forum for the bot's posts that aren't in the file and rebuild each group from its post. Posts that can't be read get their buttons removed.
 
 ### 3. LFG delivery worker polls every 3 seconds
 

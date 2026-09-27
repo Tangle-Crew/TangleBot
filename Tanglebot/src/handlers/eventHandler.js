@@ -12,6 +12,7 @@ const {
   handleLfgPostSelectInteraction,
   handleLfgPostModalSubmit,
   handleLfgPostGroupButtonInteraction,
+  restoreLfgGroups,
 } = require('../utils/lfgPost');
 const { ensureLfgStartPost } = require('../utils/lfgStartPage');
 const { refreshLeaderboard: refreshPetLeaderboard } = require('../commands/pethighscore');
@@ -69,6 +70,12 @@ function loadEvents(client) {
       await syncCommands(client);
     } catch (err) {
       console.error('Failed to sync slash commands:', err);
+    }
+    // Early, so buttons on existing LFG posts work again as soon as possible.
+    try {
+      await restoreLfgGroups(client);
+    } catch (err) {
+      console.error('[LFG] Failed to restore groups:', err);
     }
     if (isLfgBackendConfigured()) {
       try {
