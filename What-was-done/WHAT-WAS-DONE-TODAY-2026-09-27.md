@@ -4,22 +4,23 @@
 - Exported the data folder path from `src/utils/db.js` so features can keep their own files there.
 - Added `getGroupDetails` and `getGroupGains` to `src/utils/wiseOldMan.js` for loading the group's members, clan ranks and XP gains between two dates.
 - Made `updateAllGroupMembers` emit an `updateAll` event naming the feature that ran it, and had the competition ending reminder name itself.
-- Added a Templar-only `/stalemembers` command that lists WOM group members who gained less than a set amount of XP over a number of months, longest inactive first.
-- Added the `time`, `minxp` and `ignore` options, all required, with `minxp` accepting `250k`/`1.5m`/`250,000` and `ignore` taking comma-separated ranks or `None`, autocompleted from the group's own WOM ranks.
+- Added `src/utils/xlsx.js`, a small dependency-free Excel (`.xlsx`) writer for spreadsheets with several tabs, bold rows and column widths.
+- Added a Templar-only `/stalemembers` command that lists WOM group members who have been inactive or gained less than a set amount of XP over a number of months, in two lists, longest inactive first.
+- Added the required `time` and `minxp` options and an optional `ignore`, with `minxp` accepting `250k`/`1.5m`/`250,000` and `ignore` taking comma-separated ranks or `None`, autocompleted from the group's own WOM ranks.
+- Made leaving `ignore` empty privately show a tick box of the clan's ranks with their emojis and names and a Run button, listing the ticked ranks by emoji and name and showing the matching command with `ignore` filled in to copy for next time.
 - Skipped ignored ranks and members who joined the WOM group during the time frame, using the earlier of WOM's two join dates so re-added members keep their original date.
-- Listed members within 2 weeks of the time frame as close, marked ⌛ with a live countdown to when they reach it.
+- Listed members with no XP change over the time frame as "Inactive", including those within 2 weeks of it as close, marked ⌛ with a live countdown to when they reach it, and members active more recently who gained under `minxp` as "Active, but under minxp".
 - Showed each member's rank emoji, XP gained and how long ago they were last active in months and weeks, with ⏳ for members WOM hasn't updated in a week and ❓ for members WOM can't track.
-- Built page 1 with when and by whom the list was checked in local time, the options, totals, a legend of only the markers in use and a guide to the buttons, and sized later pages to match its height with the last page padded.
+- Posted a header message with when and by whom the list was checked in local time, the options, totals, a legend of only the markers in use and a guide to the buttons, then each list as its own message with 15 members a page, its title on every page and the last page padded.
+- Showed rank names capitalized with spaces instead of underscores, and ignored ranks in the clan's rank order in the copyable command and the header.
 - Always posted the list in the admin log channel, with a private reply linking to it when the command is run from any other channel.
-- Added Prev/Next, Update, Export and Refresh WOM buttons that work for any Templar with no time limit.
-- Made Export send a private CSV with who checked and exported the list and when, and keep the newest 5 copies in `data/stalemembers-exports`.
+- Added Update, a red Refresh WOM and a green Export all button under the header, and Prev, Next and a green Export under each list, all working for any Templar with no time limit.
+- Made Export privately send an Excel file of that list, or of both lists as separate tabs for Export all, with who checked and exported it and when, keeping the newest 5 copies in `data/stalemembers-exports`.
 - Made Refresh WOM run WOM's update all, show a local-time countdown, reload the list after 5 minutes and DM everyone waiting, with one refresh at a time for the group that later presses join.
-- Reloaded the list automatically 5 minutes after the competition ending reminder runs update all, showing "auto refreshed" on page 1.
-- Replaced the previous list whenever the command is run again, tracked in `data/stalemembers.json` so it survives restarts, and kept Update and Refresh working on lists posted before a restart.
-- Hooked `/stalemembers` into `src/handlers/eventHandler.js` to route its buttons and start it on startup.
-- Documented `/stalemembers` in the README.
-- Made `ignore` optional: leaving it empty privately shows a tick box of the clan's ranks with their emojis and a Run button, showing the matching command with `ignore` filled in to copy for next time.
-- Showed ignored ranks in the clan's rank order in the copyable command and on page 1.
-- Routed the rank picker's menu through `src/handlers/eventHandler.js`.
-- Documented the rank picker in the README.
-- Verified the changes with `node --check` and scripted tests against the live WOM group, with Discord interactions and WOM's update all simulated.
+- Reloaded the list automatically 5 minutes after the competition ending reminder runs update all, showing "auto refreshed" in the header.
+- Made Update and Refresh edit all of a list's messages at once, keeping each list on its page, with an admin log alert if editing them fails.
+- Counted close members whose countdown would already have passed, from month-end dates, as inactive.
+- Replaced the previous list's messages whenever the command is run again, tracked in `data/stalemembers.json` so it survives restarts, kept Update and Refresh working on lists posted before a restart, and reposted a list from an older version, posted as a single message, as three when its Update is pressed.
+- Hooked `/stalemembers` into `src/handlers/eventHandler.js` to route its buttons and rank picker menu and start it on startup.
+- Documented `/stalemembers` and its rank picker in the README.
+- Verified the changes with `node --check` and scripted tests against the live WOM group, with Discord interactions and WOM's update all simulated, and opened the exports in Excel.
