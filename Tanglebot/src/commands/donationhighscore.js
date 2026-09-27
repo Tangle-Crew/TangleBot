@@ -166,7 +166,7 @@ async function postLeaderboard(guild, channelId, entries, botUserId) {
   return postLeaderboardShared(guild, channelId, entries, botUserId, {
     buildEmbeds,
     dataFile: 'donationhighscores_message.json',
-    logPrefix: 'DHS',
+    logPrefix: 'DonationHighscore',
     isOwnLeaderboardMessage,
     onDisplayNameChange: async (entry) => {
       try {
@@ -175,16 +175,16 @@ async function postLeaderboard(guild, channelId, entries, botUserId) {
           `${SHEET_TAB}!A${entry.rowNumber}:C${entry.rowNumber}`,
           [entry.discordId, entry.displayName, entry.donated]
         );
-        console.log(`[DHS] Refreshed stored display name for ${entry.discordId} -> "${entry.displayName}"`);
+        console.log(`[DonationHighscore] Refreshed stored display name for ${entry.discordId} -> "${entry.displayName}"`);
       } catch (err) {
-        console.error(`[DHS] Failed to persist refreshed display name for ${entry.discordId}:`, err);
+        console.error(`[DonationHighscore] Failed to persist refreshed display name for ${entry.discordId}:`, err);
       }
     },
   });
 }
 
 async function loadEntries() {
-  console.log('[DHS] Fetching donation entries from sheet');
+  console.log('[DonationHighscore] Fetching donation entries from sheet');
   const rows = await getRows(process.env.DONATIONS_SHEET_ID, DATA_RANGE);
   return rows
     .map((r, i) => ({
@@ -224,7 +224,7 @@ async function refreshLeaderboard(client) {
 async function syncDonationRoles(guild, discordId, previousDonated, newDonated) {
   const member = await guild.members.fetch(discordId).catch(() => null);
   if (!member) {
-    console.warn(`[DHS] Could not fetch member ${discordId} to sync donation tier roles`);
+    console.warn(`[DonationHighscore] Could not fetch member ${discordId} to sync donation tier roles`);
     return null;
   }
 
@@ -237,7 +237,7 @@ async function syncDonationRoles(guild, discordId, previousDonated, newDonated) 
 
     const role = guild.roles.cache.get(roleId);
     if (!role) {
-      console.warn(`[DHS] ${tier.roleEnv} (${roleId}) not found in this guild`);
+      console.warn(`[DonationHighscore] ${tier.roleEnv} (${roleId}) not found in this guild`);
       continue;
     }
 
@@ -246,10 +246,10 @@ async function syncDonationRoles(guild, discordId, previousDonated, newDonated) 
 
     if (qualifies && !hasRole) {
       await member.roles.add(role);
-      console.log(`[DHS] Granted ${tier.name} donation role to ${member.user.tag}`);
+      console.log(`[DonationHighscore] Granted ${tier.name} donation role to ${member.user.tag}`);
     } else if (!qualifies && hasRole) {
       await member.roles.remove(role);
-      console.log(`[DHS] Removed ${tier.name} donation role from ${member.user.tag}`);
+      console.log(`[DonationHighscore] Removed ${tier.name} donation role from ${member.user.tag}`);
     }
   }
 
@@ -288,7 +288,7 @@ module.exports = {
     const subcommand = interaction.options.getSubcommand();
 
     if (TEMPLAR_ROLE_ID && !interaction.member.roles.cache.has(TEMPLAR_ROLE_ID)) {
-      console.log(`[DHS] ${interaction.user.tag} was denied /donationhighscore ${subcommand} (missing Templar role)`);
+      console.log(`[DonationHighscore] ${interaction.user.tag} was denied /donationhighscore ${subcommand} (missing Templar role)`);
       return interaction.reply({
         content: 'You need the Templar role to use this command.',
         flags: MessageFlags.Ephemeral,
@@ -303,7 +303,7 @@ module.exports = {
     const amount = parseDonationAmount(amountInput);
 
     if (amount === null || amount <= 0) {
-      console.warn(`[DHS] ${interaction.user.tag} submitted invalid amount "${amountInput}" for /donationhighscore ${subcommand}`);
+      console.warn(`[DonationHighscore] ${interaction.user.tag} submitted invalid amount "${amountInput}" for /donationhighscore ${subcommand}`);
       return interaction.reply({
         content: `Couldn't read a donation amount from "${amountInput}" — use a raw number or shorthand like \`10m\`, \`10k\`, \`1b\`, or \`10.1m\`.`,
         flags: MessageFlags.Ephemeral,
@@ -315,7 +315,7 @@ module.exports = {
     try {
       const guild = interaction.guild;
       const member = await guild.members.fetch(targetUser.id).catch(() => null);
-      if (!member) console.warn(`[DHS] Could not fetch member ${targetUser.id} (${targetUser.tag}) — falling back to username`);
+      if (!member) console.warn(`[DonationHighscore] Could not fetch member ${targetUser.id} (${targetUser.tag}) — falling back to username`);
       const displayName = member?.displayName || targetUser.username;
 
       const { currentAmount, newAmount, clamped, noDonationsLogged } = await withFileLock(DONATION_LOCK_KEY, async () => {
@@ -355,19 +355,19 @@ module.exports = {
         try {
           await postLeaderboard(guild, channelId, sortedForDisplay(loadedEntries), interaction.client.user.id);
         } catch (err) {
-          console.error('[DHS] Failed to update leaderboard post after a donation edit:', err.message);
+          console.error('[DonationHighscore] Failed to update leaderboard post after a donation edit:', err.message);
         }
 
         return { currentAmount, newAmount, clamped };
       });
 
       if (noDonationsLogged) {
-        console.log(`[DHS] ${interaction.user.tag} tried to remove from ${targetUser.tag}, who has no donations logged`);
+        console.log(`[DonationHighscore] ${interaction.user.tag} tried to remove from ${targetUser.tag}, who has no donations logged`);
         return interaction.editReply(`<@${targetUser.id}> doesn't have any donations logged.`);
       }
 
       if (subcommand === 'add') {
-        console.log(`[DHS] ${interaction.user.tag} added ${formatGP(amount)} to ${targetUser.tag} (now ${formatGP(newAmount)})`);
+        console.log(`[DonationHighscore] ${interaction.user.tag} added ${formatGP(amount)} to ${targetUser.tag} (now ${formatGP(newAmount)})`);
         notifyAdminLog(
           interaction.client,
           '💰 Donation Added',
@@ -376,8 +376,8 @@ module.exports = {
           EMBED_COLOR
         );
       } else {
-        console.log(`[DHS] ${interaction.user.tag} removed ${formatGP(amount)} from ${targetUser.tag} (now ${formatGP(newAmount)})`);
-        if (clamped) console.warn(`[DHS] ${targetUser.tag}'s total would have gone negative — clamped to 0`);
+        console.log(`[DonationHighscore] ${interaction.user.tag} removed ${formatGP(amount)} from ${targetUser.tag} (now ${formatGP(newAmount)})`);
+        if (clamped) console.warn(`[DonationHighscore] ${targetUser.tag}'s total would have gone negative — clamped to 0`);
         notifyAdminLog(
           interaction.client,
           '💰 Donation Removed',
@@ -402,7 +402,7 @@ module.exports = {
 
       await interaction.editReply(summary);
     } catch (err) {
-      console.error('[DHS] Fatal error:', err);
+      console.error('[DonationHighscore] Fatal error:', err);
       await interaction.editReply(`Error: ${err.message}`);
     }
   },

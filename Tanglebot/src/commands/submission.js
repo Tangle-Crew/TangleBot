@@ -52,7 +52,7 @@ module.exports = {
 
   async execute(interaction) {
     const subcommand = interaction.options.getSubcommand();
-    console.log(`/submission ${subcommand} invoked by ${interaction.user.username}`);
+    console.log(`[Submission] /submission ${subcommand} invoked by ${interaction.user.username}`);
     const privateReply = interaction.options.getBoolean('private') ?? false;
     const flags = privateReply ? MessageFlags.Ephemeral : undefined;
 

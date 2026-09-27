@@ -6,7 +6,7 @@ let cachedAuth = null;
 function getAuth() {
   if (cachedAuth) return cachedAuth;
 
-  console.log('Initializing Google Sheets auth from service account credentials');
+  console.log('[Sheets] Initializing Google Sheets auth from service account credentials');
   const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
   if (!raw) throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON is not set in .env');
 
@@ -29,14 +29,14 @@ async function getSheetsClient() {
 }
 
 async function getRows(sheetId, range) {
-  console.log(`Reading sheet rows: ${range}`);
+  console.log(`[Sheets] Reading sheet rows: ${range}`);
   const sheets = await getSheetsClient();
   const res = await sheets.spreadsheets.values.get({ spreadsheetId: sheetId, range });
   return res.data.values || [];
 }
 
 async function updateRow(sheetId, range, values) {
-  console.log(`Updating sheet row: ${range}`);
+  console.log(`[Sheets] Updating sheet row: ${range}`);
   const sheets = await getSheetsClient();
   await sheets.spreadsheets.values.update({
     spreadsheetId: sheetId,
@@ -47,7 +47,7 @@ async function updateRow(sheetId, range, values) {
 }
 
 async function appendRow(sheetId, range, values) {
-  console.log(`Appending sheet row: ${range}`);
+  console.log(`[Sheets] Appending sheet row: ${range}`);
   const sheets = await getSheetsClient();
   const res = await sheets.spreadsheets.values.append({
     spreadsheetId: sheetId,
@@ -62,7 +62,7 @@ async function appendRow(sheetId, range, values) {
 // The row number from an append's updatedRange, e.g. "Sheet!A15:C15" -> 15, or null.
 function parseAppendedRowNumber(updatedRange) {
   const match = /![A-Z]+(\d+):/.exec(updatedRange || '');
-  if (!match) console.warn(`Could not parse a row number out of updatedRange: "${updatedRange}"`);
+  if (!match) console.warn(`[Sheets] Could not parse a row number out of updatedRange: "${updatedRange}"`);
   return match ? parseInt(match[1], 10) : null;
 }
 

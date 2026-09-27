@@ -652,6 +652,7 @@ async function handleQueueOfferTimeout(client, group) {
   const skippedUserId = group.queue.shift();
   group.pendingOfferUserId = null;
   group.pendingOfferTimeoutId = null;
+  console.log(`[LFG] Queue offer for ${skippedUserId} on group ${group.id} expired; removed them from the queue`);
 
   try {
     const channel = await client.channels.fetch(group.threadId);
@@ -1085,6 +1086,7 @@ async function runKeepAliveCheck(client, group) {
       [buildKeepAliveRow(group.id)]
     );
     group.keepAliveReplyTimeoutId = setTimeout(() => handleKeepAliveTimeout(client, group), KEEP_ALIVE_REPLY_WINDOW_MS);
+    console.log(`[LFG] Asked group ${group.id} if it's still active`);
   } catch (err) {
     cleanupStaleGroupOrLog(group, err, `[LFG] Could not send keep-alive check for group ${group.id}:`);
   }
@@ -1190,6 +1192,7 @@ async function restoreLfgGroups(client) {
       activeGroups.set(group.id, group);
       await resumeGroup(client, channel, group);
       restored += 1;
+      console.log(`[LFG] Restored group ${group.id} (${group.roleLabel}, ${group.status}, ${group.members.size} member(s)) in thread ${group.threadId}`);
     } catch (err) {
       if (group) {
         if (group.cleanupTimeoutId) clearTimeout(group.cleanupTimeoutId);

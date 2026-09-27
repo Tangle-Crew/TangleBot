@@ -10,7 +10,7 @@ function readJson(filename) {
   try {
     return JSON.parse(fs.readFileSync(filePath, 'utf8'));
   } catch (err) {
-    console.error(`Could not parse ${filename}, treating it as empty:`, err.message);
+    console.error(`[Data] Could not parse ${filename}, treating it as empty:`, err.message);
     return {};
   }
 }
@@ -20,7 +20,7 @@ let writeCounter = 0;
 
 function writeJson(filename, data) {
   const filePath = path.join(DATA_DIR, filename);
-  console.log(`Writing data file: ${filename}`);
+  console.log(`[Data] Writing data file: ${filename}`);
   fs.mkdirSync(DATA_DIR, { recursive: true });
   // Unique per call, so concurrent writes don't share a temp file.
   const tempPath = `${filePath}.${process.pid}.${++writeCounter}.tmp`;

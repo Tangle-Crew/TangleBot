@@ -162,15 +162,22 @@ module.exports = {
   },
 
   async execute(interaction) {
+    console.log(`[WeeklyComp] ${interaction.user.tag} ran /weeklycomp`);
+    // Logs why the command was turned down, then tells the user privately.
+    const reject = (content) => {
+      console.log(`[WeeklyComp] Rejected /weeklycomp from ${interaction.user.tag}: ${content}`);
+      return interaction.reply({ content, flags: MessageFlags.Ephemeral });
+    };
+
     if (!interaction.member.roles.cache.has(TEMPLAR_ROLE_ID)) {
-      return interaction.reply({ content: 'You need the Templar role to use this command.', flags: MessageFlags.Ephemeral });
+      return reject('You need the Templar role to use this command.');
     }
 
     const prefix = interaction.options.getString('prefix', true).trim();
     const metricInputs = METRIC_OPTION_NAMES.map(optName => interaction.options.getString(optName)).filter(Boolean);
 
     if (!prefix) {
-      return interaction.reply({ content: 'Prefix cannot be empty.', flags: MessageFlags.Ephemeral });
+      return reject('Prefix cannot be empty.');
     }
 
     const metrics = [];
@@ -188,52 +195,36 @@ module.exports = {
     }
 
     if (unknownInputs.length > 0) {
-      return interaction.reply({
-        content: `Unknown boss/skill${unknownInputs.length === 1 ? '' : 's'} "${unknownInputs.join('", "')}". Pick from the autocomplete suggestions.`,
-        flags: MessageFlags.Ephemeral,
-      });
+      return reject(`Unknown boss/skill${unknownInputs.length === 1 ? '' : 's'} "${unknownInputs.join('", "')}". Pick from the autocomplete suggestions.`);
     }
     if (duplicateNames.length > 0) {
-      return interaction.reply({
-        content: `You listed ${duplicateNames.length === 1 ? 'a metric' : 'metrics'} more than once: **${duplicateNames.join(', ')}**. Pick each boss/skill in only one slot.`,
-        flags: MessageFlags.Ephemeral,
-      });
+      return reject(`You listed ${duplicateNames.length === 1 ? 'a metric' : 'metrics'} more than once: **${duplicateNames.join(', ')}**. Pick each boss/skill in only one slot.`);
     }
 
     const startsAt = parseDateInput(interaction.options.getString('start', true));
     const durationDays = interaction.options.getInteger('duration') ?? 7;
 
     if (!startsAt) {
-      return interaction.reply({
-        content: 'Could not parse the start date. Use `YYYY-MM-DD`, `YYYY/MM/DD`, or `MM/DD/YYYY` (Eastern Time), optionally with an hour — `HH` (24-hour) or `H` + `am`/`pm`, e.g. `2025-09-20 18` or `2025-09-20 6pm`.',
-        flags: MessageFlags.Ephemeral,
-      });
+      // A week from today, so the example is never a date that's already passed.
+      const example = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      return reject(`Could not parse the start date. Use \`YYYY-MM-DD\`, \`YYYY/MM/DD\`, or \`MM/DD/YYYY\` (Eastern Time), optionally with an hour — \`HH\` (24-hour) or \`H\` + \`am\`/\`pm\`, e.g. \`${example} 18\` or \`${example} 6pm\`.`);
     }
 
     // WOM and Discord both reject a start in the past, so catch it before anything is created.
     if (startsAt <= new Date()) {
-      return interaction.reply({
-        content: `The start time (<t:${Math.floor(startsAt.getTime() / 1000)}:F>) has already passed. Pick a time in the future.`,
-        flags: MessageFlags.Ephemeral,
-      });
+      return reject(`The start time (<t:${Math.floor(startsAt.getTime() / 1000)}:F>) has already passed. Pick a time in the future.`);
     }
 
     const endsAt = new Date(startsAt.getTime() + durationDays * 24 * 60 * 60 * 1000);
 
     const groupId = interaction.options.getInteger('group_id') ?? (process.env.WOM_GROUP_ID ? Number(process.env.WOM_GROUP_ID) : null);
     if (!groupId) {
-      return interaction.reply({
-        content: 'No WOM group ID configured. Set `WOM_GROUP_ID` in the bot config, or pass the `group_id` option.',
-        flags: MessageFlags.Ephemeral,
-      });
+      return reject('No WOM group ID configured. Set `WOM_GROUP_ID` in the bot config, or pass the `group_id` option.');
     }
 
     const groupVerificationCode = interaction.options.getString('verification_code') ?? process.env.WOM_GROUP_VERIFICATION_CODE ?? null;
     if (!groupVerificationCode) {
-      return interaction.reply({
-        content: 'No WOM group verification code configured. Set `WOM_GROUP_VERIFICATION_CODE` in the bot config, or pass the `verification_code` option.',
-        flags: MessageFlags.Ephemeral,
-      });
+      return reject('No WOM group verification code configured. Set `WOM_GROUP_VERIFICATION_CODE` in the bot config, or pass the `verification_code` option.');
     }
 
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -268,10 +259,12 @@ module.exports = {
         time: 60_000,
       });
     } catch {
+      console.log(`[WeeklyComp] ${interaction.user.tag} didn't confirm in time; nothing created`);
       return interaction.editReply({ content: 'Confirmation timed out — nothing was created.', embeds: [], components: [] });
     }
 
     if (confirmation.customId === 'weeklycomp:cancel') {
+      console.log(`[WeeklyComp] ${interaction.user.tag} cancelled; nothing created`);
       return confirmation.update({ content: 'Cancelled — nothing was created.', embeds: [], components: [] });
     }
 
@@ -280,7 +273,7 @@ module.exports = {
       components: [],
     });
 
-    console.log(`[weeklycomp] ${interaction.user.tag} creating "${prefix}" (${metrics.map(m => m.value).join(', ')}) ${startsAt.toISOString()} -> ${endsAt.toISOString()} in WOM group ${groupId}`);
+    console.log(`[WeeklyComp] ${interaction.user.tag} creating "${prefix}" (${metrics.map(m => m.value).join(', ')}) ${startsAt.toISOString()} -> ${endsAt.toISOString()} in WOM group ${groupId}`);
 
     // One WOM competition per metric.
     const created = [];
@@ -291,7 +284,7 @@ module.exports = {
         created.push({ metric, title, competition: result.competition, url: `https://wiseoldman.net/competitions/${result.competition.id}` });
         clearStandingsCache();
       } catch (err) {
-        console.error(`[weeklycomp] Failed to create WOM competition for ${metric.name}:`, err);
+        console.error(`[WeeklyComp] Failed to create WOM competition for ${metric.name}:`, err);
         if (created.length === 0) {
           return interaction.editReply(`Failed to create the Wise Old Man competition: ${err.message}`);
         }
@@ -333,7 +326,7 @@ module.exports = {
         reason: `Created by /weeklycomp (${interaction.user.tag})`,
       });
     } catch (err) {
-      console.error('[weeklycomp] Failed to create Discord event:', err);
+      console.error('[WeeklyComp] Failed to create Discord event:', err);
       const createdLines = created.map(c => `${c.title}: ${c.url}`).join('\n');
       await interaction.editReply(
         `Created the Wise Old Man competition${created.length === 1 ? '' : 's'}, but failed to create the Discord event: ${err.message}\n\n` +
@@ -349,7 +342,7 @@ module.exports = {
       return;
     }
 
-    console.log(`[weeklycomp] Created event ${event.id} and WOM competition${created.length === 1 ? '' : 's'} ${created.map(c => c.competition.id).join(', ')}`);
+    console.log(`[WeeklyComp] Created event ${event.id} and WOM competition${created.length === 1 ? '' : 's'} ${created.map(c => c.competition.id).join(', ')}`);
 
     const embed = new EmbedBuilder()
       .setColor(DISCORD_GREEN)

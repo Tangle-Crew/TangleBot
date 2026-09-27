@@ -11,7 +11,7 @@ function mentionOrName(entry) {
 // Updates display names from the server; members who left keep their stored name. onNameChange
 // is awaited for each changed entry so the caller can save it to the sheet.
 async function refreshDisplayNames(guild, entries, onNameChange) {
-  console.log(`Refreshing display names for ${entries.length} leaderboard entrie(s)`);
+  console.log(`[Leaderboard] Refreshing display names for ${entries.length} leaderboard entrie(s)`);
   const fetchedMembers = await guild.members.fetch().catch(() => null);
   if (!fetchedMembers) return entries;
 
@@ -72,7 +72,7 @@ async function findPreviousLeaderboardMessages(channel, botUserId, isOwnLeaderbo
 // options:
 //   buildEmbeds(entries) -> Embed[]              builds this leaderboard's embeds
 //   dataFile                                     data/ JSON file storing the last-posted message IDs
-//   logPrefix                                    tag for console logs, e.g. "PHS" / "DHS"
+//   logPrefix                                    tag for console logs, e.g. "PetHighscore"
 //   isOwnLeaderboardMessage(firstEmbed) -> bool   identifies this leaderboard's own post during recovery
 //   onDisplayNameChange(entry) -> Promise         (optional) persists a refreshed display name back to the sheet
 async function postLeaderboard(guild, channelId, entries, botUserId, options) {

@@ -179,6 +179,7 @@ async function handleSyncedGroupButtonInteraction(interaction) {
     return;
   }
 
+  console.log(`[LFG] Synced group ${action} clicked: group ${groupId} by ${interaction.user.username}`);
   // The backend call can take longer than Discord's 3-second reply window.
   await interaction.deferUpdate();
 
@@ -196,6 +197,7 @@ async function handleSyncedGroupButtonInteraction(interaction) {
   }
 
   if (!result?.success) {
+    console.log(`[LFG] Synced group ${action} on ${groupId} refused by the backend: ${result?.message ?? 'no message'}`);
     return followUpEphemeral(interaction, `⚠️ ${result?.message ?? 'Unable to update group.'}`);
   }
 
@@ -204,6 +206,7 @@ async function handleSyncedGroupButtonInteraction(interaction) {
   }
 
   await applySyncedGroupUpdate(interaction, result.group, action);
+  console.log(`[LFG] Synced group ${action} on ${groupId} done; status ${result.group.status}`);
   try {
     await followUpEphemeral(interaction, `✅ ${result.message ?? 'Group updated.'}`, { autoDelete: true });
   } catch (err) {

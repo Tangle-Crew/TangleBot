@@ -25,13 +25,13 @@ client.commands = new Collection();
 
 // Log a missed rejection instead of crashing the bot.
 process.on('unhandledRejection', (err) => {
-  console.error('Unhandled promise rejection:', err);
+  console.error('[Bot] Unhandled promise rejection:', err);
 });
 
 loadCommands(client);
 loadEvents(client);
 
 client.login(discordBotToken).catch((err) => {
-  console.error('Failed to log in to Discord:', err);
+  console.error('[Bot] Failed to log in to Discord:', err);
   process.exit(1);
 });

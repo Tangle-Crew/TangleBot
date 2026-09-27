@@ -25,8 +25,8 @@ const { handleSyncedGroupButtonInteraction } = require('../utils/lfgSyncedPost')
 // customId prefix -> handler, per interaction kind. The honeypot route has no errorReply, so its
 // failures stay silent.
 const BUTTON_ROUTES = [
-  { prefix: 'hp:', handler: handleHoneypotButtonInteraction, errorLabel: 'Honeypot button interaction error:' },
-  { prefix: 'roles:', handler: handleRoleMenuButtonInteraction, errorLabel: 'Role menu button interaction error:', errorReply: 'Something went wrong updating your roles.' },
+  { prefix: 'hp:', handler: handleHoneypotButtonInteraction, errorLabel: '[Honeypot] Button interaction error:' },
+  { prefix: 'roles:', handler: handleRoleMenuButtonInteraction, errorLabel: '[LFG] Role menu button interaction error:', errorReply: 'Something went wrong updating your roles.' },
   { prefix: 'lfgpostgroup:', handler: handleLfgPostGroupButtonInteraction, errorLabel: '[LFG] Post group button interaction error:', errorReply: 'Something went wrong updating that group.' },
   { prefix: 'lfgsyncgroup:', handler: handleSyncedGroupButtonInteraction, errorLabel: '[LFG] Synced group button interaction error:', errorReply: 'Something went wrong updating that shared LFG group.' },
 ];
@@ -54,22 +54,19 @@ function loadEvents(client) {
   let stopCompEndingReminder = null;
   const submissionConfig = loadSubmissionConfig();
   client.submissionConfig = submissionConfig;
-  if (submissionConfig.enabled) {
-    console.log('Discord submission intake enabled.');
-  }
 
   const honeypotConfig = loadHoneypotConfig();
   client.honeypotConfig = honeypotConfig;
   if (honeypotConfig.enabled) {
-    console.log('Honeypot channel trap enabled.');
+    console.log('[Honeypot] Channel trap enabled.');
   }
 
   client.once(Events.ClientReady, async (c) => {
-    console.log(`Logged in as ${c.user.tag}`);
+    console.log(`[Bot] Logged in as ${c.user.tag}`);
     try {
       await syncCommands(client);
     } catch (err) {
-      console.error('Failed to sync slash commands:', err);
+      console.error('[Commands] Failed to sync slash commands:', err);
     }
     // Early, so buttons on existing LFG posts work again as soon as possible.
     try {
@@ -93,7 +90,7 @@ function loadEvents(client) {
     try {
       await sendHoneypotStartupMessage(client, honeypotConfig);
     } catch (err) {
-      console.error('Failed to send honeypot startup message:', err);
+      console.error('[Honeypot] Failed to reset the trap channels on startup:', err);
     }
 
     try {
@@ -105,13 +102,13 @@ function loadEvents(client) {
     try {
       await refreshPetLeaderboard(client);
     } catch (err) {
-      console.error('[PHS] Failed to refresh pet leaderboard on startup:', err);
+      console.error('[PetHighscore] Failed to refresh pet leaderboard on startup:', err);
     }
 
     try {
       await refreshDonationLeaderboard(client);
     } catch (err) {
-      console.error('[DHS] Failed to refresh donation leaderboard on startup:', err);
+      console.error('[DonationHighscore] Failed to refresh donation leaderboard on startup:', err);
     }
 
     if (process.env.CLAN_ID) {
@@ -134,23 +131,25 @@ function loadEvents(client) {
         const channel = await client.channels.fetch(adminLogChannelId);
         const ping = ownerRoleId ? `<@&${ownerRoleId}> ` : '';
         await channel.send(`${ping}Bot is online and ready.`);
+        console.log('[Bot] Sent the online message to the admin log.');
       } catch (err) {
-        console.error('Failed to send startup message to admin log channel:', err);
+        console.error('[Bot] Failed to send the online message to the admin log:', err);
       }
     }
+    console.log('[Bot] Startup finished.');
   });
 
   client.on(Events.MessageCreate, async (message) => {
     try {
       await handleSubmissionMessage(message, submissionConfig);
     } catch (err) {
-      console.error('Submission intake error:', err);
+      console.error('[Submission] Intake error:', err);
     }
 
     try {
       await handleHoneypotMessage(message, honeypotConfig, client);
     } catch (err) {
-      console.error('Honeypot error:', err);
+      console.error('[Honeypot] Error handling a message:', err);
     }
   });
 
@@ -161,8 +160,9 @@ function loadEvents(client) {
     if (newMessage.content !== '[Original Message Deleted]') return;
     try {
       await newMessage.delete();
+      console.log(`[Announcements] Deleted crossposted message ${newMessage.id} whose original was deleted.`);
     } catch (err) {
-      console.error('Failed to delete stale announcement message:', err);
+      console.error('[Announcements] Failed to delete stale crossposted message:', err);
     }
   });
 
@@ -189,7 +189,7 @@ function loadEvents(client) {
       try {
         await command.autocomplete(interaction);
       } catch (err) {
-        console.error('Autocomplete error:', err);
+        console.error(`[Interactions] Autocomplete error for /${interaction.commandName}:`, err);
       }
       return;
     }
@@ -199,7 +199,7 @@ function loadEvents(client) {
     try {
       await command.execute(interaction);
     } catch (err) {
-      console.error(err);
+      console.error(`[Interactions] /${interaction.commandName} failed for ${interaction.user.tag}:`, err);
       await replyOrFollowUp(interaction, 'Something went wrong running that command.');
     }
   });

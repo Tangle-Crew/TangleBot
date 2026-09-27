@@ -24,13 +24,13 @@ for (const file of fs.readdirSync(commandsPath).filter(f => f.endsWith('.js'))) 
   if (command.requiredEnv) {
     const missing = command.requiredEnv.filter(k => !process.env[k]);
     if (missing.length > 0) {
-      console.log(`Skipping /${command.data.name}: missing env var(s): ${missing.join(', ')}`);
+      console.log(`[Deploy] Skipping /${command.data.name}: missing env var(s): ${missing.join(', ')}`);
       continue;
     }
   }
 
   if (command.requiredEnvAny && !command.requiredEnvAny.some(k => process.env[k])) {
-    console.log(`Skipping /${command.data.name}: none of the env var(s) set: ${command.requiredEnvAny.join(', ')}`);
+    console.log(`[Deploy] Skipping /${command.data.name}: none of the env var(s) set: ${command.requiredEnvAny.join(', ')}`);
     continue;
   }
 
@@ -41,17 +41,17 @@ const rest = new REST().setToken(discordBotToken);
 
 (async () => {
   try {
-    console.log(`Deploying ${commands.length} slash command(s)...`);
+    console.log(`[Deploy] Deploying ${commands.length} slash command(s)...`);
     await rest.put(
       Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.CLAN_ID),
       { body: commands }
     );
-    console.log('Slash commands deployed successfully.');
+    console.log('[Deploy] Slash commands deployed successfully.');
   } catch (err) {
     if (err?.code === 50001) {
       console.error(
         [
-          'Discord rejected the command deploy with Missing Access.',
+          '[Deploy] Discord rejected the command deploy with Missing Access.',
           'Check that:',
           '- CLAN_ID is the Discord server ID where the bot is installed.',
           '- CLIENT_ID belongs to the same Discord application as DISCORD_BOT_TOKEN.',
@@ -60,7 +60,7 @@ const rest = new REST().setToken(discordBotToken);
         ].join('\n')
       );
     }
-    console.error(err);
+    console.error('[Deploy] Failed to deploy slash commands:', err);
     process.exitCode = 1;
   }
 })();

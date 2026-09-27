@@ -166,6 +166,7 @@ async function ensureLfgStartPost(client) {
       await thread.messages.edit(thread.id, { embeds });
       writeJson(START_POST_DATA_FILE, { threadId: thread.id });
       await pinStartPost(client, thread);
+      console.log(`[LFG] Updated start page post: thread ${thread.id}`);
       if (adopted) {
         console.log(`[LFG] Adopted the bot's pinned thread as the LFG start page: ${thread.id}`);
         await notifyAdminLog(

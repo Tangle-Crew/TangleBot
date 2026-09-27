@@ -55,7 +55,7 @@ function ensurePetsLoaded() {
       })
       .catch(err => {
         petsLoadPromise = null; // retry next call instead of caching the failure
-        console.error('[PHS] Failed to load pet catalog from the Pets sheet tab:', err);
+        console.error('[PetHighscore] Failed to load pet catalog from the Pets sheet tab:', err);
         throw err;
       });
   }
@@ -194,7 +194,7 @@ async function postLeaderboard(guild, channelId, entries, botUserId) {
   return postLeaderboardShared(guild, channelId, entries, botUserId, {
     buildEmbeds,
     dataFile: 'pethighscores_message.json',
-    logPrefix: 'PHS',
+    logPrefix: 'PetHighscore',
     isOwnLeaderboardMessage,
     onDisplayNameChange: async (entry) => {
       try {
@@ -203,16 +203,16 @@ async function postLeaderboard(guild, channelId, entries, botUserId) {
           `${SHEET_TAB}!A${entry.rowNumber}:C${entry.rowNumber}`,
           [entry.discordId, entry.displayName, entry.petKeys.join(', ')]
         );
-        console.log(`[PHS] Refreshed stored display name for ${entry.discordId} -> "${entry.displayName}"`);
+        console.log(`[PetHighscore] Refreshed stored display name for ${entry.discordId} -> "${entry.displayName}"`);
       } catch (err) {
-        console.error(`[PHS] Failed to persist refreshed display name for ${entry.discordId}:`, err);
+        console.error(`[PetHighscore] Failed to persist refreshed display name for ${entry.discordId}:`, err);
       }
     },
   });
 }
 
 async function fetchEntries() {
-  console.log('[PHS] Fetching pet highscore entries from sheet');
+  console.log('[PetHighscore] Fetching pet highscore entries from sheet');
   const rows = await getRows(process.env.PET_HIGHSCORES_SHEET_ID, DATA_RANGE);
   return rows
     .map((r, i) => ({
@@ -232,7 +232,7 @@ function ensureEntriesLoaded() {
   if (!entriesLoadPromise) {
     entriesLoadPromise = fetchEntries().catch(err => {
       entriesLoadPromise = null;
-      console.error('[PHS] Failed to load entries from the Highscores sheet tab:', err);
+      console.error('[PetHighscore] Failed to load entries from the Highscores sheet tab:', err);
       throw err;
     });
   }
@@ -276,13 +276,13 @@ async function syncMasterRole(guild, discordId, count) {
 
   const member = await guild.members.fetch(discordId).catch(() => null);
   if (!member) {
-    console.warn(`[PHS] Could not fetch member ${discordId} to sync Pet Master role`);
+    console.warn(`[PetHighscore] Could not fetch member ${discordId} to sync Pet Master role`);
     return null;
   }
 
   const role = guild.roles.cache.get(roleId);
   if (!role) {
-    console.warn(`[PHS] PET_MASTER_ROLE_ID (${roleId}) not found in this guild`);
+    console.warn(`[PetHighscore] PET_MASTER_ROLE_ID (${roleId}) not found in this guild`);
     return null;
   }
 
@@ -291,12 +291,12 @@ async function syncMasterRole(guild, discordId, count) {
 
   if (qualifies && !hasRole) {
     await member.roles.add(role);
-    console.log(`[PHS] Granted Pet Master role to ${member.user.tag}`);
+    console.log(`[PetHighscore] Granted Pet Master role to ${member.user.tag}`);
     return 'added';
   }
   if (!qualifies && hasRole) {
     await member.roles.remove(role);
-    console.log(`[PHS] Removed Pet Master role from ${member.user.tag}`);
+    console.log(`[PetHighscore] Removed Pet Master role from ${member.user.tag}`);
     return 'removed';
   }
   return null;
@@ -304,7 +304,7 @@ async function syncMasterRole(guild, discordId, count) {
 
 async function handleNewPet(interaction) {
   if (OWNER_ROLE_ID && !interaction.member.roles.cache.has(OWNER_ROLE_ID)) {
-    console.log(`[PHS] ${interaction.user.tag} was denied /pethighscore new (missing Owner role)`);
+    console.log(`[PetHighscore] ${interaction.user.tag} was denied /pethighscore new (missing Owner role)`);
     return interaction.reply({
       content: 'Only the Owner role can register new pets.',
       flags: MessageFlags.Ephemeral,
@@ -319,6 +319,7 @@ async function handleNewPet(interaction) {
     return interaction.reply({ content: 'Pet name cannot be empty.', flags: MessageFlags.Ephemeral });
   }
   if (!emojiId) {
+    console.warn(`[PetHighscore] ${interaction.user.tag} gave an unreadable emoji "${emojiInput}" for /pethighscore new`);
     return interaction.reply({
       content: "Couldn't read an emoji ID from that — paste the custom emoji itself (type `:` and pick it from the list) or its raw numeric ID.",
       flags: MessageFlags.Ephemeral,
@@ -332,6 +333,7 @@ async function handleNewPet(interaction) {
     return interaction.reply({ content: 'Pet name must contain at least one letter or number.', flags: MessageFlags.Ephemeral });
   }
   if (PET_BY_KEY.has(key) || PETS.some(p => p.name.toLowerCase() === name.toLowerCase())) {
+    console.log(`[PetHighscore] ${interaction.user.tag} tried to add "${name}", which already exists`);
     return interaction.reply({ content: `A pet named **${name}** already exists.`, flags: MessageFlags.Ephemeral });
   }
 
@@ -342,14 +344,14 @@ async function handleNewPet(interaction) {
   try {
     await appendRow(process.env.PET_HIGHSCORES_SHEET_ID, PET_CATALOG_APPEND_RANGE, [key, name, emojiId]);
   } catch (err) {
-    console.error('[PHS] Failed to append to the Pets sheet tab:', err);
+    console.error('[PetHighscore] Failed to append to the Pets sheet tab:', err);
     return interaction.editReply(`Error saving the new pet: ${err.message}`);
   }
 
   PETS.push(pet);
   rebuildPetIndexes();
 
-  console.log(`[PHS] ${interaction.user.tag} added new pet "${name}" (${key})`);
+  console.log(`[PetHighscore] ${interaction.user.tag} added new pet "${name}" (${key})`);
 
   await interaction.editReply(
     `Added **${name}** (\`${key}\`) ${petEmoji(pet)} to the pet list — available in \`/pethighscore add\` and \`/pethighscore remove\` immediately, no restart needed.`
@@ -452,7 +454,7 @@ module.exports = {
     }
 
     if (TEMPLAR_ROLE_ID && !interaction.member.roles.cache.has(TEMPLAR_ROLE_ID)) {
-      console.log(`[PHS] ${interaction.user.tag} was denied /pethighscore ${subcommand} (missing Templar role)`);
+      console.log(`[PetHighscore] ${interaction.user.tag} was denied /pethighscore ${subcommand} (missing Templar role)`);
       return interaction.reply({
         content: 'You need the Templar role to use this command.',
         flags: MessageFlags.Ephemeral,
@@ -482,7 +484,7 @@ module.exports = {
     }
 
     if (unknownInputs.length > 0) {
-      console.warn(`[PHS] ${interaction.user.tag} submitted unknown pet(s) "${unknownInputs.join('", "')}" for /pethighscore ${subcommand}`);
+      console.warn(`[PetHighscore] ${interaction.user.tag} submitted unknown pet(s) "${unknownInputs.join('", "')}" for /pethighscore ${subcommand}`);
       return interaction.reply({
         content: `Unknown pet${unknownInputs.length === 1 ? '' : 's'} "${unknownInputs.join('", "')}". Pick from the autocomplete suggestions.`,
         flags: MessageFlags.Ephemeral,
@@ -490,7 +492,7 @@ module.exports = {
     }
 
     if (duplicateSlotNames.length > 0) {
-      console.warn(`[PHS] ${interaction.user.tag} listed the same pet more than once ("${duplicateSlotNames.join('", "')}") for /pethighscore ${subcommand}`);
+      console.warn(`[PetHighscore] ${interaction.user.tag} listed the same pet more than once ("${duplicateSlotNames.join('", "')}") for /pethighscore ${subcommand}`);
       return interaction.reply({
         content: `You listed ${duplicateSlotNames.length === 1 ? 'a pet' : 'pets'} more than once: **${duplicateSlotNames.join(', ')}**. Pick each pet in only one slot.`,
         flags: MessageFlags.Ephemeral,
@@ -502,7 +504,7 @@ module.exports = {
     try {
       const guild = interaction.guild;
       const member = await guild.members.fetch(targetUser.id).catch(() => null);
-      if (!member) console.warn(`[PHS] Could not fetch member ${targetUser.id} (${targetUser.tag}) — falling back to username`);
+      if (!member) console.warn(`[PetHighscore] Could not fetch member ${targetUser.id} (${targetUser.tag}) — falling back to username`);
       const displayName = member?.displayName || targetUser.username;
 
       const { toApply, skipped, newKeys, appliedNames, noOp } = await withFileLock(PET_LOCK_KEY, async () => {
@@ -541,7 +543,7 @@ module.exports = {
         try {
           await postLeaderboard(guild, channelId, sortedForDisplay(entries), interaction.client.user.id);
         } catch (err) {
-          console.error('[PHS] Failed to update leaderboard post after a pet edit:', err.message);
+          console.error('[PetHighscore] Failed to update leaderboard post after a pet edit:', err.message);
         }
 
         return { toApply, skipped, newKeys, appliedNames: toApply.map(p => p.name).join(', '), noOp: false };
@@ -552,12 +554,12 @@ module.exports = {
         const msg = subcommand === 'add'
           ? `<@${targetUser.id}> already has ${names} logged.`
           : `<@${targetUser.id}> doesn't have ${names} logged.`;
-        console.log(`[PHS] ${interaction.user.tag} tried to ${subcommand} ${skipped.map(p => p.name).join(', ')} for ${targetUser.tag} — no change`);
+        console.log(`[PetHighscore] ${interaction.user.tag} tried to ${subcommand} ${skipped.map(p => p.name).join(', ')} for ${targetUser.tag} — no change`);
         return interaction.editReply(msg);
       }
 
       if (subcommand === 'add') {
-        console.log(`[PHS] ${interaction.user.tag} added "${appliedNames}" to ${targetUser.tag} (now ${newKeys.length} pets)`);
+        console.log(`[PetHighscore] ${interaction.user.tag} added "${appliedNames}" to ${targetUser.tag} (now ${newKeys.length} pets)`);
         notifyAdminLog(
           interaction.client,
           '🐾 Pet Added',
@@ -566,7 +568,7 @@ module.exports = {
           EMBED_COLOR
         );
       } else {
-        console.log(`[PHS] ${interaction.user.tag} removed "${appliedNames}" from ${targetUser.tag} (now ${newKeys.length} pets)`);
+        console.log(`[PetHighscore] ${interaction.user.tag} removed "${appliedNames}" from ${targetUser.tag} (now ${newKeys.length} pets)`);
         notifyAdminLog(
           interaction.client,
           '🐾 Pet Removed',
@@ -597,7 +599,7 @@ module.exports = {
 
       await interaction.editReply(summary);
     } catch (err) {
-      console.error('[PHS] Fatal error:', err);
+      console.error('[PetHighscore] Fatal error:', err);
       await interaction.editReply(`Error: ${err.message}`);
     }
   },

@@ -34,7 +34,7 @@ async function notifyAdminLog(client, title, description, fields = [], color = A
     const channel = await client.channels.fetch(adminLogChannelId);
     await channel.send({ embeds: [embed] });
   } catch (err) {
-    console.error('[LFG] Could not send admin log notification:', err.message);
+    console.error(`[AdminLog] Could not send "${title}":`, err.message);
   }
 }
 
@@ -50,7 +50,7 @@ function followUpEphemeral(interaction, content, { autoDelete = false } = {}) {
       setTimeout(() => {
         // Via the webhook: message.delete() fails once the thread leaves the channel cache.
         interaction.webhook.deleteMessage(message.id).catch((err) => {
-          if (!isAlreadyGoneError(err)) console.error('Could not delete ephemeral follow-up:', err.message);
+          if (!isAlreadyGoneError(err)) console.error('[LFG] Could not delete ephemeral follow-up:', err.message);
         });
       }, MENU_MESSAGE_LIFETIME_MS);
     }).catch(() => {});
@@ -76,7 +76,7 @@ function scheduleReplyCleanup(interaction, delayMs, logLabel) {
   setTimeout(() => {
     interaction.deleteReply().catch((err) => {
       if (isAlreadyGoneError(err)) return;
-      console.error(`Could not delete ${logLabel}:`, err.message);
+      console.error(`[LFG] Could not delete ${logLabel}:`, err.message);
     });
   }, delayMs);
 }
@@ -329,11 +329,13 @@ async function handleRoleToggle(interaction, categoryKey, value) {
   try {
     if (member.roles.cache.has(role.id)) {
       await member.roles.remove(role);
+      console.log(`[LFG] Removed ${role.name} from ${interaction.user.tag}`);
     } else {
       await member.roles.add(role);
+      console.log(`[LFG] Gave ${role.name} to ${interaction.user.tag}`);
     }
   } catch (err) {
-    console.error('Role toggle error:', err);
+    console.error('[LFG] Role toggle error:', err);
     return notifyAdminLogAndReply(
       interaction,
       '⚠️ LFG Role Assignment Failed',
@@ -366,6 +368,7 @@ async function handleClearAllRoles(interaction) {
     );
   }
 
+  console.log(`[LFG] Cleared ${lfgRoles.size} LFG role(s) from ${interaction.user.tag}`);
   return replyEphemeral(interaction, `✅ Cleared ${lfgRoles.size} LFG role(s).`);
 }
 

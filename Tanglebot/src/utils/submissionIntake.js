@@ -72,7 +72,7 @@ function getConfiguredIntakeUrl(env = process.env) {
 }
 
 function setConfiguredIntakeUrl(url) {
-  console.log(`Submission intake URL override updated to: ${url}`);
+  console.log(`[Submission] Submission intake URL override updated to: ${url}`);
   const runtimeConfig = getSubmissionRuntimeConfig();
   runtimeConfig.intakeUrl = url;
   writeJson(SUBMISSION_RUNTIME_CONFIG_FILE, runtimeConfig);
@@ -159,7 +159,7 @@ function loadSubmissionConfig(env = process.env) {
     return !env[key];
   });
   if (missing.length === REQUIRED_ENV_KEYS.length) {
-    console.log('Submission intake is disabled — none of the required config is set.');
+    console.log('[Submission] Submission intake is disabled — none of the required config is set.');
     return { enabled: false, missing };
   }
 
@@ -167,7 +167,7 @@ function loadSubmissionConfig(env = process.env) {
     throw new Error(`Submission intake is partially configured. Missing: ${missing.join(', ')}`);
   }
 
-  console.log('Submission intake is enabled.');
+  console.log('[Submission] Submission intake is enabled.');
   return {
     enabled: true,
     intakeSecret: env.DISCORD_KC_INTAKE_SECRET,
@@ -220,7 +220,7 @@ async function resolveEventIdForChannel(channelId, config) {
     return eventId;
   } catch (error) {
     const details = error.response?.data ?? error.message;
-    console.error('Failed to resolve Discord submission channel via Supabase event_discord_channels:', {
+    console.error('[Submission] Failed to resolve Discord submission channel via Supabase event_discord_channels:', {
       channelId,
       details,
     });
@@ -229,7 +229,7 @@ async function resolveEventIdForChannel(channelId, config) {
 }
 
 async function forwardSubmission({ attachment, config, eventId, message, parsed }) {
-  console.log(`Forwarding submission for message=${message.id} channel=${message.channelId} event=${eventId} to intake URL`);
+  console.log(`[Submission] Forwarding submission for message=${message.id} channel=${message.channelId} event=${eventId} to intake URL`);
   const response = await fetch(config.intakeUrl, {
     method: 'POST',
     headers: {
@@ -283,7 +283,7 @@ function getLastAcceptedSubmission() {
 }
 
 function saveLastAcceptedSubmission({ attachment, eventId, isDrop, message, parsed }) {
-  console.log(`Saving last accepted submission: type=${isDrop ? 'drop' : 'kc'} message=${message.id}`);
+  console.log(`[Submission] Saving last accepted submission: type=${isDrop ? 'drop' : 'kc'} message=${message.id}`);
   const submission = {
     acceptedAt: new Date().toISOString(),
     channelId: message.channelId,
@@ -362,7 +362,7 @@ async function handleSubmissionMessage(message, config) {
     });
 
     if (result?.duplicate) {
-      console.log(`Duplicate submission ignored: message=${message.id} channel=${message.channelId} event=${eventId}`);
+      console.log(`[Submission] Duplicate submission ignored: message=${message.id} channel=${message.channelId} event=${eventId}`);
       await statusReply.edit('This Discord message was already processed and is still linked to a pending submission.');
       return;
     }
@@ -375,7 +375,7 @@ async function handleSubmissionMessage(message, config) {
       parsed,
     });
 
-    console.log(`Submission forwarded: type=${isDrop ? 'drop' : 'kc'} message=${message.id} channel=${message.channelId} event=${eventId}`);
+    console.log(`[Submission] Submission forwarded: type=${isDrop ? 'drop' : 'kc'} message=${message.id} channel=${message.channelId} event=${eventId}`);
 
     const successMessage = isDrop
       ? 'Drop proof received and sent to the site for manual review.'
@@ -383,7 +383,7 @@ async function handleSubmissionMessage(message, config) {
     await statusReply.edit(successMessage);
   } catch (error) {
     const reason = error instanceof Error ? error.message : 'Unknown error.';
-    console.error('Submission upload failed:', {
+    console.error('[Submission] Submission upload failed:', {
       channelId: message.channelId,
       discordMessageId: message.id,
       eventId,

@@ -26,6 +26,7 @@ module.exports = {
 
   async execute(interaction) {
     if (!hasHoneypotAdminAccess(interaction.member)) {
+      console.log(`[Honeypot] ${interaction.user.tag} was denied /honeypot (missing Owner/Templar role)`);
       return interaction.reply({
         content: 'You need the owner or templar role to manage the honeypot trap.',
         flags: MessageFlags.Ephemeral,
@@ -33,7 +34,7 @@ module.exports = {
     }
 
     const subcommand = interaction.options.getSubcommand();
-    console.log(`Honeypot: /honeypot ${subcommand} invoked by ${interaction.user.username}`);
+    console.log(`[Honeypot] /honeypot ${subcommand} invoked by ${interaction.user.username}`);
 
     if (subcommand === 'status') {
       const enabled = isTestModeEnabled();

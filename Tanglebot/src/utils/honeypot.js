@@ -45,7 +45,7 @@ function isTestModeEnabled() {
 }
 
 function setTestModeEnabled(enabled) {
-  console.log(`Honeypot: setting test mode to ${!!enabled}`);
+  console.log(`[Honeypot] Setting test mode to ${!!enabled}`);
   const runtimeConfig = getRuntimeConfig();
   runtimeConfig.testMode = !!enabled;
   writeJson(RUNTIME_CONFIG_FILE, runtimeConfig);
@@ -74,7 +74,7 @@ async function clearHoneypotChannel(channel) {
           await msg.delete();
           totalDeleted += 1;
         } catch (err) {
-          console.error('Honeypot: failed to delete individual old message:', err);
+          console.error('[Honeypot] Failed to delete individual old message:', err);
         }
       }
     }
@@ -100,10 +100,11 @@ async function sendHoneypotStartupMessage(client, config) {
   for (const channelId of config.trapChannelIds) {
     try {
       const channel = await client.channels.fetch(channelId);
-      await clearHoneypotChannel(channel);
+      const cleared = await clearHoneypotChannel(channel);
       await channel.send({ embeds: [buildWarningEmbed()] });
+      console.log(`[Honeypot] Reset trap channel ${channelId}: cleared ${cleared} message(s) and posted the warning.`);
     } catch (err) {
-      console.error(`Honeypot: failed to reset honeypot channel ${channelId} on startup:`, err);
+      console.error(`[Honeypot] Failed to reset honeypot channel ${channelId} on startup:`, err);
     }
   }
 }
@@ -132,13 +133,13 @@ async function downloadImageAttachment(attachment, index) {
     const name = `honeypot-image-${index}.${ext}`;
     return new AttachmentBuilder(Buffer.from(response.data), { name });
   } catch (err) {
-    console.error('Honeypot: failed to download trap message image attachment:', err);
+    console.error('[Honeypot] Failed to download trap message image attachment:', err);
     return null;
   }
 }
 
 async function downloadImageAttachments(attachments) {
-  console.log(`Honeypot: downloading ${attachments.length} trap message image attachment(s)`);
+  console.log(`[Honeypot] Downloading ${attachments.length} trap message image attachment(s)`);
   const files = await Promise.all(attachments.map((attachment, index) => downloadImageAttachment(attachment, index)));
   return files.filter(Boolean);
 }
@@ -204,12 +205,18 @@ async function handleHoneypotMessage(message, config, client) {
   if (!config.trapChannelIds.includes(message.channelId)) return;
 
   const testMode = isTestModeEnabled();
+  console.log(`[Honeypot] Triggered by ${message.author.tag} (${message.author.id}) in ${message.channelId}${testMode ? ' (test mode)' : ''}.`);
 
   if (!testMode) {
     try {
-      await message.member?.timeout(TIMEOUT_MS, 'Posted in honeypot channel');
+      if (message.member) {
+        await message.member.timeout(TIMEOUT_MS, 'Posted in honeypot channel');
+        console.log(`[Honeypot] Timed out ${message.author.tag} for 1 week.`);
+      } else {
+        console.warn(`[Honeypot] ${message.author.tag} isn't a known server member, so they weren't timed out.`);
+      }
     } catch (err) {
-      console.error('Honeypot: failed to timeout user:', err);
+      console.error('[Honeypot] Failed to timeout user:', err);
     }
   }
 
@@ -220,7 +227,7 @@ async function handleHoneypotMessage(message, config, client) {
   try {
     await message.delete();
   } catch (err) {
-    console.error('Honeypot: failed to delete trap message:', err);
+    console.error('[Honeypot] Failed to delete trap message:', err);
   }
 
   const adminLogChannelId = process.env.ADMIN_LOG_CHANNEL_ID;
@@ -234,7 +241,7 @@ async function handleHoneypotMessage(message, config, client) {
       files: imageFiles,
     });
   } catch (err) {
-    console.error('Honeypot: failed to send admin log message:', err);
+    console.error('[Honeypot] Failed to send admin log message:', err);
   }
 }
 
@@ -252,7 +259,7 @@ function canScanChannel(channel, botMember) {
   const perms = channel.permissionsFor(botMember);
   const allowed = !!perms && perms.has(REQUIRED_DELETE_PERMISSIONS);
   if (!allowed) {
-    console.log(`Honeypot: skipping #${channel.name ?? channel.id} (${channel.id}) for message deletion - missing permissions.`);
+    console.log(`[Honeypot] Skipping #${channel.name ?? channel.id} (${channel.id}) for message deletion - missing permissions.`);
   }
   return allowed;
 }
@@ -281,10 +288,10 @@ async function deleteAllUserMessages(guild, userId) {
       deletedCount += deleted.size;
     } catch (err) {
       if (ACCESS_DENIED_CODES.has(err?.code)) {
-        console.log(`Honeypot: skipping #${channel.name ?? channel.id} (${channel.id}) for message deletion - access denied (${err.code}).`);
+        console.log(`[Honeypot] Skipping #${channel.name ?? channel.id} (${channel.id}) for message deletion - access denied (${err.code}).`);
         continue;
       }
-      console.error(`Honeypot: failed to scan/delete messages in channel ${channel.id}:`, err);
+      console.error(`[Honeypot] Failed to scan/delete messages in channel ${channel.id}:`, err);
     }
   }
 
@@ -302,6 +309,7 @@ async function handleHoneypotButtonInteraction(interaction) {
   if (!parsed) return;
 
   if (!hasHoneypotAdminAccess(interaction.member)) {
+    console.log(`[Honeypot] ${interaction.user.tag} was denied the ${parsed.action} button (missing Owner/Templar role)`);
     await interaction.reply({
       content: 'You do not have permission to use this action.',
       flags: MessageFlags.Ephemeral,
@@ -327,14 +335,14 @@ async function handleHoneypotButtonInteraction(interaction) {
         });
         outcomes.push(`Banned <@${userId}> and deleted their messages from the last 7 days.`);
       } catch (err) {
-        console.error('Honeypot: failed to ban user:', err);
+        console.error('[Honeypot] Failed to ban user:', err);
         outcomes.push(`Failed to ban <@${userId}>: ${err.message.replace(/\.?$/, '.')}`);
         // The ban didn't delete anything, so clean up what we can by scanning channels.
         try {
           const count = await deleteAllUserMessages(interaction.guild, userId);
           outcomes.push(`Deleted ${count} recent message(s) by scanning channels instead.`);
         } catch (scanErr) {
-          console.error('Honeypot: failed to delete user messages:', scanErr);
+          console.error('[Honeypot] Failed to delete user messages:', scanErr);
           outcomes.push(`Failed to delete messages: ${scanErr.message}`);
         }
       }
@@ -349,13 +357,15 @@ async function handleHoneypotButtonInteraction(interaction) {
         await member.timeout(null, 'Honeypot: marked as false positive via admin action');
         resultText = `Removed the timeout for <@${userId}>.`;
       } catch (err) {
-        console.error('Honeypot: failed to remove timeout:', err);
+        console.error('[Honeypot] Failed to remove timeout:', err);
         resultText = `Failed to remove the timeout for <@${userId}>: ${err.message}`;
       }
     }
   } else {
     return;
   }
+
+  console.log(`[Honeypot] ${interaction.user.tag} clicked ${ACTION_LABELS[action]} for ${userId}: ${resultText}`);
 
   const resolvedAtSeconds = Math.floor(Date.now() / 1000);
   const actionField = {

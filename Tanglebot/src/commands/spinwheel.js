@@ -201,7 +201,7 @@ function drawWheelFrame(ctx, SIZE, entries, rotationAngle, flash) {
 
 // ── GIF generator ──────────────────────────────────────────────────────────────
 function createSpinGif(entries, winnerIdx) {
-  console.log(`[spinwheel] Generating spin GIF for ${entries.length} entries (winner index ${winnerIdx})`);
+  console.log(`[Spinwheel] Generating spin GIF for ${entries.length} entries (winner index ${winnerIdx})`);
   const SIZE       = 400;
   const N          = entries.length;
   const sliceAngle = (2 * Math.PI) / N;
@@ -287,12 +287,13 @@ module.exports = {
 
   async execute(interaction) {
     if (!interaction.member.roles.cache.has(COORDINATOR_ROLE_ID)) {
+      console.log(`[Spinwheel] ${interaction.user.tag} was denied /spinwheel (missing Coordinator role)`);
       return interaction.reply({ content: 'You need the Coordinator role to use this command.', flags: MessageFlags.Ephemeral });
     }
 
     await interaction.deferReply();
 
-    console.log(`[spinwheel] Started by ${interaction.user.tag}`);
+    console.log(`[Spinwheel] Started by ${interaction.user.tag}`);
 
     const raw       = interaction.options.getString('entries');
     const title     = interaction.options.getString('title') ?? 'Wheel Spin';
@@ -326,7 +327,7 @@ module.exports = {
       const idx = Math.floor(Math.random() * pool.length);
       winners.push(pool.splice(idx, 1)[0]);
     }
-    console.log(`[spinwheel] ${entries.length} entries → Winner(s): ${winners.join(', ')}`);
+    console.log(`[Spinwheel] ${entries.length} entries → Winner(s): ${winners.join(', ')}`);
 
     const winnerIdx = entries.indexOf(winners[0]);
     const gifBuf    = createSpinGif(entries, winnerIdx);
