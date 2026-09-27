@@ -34,7 +34,7 @@ A Discord bot built for the **Tangle Crew** clan in [Old School RuneScape](https
 | [`/weeklycompstats`](#-weeklycompstats--competition-leaderboard) | Standings for the running WOM competitions | Everyone |
 | [`/honeypot`](#honeypot-channel-trap) | Test mode for the honeypot trap | Owner or Templar |
 
-Role checks for **Templar** and **Owner** on the high score commands fail **open**: if `TEMPLAR_ROLE_ID` / `OWNER_ROLE_ID` is unset, anyone can use them. `/spinwheel`, `/weeklycomp` and `/honeypot` fail **closed**: if their role ID is unset, no one can.
+Role checks for **Templar** and **Owner** on the high score commands and `/refreshboards` fail **open**: if `TEMPLAR_ROLE_ID` / `OWNER_ROLE_ID` is unset, anyone can use them. `/spinwheel`, `/weeklycomp` and `/honeypot` fail **closed**: if their role ID is unset, no one can.
 
 ---
 
@@ -293,7 +293,7 @@ Creates a Discord scheduled event and one Wise Old Man competition per boss or s
 | Option | Required | Description |
 |--------|----------|-------------|
 | `prefix` | Yes | Name prefix. Each competition is named `<prefix> <metric>`, e.g. `BOTW T3 Vorkath`, without a leading "The". |
-| `metric` | Yes | Boss or skill. Autocompletes over everything WOM tracks. |
+| `metric` | Yes | Boss or skill. Autocompletes over every boss and skill WOM tracks. |
 | `metric2`–`metric4` | No | More bosses or skills, each with its own competition. |
 | `start` | Yes | Eastern Time date: `YYYY-MM-DD`, `YYYY/MM/DD` or `MM/DD/YYYY`, optionally with an hour (`18` or `6pm`). ISO 8601 with an offset also works. Must be in the future. |
 | `duration` | No | Days, 1–365 (default 7). |
@@ -441,7 +441,7 @@ On startup each trap channel is cleared and a warning is posted. When anyone (ex
 1. Times them out for 1 week.
 2. Deletes the message, keeping up to 10 of its images.
 3. Posts a report with the images to `ADMIN_LOG_CHANNEL_ID`, with two buttons:
-   - **Ban & Delete Messages** — bans the account and has Discord delete their messages from the last 7 days in every channel and thread. If the ban fails, the bot instead deletes their messages from the last 100 in each channel it can see.
+   - **Ban & Delete Messages** — bans the account and has Discord delete their messages from the last 7 days in every channel and thread. If the ban fails, the bot instead deletes any of their messages among the last 100 in each channel it can see.
    - **False Positive (Un-Timeout)** — lifts the timeout.
 
 Only Owners and Templars can use the buttons. After a click, the buttons are removed and the report records the action, who took it and when.
@@ -472,7 +472,7 @@ Only Owners and Templars can use the buttons. After a click, the buttons are rem
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) 18 or later (or Docker)
+- [Node.js](https://nodejs.org/) 22 or later (or Docker)
 - A Discord application and bot token from [discord.com/developers](https://discord.com/developers/applications)
 - **Server Members Intent** and **Message Content Intent** enabled for the bot. It requests both at startup and can't log in without them.
 

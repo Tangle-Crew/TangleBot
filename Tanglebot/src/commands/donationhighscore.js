@@ -208,6 +208,8 @@ async function refreshLeaderboard(client) {
   const channelId = process.env.DONATIONS_CHANNEL_ID;
   if (!process.env.DONATIONS_SHEET_ID || !channelId || !process.env.GOOGLE_SERVICE_ACCOUNT_JSON) return false;
 
+  // Without it, fetch() returns every server instead of one and the post fails with a cryptic error.
+  if (!process.env.CLAN_ID) throw new Error('CLAN_ID is not set, so the server to post in is unknown.');
   const guild = await client.guilds.fetch(process.env.CLAN_ID);
   // Locked because the display-name refresh writes rows too.
   await withFileLock(DONATION_LOCK_KEY, async () => {

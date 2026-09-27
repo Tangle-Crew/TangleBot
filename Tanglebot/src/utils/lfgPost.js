@@ -1137,9 +1137,6 @@ async function handleKeepAliveButton(interaction, groupId) {
 
 // Restarts a restored group's timers from now, as if its current state had just begun.
 async function resumeGroup(client, channel, group) {
-  // The title's countdown or Open/Full may have changed while the bot was down.
-  if (channel.name !== buildThreadName(group, statusWordFor(group))) await renameThreadChannel(channel, group);
-
   if (group.status === 'disbanded') {
     const closesAtEpoch = Math.floor((Date.now() + DISBAND_DELAY_MS) / 1000);
     await sendOrEditActivity(
@@ -1151,6 +1148,11 @@ async function resumeGroup(client, channel, group) {
     schedulePostGroupCleanup(client, group, DISBAND_DELAY_MS);
     return;
   }
+
+  // The title's countdown or Open/Full may have changed while the bot was down. Not awaited:
+  // Discord allows 2 renames per thread every 10 minutes, and a rate-limited rename would hold up
+  // the rest of startup. renameThreadChannel logs its own errors.
+  if (channel.name !== buildThreadName(group, statusWordFor(group))) renameThreadChannel(channel, group);
 
   scheduleCountdownRefresh(client, group);
 
