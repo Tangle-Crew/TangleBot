@@ -125,7 +125,8 @@ function loadEvents(client) {
     if (adminLogChannelId) {
       try {
         const channel = await client.channels.fetch(adminLogChannelId);
-        await channel.send(`<@&${ownerRoleId}> Bot is online and ready.`);
+        const ping = ownerRoleId ? `<@&${ownerRoleId}> ` : '';
+        await channel.send(`${ping}Bot is online and ready.`);
       } catch (err) {
         console.error('Failed to send startup message to admin log channel:', err);
       }
