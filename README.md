@@ -32,9 +32,10 @@ A Discord bot built for the **Tangle Crew** clan in [Old School RuneScape](https
 | [`/channelmap`](#-channelmap--channel-id-for-the-web-panel) | Shows a channel's ID for the web panel | Manage Server |
 | [`/weeklycomp`](#-weeklycomp--discord-event--wise-old-man-competitions) | Creates a Discord event plus WOM competitions | Templar |
 | [`/weeklycompstats`](#-weeklycompstats--competition-leaderboard) | Standings for the running WOM competitions | Everyone |
+| [`/stalemembers`](#-stalemembers--inactive-clan-members) | Lists WOM group members who gained too little XP over a number of months | Templar (posts in the admin log) |
 | [`/honeypot`](#honeypot-channel-trap) | Test mode for the honeypot trap | Owner or Templar |
 
-Role checks for **Templar** and **Owner** on the high score commands and `/refreshboards` fail **open**: if `TEMPLAR_ROLE_ID` / `OWNER_ROLE_ID` is unset, anyone can use them. `/spinwheel`, `/weeklycomp` and `/honeypot` fail **closed**: if their role ID is unset, no one can.
+Role checks for **Templar** and **Owner** on the high score commands and `/refreshboards` fail **open**: if `TEMPLAR_ROLE_ID` / `OWNER_ROLE_ID` is unset, anyone can use them. `/spinwheel`, `/weeklycomp`, `/stalemembers` and `/honeypot` fail **closed**: if their role ID is unset, no one can.
 
 ---
 
@@ -371,6 +372,58 @@ Shows the standings for every WOM competition the group is running. Anyone can u
 5. If nothing is running, it names the next competition(s) and when they start.
 
 Standings are fetched at most every 5 minutes and shared between runs; sooner when a competition starts or ends or `/weeklycomp` creates one, and 1 minute after an error. Gains are only as fresh as each player's last WOM update. The command doesn't run update all.
+
+</details>
+
+---
+
+### 💤 `/stalemembers` — Inactive Clan Members
+
+Lists every member of the WOM group who gained less than a set amount of overall XP over the last few months, longest inactive first. For example, `/stalemembers time: 6 minxp: 250k ignore: Owner, Deputy Owner, Templar` lists everyone outside those ranks who gained less than 250k XP in the last 6 months, plus anyone within 2 weeks of having been inactive that long. The list is always posted in the admin log channel, for everyone there to see. Run from any other channel, it's still posted there and you get a private reply with a link to it. Errors reply privately. **Requires** `TEMPLAR_ROLE_ID` and `ADMIN_LOG_CHANNEL_ID`.
+
+| Option | Required | Description |
+|--------|----------|-------------|
+| `time` | Yes | How many months back to check (1–60). |
+| `minxp` | Yes | The XP they must have gained, at least 1, e.g. `250k`, `1.5m` or `250,000`. |
+| `ignore` | Yes | Clan ranks to leave out, comma separated, e.g. `Owner, Templar, Gnome Child`, or `None` to check every rank. Uses WOM's rank names, in any case. Autocompletes from the ranks the group uses, in rank order; any WOM rank can still be typed in full, but only the group's show on the list. |
+
+<details>
+<summary><strong>Environment variables</strong></summary>
+
+| Variable | Required | Description |
+|---|---|---|
+| `TEMPLAR_ROLE_ID` | Yes | The role that can run the command and use its buttons. The command isn't loaded without it. |
+| `ADMIN_LOG_CHANNEL_ID` | Yes | Where every list is posted, wherever the command is run. Also receives an alert, naming who ran the command, when loading or replying fails. The command isn't loaded without it. |
+| `WOM_GROUP_ID` | Yes | Your WOM group. The command isn't loaded without it. |
+| `WOM_GROUP_VERIFICATION_CODE` | No | Enables the 🔃 Refresh WOM button, which runs update all on the group. |
+| `WOM_API_KEY` | No | Raises WOM's rate limit from 20 to 100 requests a minute. |
+
+</details>
+
+<details>
+<summary><strong>How it works</strong></summary>
+
+1. Loads the group's members and their overall XP gained over the window from WOM (2 requests).
+2. Members in an ignored rank are skipped, and so is anyone who joined the WOM group during the window, since they haven't had the whole window to gain XP. The join date is the earlier of WOM's two (when WOM added them, and the clan join the RuneLite plugin reports), so someone WOM re-added after a name change keeps their original date. Page 1 says how many were skipped.
+3. Everyone else who gained less than `minxp` is listed with their rank's emoji, XP gained and how long ago WOM last saw their stats change, in months and weeks (e.g. `last active 6 months, 2 weeks ago`) with the date.
+4. Members who gained more than `minxp`, but haven't been active for all but the last 2 weeks of the window, are listed too as close. They're marked ⌛ with when they'll have been inactive for the whole window, counting down live (e.g. `⌛ 6 months inactive in 9 days`), and counted separately on page 1.
+5. The list is sorted by that last change, oldest first. Members WOM has never seen change come first.
+6. Members WOM has no data for in the window (e.g. never tracked) count as 0 XP and show **no WOM data**. ⏳ marks members WOM hasn't updated in over 7 days, so they may have gains WOM hasn't seen. ❓ marks members WOM can't track (unranked, flagged, archived or banned on WOM), whose XP may be wrong.
+7. The first page shows when the list was checked and by whom (in each viewer's local time), the options, the totals, what the markers in this list mean (only the ones it uses, so the legend changes when an Update or Refresh adds or removes one), what the buttons do (Discord buttons can't show a description on hover), and the first 10 members. Later pages hold as many members as page 1 has lines (up to 24), and the last page is padded with blank lines, so every page is about the same height.
+8. **◀ Prev** / **Next ▶**, **🔄 Update**, **🔃 Refresh WOM** and **📄 Export** work for any Templar, with no time limit.
+   - Update reloads the list from WOM with the same options and stays on the same page.
+   - Refresh WOM runs WOM's update all, so every member is re-checked on the hiscores, and privately says how many were queued and when the list will update, as a local time with a live countdown (e.g. "at 3:05 PM (in 5 minutes)"). When it's done, that message changes to say it finished. Update all covers the whole group, so only one refresh runs at a time: if someone presses Refresh during the wait, on any list, they're told privately who started it and when it finishes, and they're DMed too when it's done. After 5 minutes (the same wait as the competition reminder) it reloads the newest list and DMs everyone waiting a link to it. Anyone with DMs closed is pinged in the admin log channel instead. A bot restart during the wait cancels the reload and the message. Only shown when `WOM_GROUP_VERIFICATION_CODE` is set.
+   - When another feature runs update all (the [competition ending reminder](#-weeklycomp--discord-event--wise-old-man-competitions)), the newest list also reloads on its own 5 minutes later, so that one update all serves both. Page 1 then shows the time with "auto refreshed" (the export says what triggered it). Refresh presses during that wait join it, as above.
+   - Export privately sends the whole list as a CSV file that opens in Excel or Google Sheets, named `stale-members-export-<date>_<time>.csv` (UTC; a second export in the same second gets `_2`). It starts with when the data was checked and by whom, who exported it and when, and the options, then lists each member's name, rank, status (stale, or close with the date they reach the window), XP gained, dates and notes. A copy is saved in `data/stalemembers-exports/`, keeping the newest 5.
+9. Running the command again deletes the previous list once the new one is posted, so only one shows. The newest list's message ID is saved in `data/stalemembers.json`, so this still works after a restart. If two runs finish at the same time, the later list is kept.
+10. Lists are kept in memory until the bot restarts. After that, Prev/Next/Export say the list has expired and give the command to copy and run again (e.g. `/stalemembers time:6 minxp:250k ignore:Owner, Templar`), and Update reloads the list from the options stored on the button.
+11. If WOM can't be reached, the "thinking" message is removed and the error is shown only to whoever ran the command.
+
+Gains are only as fresh as each player's last WOM update; 🔃 Refresh WOM brings everyone up to date first. "Last active" counts any stat change WOM saw, boss kills included, not just XP.
+
+Rank emojis are the bot's own application emojis (uploaded from `assets/icons/clan_ranks`), matched to ranks by name and loaded once. A rank with no emoji, or every rank if loading them fails, shows its name instead.
+
+The group's ranks are loaded from WOM on startup for autocomplete and reused for 30 minutes. If they can't be loaded, autocomplete only suggests `None`; ranks can still be typed.
 
 </details>
 
