@@ -14,8 +14,8 @@ const {
   handleLfgPostGroupButtonInteraction,
 } = require('../utils/lfgPost');
 const { ensureLfgStartPost } = require('../utils/lfgStartPage');
-const { refreshLeaderboardOnStartup: refreshPetLeaderboardOnStartup } = require('../commands/pethighscore');
-const { refreshLeaderboardOnStartup: refreshDonationLeaderboardOnStartup } = require('../commands/donationhighscore');
+const { refreshLeaderboard: refreshPetLeaderboard } = require('../commands/pethighscore');
+const { refreshLeaderboard: refreshDonationLeaderboard } = require('../commands/donationhighscore');
 const { syncDiscordCatalog, isConfigured: isLfgBackendConfigured } = require('../utils/lfgBackend');
 const { startLfgDeliveryWorker } = require('../utils/lfgDeliveryWorker');
 const { startCompEndingReminder } = require('../utils/compEndingReminder');
@@ -96,13 +96,13 @@ function loadEvents(client) {
     }
 
     try {
-      await refreshPetLeaderboardOnStartup(client);
+      await refreshPetLeaderboard(client);
     } catch (err) {
       console.error('[PHS] Failed to refresh pet leaderboard on startup:', err);
     }
 
     try {
-      await refreshDonationLeaderboardOnStartup(client);
+      await refreshDonationLeaderboard(client);
     } catch (err) {
       console.error('[DHS] Failed to refresh donation leaderboard on startup:', err);
     }

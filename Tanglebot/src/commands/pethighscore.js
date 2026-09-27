@@ -252,22 +252,20 @@ function sortedForDisplay(entries) {
     .sort((a, b) => b.count - a.count || a.displayName.localeCompare(b.displayName));
 }
 
-// Reposts the leaderboard. Runs on startup and from /refreshboards.
-async function refreshLeaderboardOnStartup(client) {
+// Reposts the leaderboard from the sheet. Runs on startup and from /refreshboards. Returns false
+// if the leaderboard isn't configured; errors are thrown to the caller.
+async function refreshLeaderboard(client) {
   const channelId = process.env.PET_HIGHSCORES_CHANNEL_ID;
-  if (!process.env.PET_HIGHSCORES_SHEET_ID || !channelId || !process.env.GOOGLE_SERVICE_ACCOUNT_JSON) return;
+  if (!process.env.PET_HIGHSCORES_SHEET_ID || !channelId || !process.env.GOOGLE_SERVICE_ACCOUNT_JSON) return false;
 
-  try {
-    await reloadPets();
-    const guild = await client.guilds.fetch(process.env.CLAN_ID);
-    // Locked because the display-name refresh writes rows too.
-    await withFileLock(PET_LOCK_KEY, async () => {
-      const entries = await loadFreshEntries();
-      await postLeaderboard(guild, channelId, sortedForDisplay(entries), client.user.id);
-    });
-  } catch (err) {
-    console.error('[PHS] Failed to refresh leaderboard on startup:', err);
-  }
+  await reloadPets();
+  const guild = await client.guilds.fetch(process.env.CLAN_ID);
+  // Locked because the display-name refresh writes rows too.
+  await withFileLock(PET_LOCK_KEY, async () => {
+    const entries = await loadFreshEntries();
+    await postLeaderboard(guild, channelId, sortedForDisplay(entries), client.user.id);
+  });
+  return true;
 }
 
 async function syncMasterRole(guild, discordId, count) {
@@ -358,7 +356,7 @@ async function handleNewPet(interaction) {
 
 module.exports = {
   requiredEnv: ['PET_HIGHSCORES_SHEET_ID', 'PET_HIGHSCORES_CHANNEL_ID', 'GOOGLE_SERVICE_ACCOUNT_JSON'],
-  refreshLeaderboardOnStartup,
+  refreshLeaderboard,
 
   data: new SlashCommandBuilder()
     .setName('pethighscore')

@@ -15,6 +15,8 @@ const RUNTIME_CONFIG_FILE = 'honeypot-runtime-config.json';
 const TIMEOUT_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
 const TRAP_MESSAGE_FETCH_LIMIT = 100;
 const DELETE_SCAN_FETCH_LIMIT = 100;
+// Discord's maximum for deleting a banned user's messages.
+const BAN_DELETE_MESSAGE_SECONDS = 7 * 24 * 60 * 60;
 
 const DISCORD_RED = 0xb02020;
 const DISCORD_YELLOW = 0xd4a017;
@@ -158,7 +160,7 @@ function buildAdminLogEmbeds({ message, testMode }) {
   embed.addFields({
     name: 'Button Guide',
     value: [
-      '🔨 **Ban & Delete Messages** — bans the account and deletes their recent messages across the server.',
+      '🔨 **Ban & Delete Messages** — bans the account and deletes their messages from the last 7 days across the server.',
       '✅ **False Positive (Un-Timeout)** — dismisses this alert and lifts the timeout applied to this user.',
     ].join('\n'),
   });
@@ -318,18 +320,23 @@ async function handleHoneypotButtonInteraction(interaction) {
     } else {
       const outcomes = [];
       try {
-        await interaction.guild.members.ban(userId, { reason: 'Honeypot: banned via admin action' });
-        outcomes.push(`Banned <@${userId}>.`);
+        // Discord deletes their messages from every channel and thread as part of the ban.
+        await interaction.guild.members.ban(userId, {
+          reason: 'Honeypot: banned via admin action',
+          deleteMessageSeconds: BAN_DELETE_MESSAGE_SECONDS,
+        });
+        outcomes.push(`Banned <@${userId}> and deleted their messages from the last 7 days.`);
       } catch (err) {
         console.error('Honeypot: failed to ban user:', err);
-        outcomes.push(`Failed to ban <@${userId}>: ${err.message}`);
-      }
-      try {
-        const count = await deleteAllUserMessages(interaction.guild, userId);
-        outcomes.push(`Deleted ${count} recent message(s) across the server.`);
-      } catch (err) {
-        console.error('Honeypot: failed to delete user messages:', err);
-        outcomes.push(`Failed to delete messages: ${err.message}`);
+        outcomes.push(`Failed to ban <@${userId}>: ${err.message.replace(/\.?$/, '.')}`);
+        // The ban didn't delete anything, so clean up what we can by scanning channels.
+        try {
+          const count = await deleteAllUserMessages(interaction.guild, userId);
+          outcomes.push(`Deleted ${count} recent message(s) by scanning channels instead.`);
+        } catch (scanErr) {
+          console.error('Honeypot: failed to delete user messages:', scanErr);
+          outcomes.push(`Failed to delete messages: ${scanErr.message}`);
+        }
       }
       resultText = outcomes.join(' ');
     }

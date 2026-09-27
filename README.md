@@ -179,7 +179,7 @@ Hand edits to the `Pets` tab take effect on the next restart or `/refreshboards`
 
 ### 🔄 `/refreshboards` — Refresh Leaderboards
 
-Reposts the pet and donation leaderboards from their Google Sheets, e.g. after editing a sheet by hand. A board whose env vars aren't set is skipped. The same refresh runs on startup.
+Reposts the pet and donation leaderboards from their Google Sheets, e.g. after editing a sheet by hand. The reply says whether each board was refreshed, skipped (env vars not set) or failed, with the error. The same refresh runs on startup.
 
 Requires `GOOGLE_SERVICE_ACCOUNT_JSON` to load. Restricted to Templars (`TEMPLAR_ROLE_ID`, fails open).
 
@@ -441,7 +441,7 @@ On startup each trap channel is cleared and a warning is posted. When anyone (ex
 1. Times them out for 1 week.
 2. Deletes the message, keeping up to 10 of its images.
 3. Posts a report with the images to `ADMIN_LOG_CHANNEL_ID`, with two buttons:
-   - **Ban & Delete Messages** — bans the account and deletes their messages from the last 100 in each channel the bot can see.
+   - **Ban & Delete Messages** — bans the account and has Discord delete their messages from the last 7 days in every channel and thread. If the ban fails, the bot instead deletes their messages from the last 100 in each channel it can see.
    - **False Positive (Un-Timeout)** — lifts the timeout.
 
 Only Owners and Templars can use the buttons. After a click, the buttons are removed and the report records the action, who took it and when.

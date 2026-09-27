@@ -198,21 +198,19 @@ function sortedForDisplay(entries) {
     .sort((a, b) => b.donated - a.donated || a.displayName.localeCompare(b.displayName));
 }
 
-// Reposts the leaderboard from the sheet. Runs on startup and from /refreshboards.
-async function refreshLeaderboardOnStartup(client) {
+// Reposts the leaderboard from the sheet. Runs on startup and from /refreshboards. Returns false
+// if the leaderboard isn't configured; errors are thrown to the caller.
+async function refreshLeaderboard(client) {
   const channelId = process.env.DONATIONS_CHANNEL_ID;
-  if (!process.env.DONATIONS_SHEET_ID || !channelId || !process.env.GOOGLE_SERVICE_ACCOUNT_JSON) return;
+  if (!process.env.DONATIONS_SHEET_ID || !channelId || !process.env.GOOGLE_SERVICE_ACCOUNT_JSON) return false;
 
-  try {
-    const guild = await client.guilds.fetch(process.env.CLAN_ID);
-    // Locked because the display-name refresh writes rows too.
-    await withFileLock(DONATION_LOCK_KEY, async () => {
-      const entries = await loadEntries();
-      await postLeaderboard(guild, channelId, sortedForDisplay(entries), client.user.id);
-    });
-  } catch (err) {
-    console.error('[DHS] Failed to refresh leaderboard on startup:', err);
-  }
+  const guild = await client.guilds.fetch(process.env.CLAN_ID);
+  // Locked because the display-name refresh writes rows too.
+  await withFileLock(DONATION_LOCK_KEY, async () => {
+    const entries = await loadEntries();
+    await postLeaderboard(guild, channelId, sortedForDisplay(entries), client.user.id);
+  });
+  return true;
 }
 
 // Grants the tier roles the new total qualifies for and removes the rest. Returns { tier } if the
@@ -256,7 +254,7 @@ async function syncDonationRoles(guild, discordId, previousDonated, newDonated) 
 
 module.exports = {
   requiredEnv: ['DONATIONS_SHEET_ID', 'DONATIONS_CHANNEL_ID', 'GOOGLE_SERVICE_ACCOUNT_JSON'],
-  refreshLeaderboardOnStartup,
+  refreshLeaderboard,
 
   data: new SlashCommandBuilder()
     .setName('donationhighscore')

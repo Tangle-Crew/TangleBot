@@ -1,8 +1,13 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
-const { refreshLeaderboardOnStartup: refreshPetLeaderboard } = require('./pethighscore');
-const { refreshLeaderboardOnStartup: refreshDonationLeaderboard } = require('./donationhighscore');
+const { refreshLeaderboard: refreshPetLeaderboard } = require('./pethighscore');
+const { refreshLeaderboard: refreshDonationLeaderboard } = require('./donationhighscore');
 
 const TEMPLAR_ROLE_ID = process.env.TEMPLAR_ROLE_ID;
+
+const BOARDS = [
+  { label: 'Pet high scores', refresh: refreshPetLeaderboard },
+  { label: 'Donation high scores', refresh: refreshDonationLeaderboard },
+];
 
 module.exports = {
   requiredEnv: ['GOOGLE_SERVICE_ACCOUNT_JSON'],
@@ -21,14 +26,20 @@ module.exports = {
     }
 
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-
-    // A board without its env vars set is skipped.
-    await Promise.all([
-      refreshPetLeaderboard(interaction.client),
-      refreshDonationLeaderboard(interaction.client),
-    ]);
-
     console.log(`[RB] ${interaction.user.tag} triggered /refreshboards`);
-    await interaction.editReply('Refreshed the pet and donation high score leaderboards.');
+
+    // Each board runs on its own, so one failing doesn't stop the other.
+    const results = await Promise.allSettled(BOARDS.map(board => board.refresh(interaction.client)));
+
+    const lines = results.map((result, i) => {
+      const { label } = BOARDS[i];
+      if (result.status === 'rejected') {
+        console.error(`[RB] Failed to refresh ${label}:`, result.reason);
+        return `⚠️ **${label}** failed: ${result.reason?.message ?? 'unknown error'}`;
+      }
+      return result.value ? `✅ **${label}** refreshed.` : `➖ **${label}** skipped (not set up).`;
+    });
+
+    await interaction.editReply(lines.join('\n'));
   },
 };
