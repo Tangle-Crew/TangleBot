@@ -20,47 +20,47 @@ A Discord bot built for the **Tangle Crew** clan in [Old School RuneScape](https
 
 ## Commands
 
+| Command | What it does | Who can use it |
+|---|---|---|
+| [`/spinwheel`](#-spinwheel--prize-wheel) | Animated prize wheel that picks random winners | Coordinator |
+| [`/donationhighscore`](#-donationhighscore--donation-high-scores) | Logs donations, posts the leaderboard, manages tier roles | Templar |
+| [`/pethighscore`](#-pethighscore--pet-high-scores) | Logs pets, posts the leaderboard, manages the Pet Master role | Templar (`new`: Owner) |
+| [`/refreshboards`](#-refreshboards--refresh-leaderboards) | Reposts both leaderboards from their sheets | Templar |
+| [`/lfg-roles`](#-lfg-roles--activity-ping-roles) | Opt in/out of activity ping roles | Everyone |
+| [`/lfg-post`](#-lfg-post--looking-for-group) | Creates an LFG group post in the forum | Everyone |
+| [`/submission`](#-submission--proof-submission-help) | Proof formats, latest accepted proof, intake URL | Everyone (URL subcommands: Manage Server) |
+| [`/channelmap`](#-channelmap--channel-id-for-the-web-panel) | Shows a channel's ID for the web panel | Manage Server |
+| [`/weeklycomp`](#-weeklycomp--discord-event--wise-old-man-competitions) | Creates a Discord event plus WOM competitions | Templar |
+| [`/weeklycompstats`](#-weeklycompstats--competition-leaderboard) | Standings for the running WOM competitions | Everyone |
+| [`/honeypot`](#honeypot-channel-trap) | Test mode for the honeypot trap | Owner or Templar |
+
+Role checks for **Templar** and **Owner** on the high score commands fail **open**: if `TEMPLAR_ROLE_ID` / `OWNER_ROLE_ID` is unset, anyone can use them. `/spinwheel`, `/weeklycomp` and `/honeypot` fail **closed**: if their role ID is unset, no one can.
+
+---
+
 ### 🎡 `/spinwheel` — Prize Wheel
 
-Spins an animated prize wheel and picks one or more random winners from a list of entries.
-
-**When to use it:**
-- Giveaways (pick a winner from everyone who entered)
-- Loot splits (randomly assign a drop from a boss trip)
-- Event prizes (randomly select who gets first pick of a reward)
-- Deciding activities (spin between bossing locations, minigames, or skilling tasks)
-- Any situation where you want a fair, visible, and fun random pick
-
-**Options:**
+Spins an animated wheel and picks one or more random winners, for giveaways, loot splits, event prizes, or picking an activity.
 
 | Option | Required | Description |
 |--------|----------|-------------|
-| `entries` | Yes | Comma-separated list of names or numeric ranges, e.g. `Alice,Bob,Carol` or `1-10` or `Alice,1-5,Bob` |
-| `title` | No | Label shown on the wheel (default: `Wheel Spin`) |
-| `winners` | No | How many winners to pick (1–10, default: 1) |
-| `message` | No | Custom win message — use `{winner}` as a placeholder (default: `Winner is {winner}`) |
-| `shuffle` | No | Shuffle the entry order before spinning (default: false) |
-| `ping` | No | Send an `@here` or `@everyone` notification when the winner is announced |
+| `entries` | Yes | Comma-separated names or numeric ranges, e.g. `Alice,Bob,Carol`, `1-10`, or `Alice,1-5,Bob`. 2–50 entries after ranges expand. |
+| `title` | No | Label on the wheel (default `Wheel Spin`) |
+| `winners` | No | Winners to pick, 1–10 and fewer than the number of entries (default 1) |
+| `message` | No | Win message, with `{winner}` as a placeholder (default `Winner is {winner}`) |
+| `shuffle` | No | Shuffle the entries before spinning (default false) |
+| `ping` | No | `@here` or `@everyone` when the winner is announced |
 
-**Range auto-fill:** Entries like `1-10` automatically expand to `1,2,3,4,5,6,7,8,9,10`. Works with any range in either direction (e.g. `5-1` counts down).
+Ranges count either way (`5-1` counts down). Labels longer than 16 characters are cut short on the wheel.
 
-Restricted to users with the **Coordinator** role.
-
-<details>
-<summary><strong>Environment variables</strong></summary>
-
-| Variable | Required | Description |
-|---|---|---|
-| `COORDINATOR_ROLE_ID` | Yes | The only role allowed to run `/spinwheel`. Unlike the Templar-gated commands below, this check fails **closed** — if left unset, no one can use the command at all (not even the Owner). |
-
-</details>
+**Requires** `COORDINATOR_ROLE_ID`.
 
 <details>
 <summary><strong>How it works</strong></summary>
 
-1. The bot renders and sends an animated GIF of the wheel spinning, easing to a stop on the winner's slice.
-2. Once the GIF finishes playing, the bot edits the same message to reveal the winner alongside the full entry list.
-3. If a ping option was selected, a short follow-up is sent so Discord fires the notification.
+1. The bot posts a GIF of the wheel spinning and easing to a stop on the first winner.
+2. When the GIF finishes, it edits the message to show the winner(s) and every entry.
+3. If `ping` was set, it sends the ping as a separate message, since edits don't notify.
 
 </details>
 
@@ -68,66 +68,54 @@ Restricted to users with the **Coordinator** role.
 
 ### 💰 `/donationhighscore` — Donation High Scores
 
-Tracks each member's total GP donated in a Google Sheet the bot both reads and writes, posts a ranked leaderboard embed, and assigns donation tier roles (Zenyte/Onyx/Dragonstone/Diamond/Ruby) based on configurable GP thresholds.
-
-**When to use it:**
-- Logging a donation for a member and having the leaderboard update automatically
-- Keeping a live, sorted "who's donated the most" leaderboard pinned in a channel
-- Automatically granting/revoking donation tier roles as totals change
-
-**Subcommands:**
+Tracks each member's total GP donated in a Google Sheet, posts a ranked leaderboard, and assigns stacking donation tier roles (Zenyte / Onyx / Dragonstone / Diamond / Ruby).
 
 | Subcommand | Description |
 |------------|-------------|
-| `add` | Adds an amount to a member's donation total |
-| `remove` | Subtracts an amount from a member's donation total (for fixing mistakes) |
+| `add` | Adds an amount to a member's total |
+| `remove` | Subtracts an amount (never below 0) |
 
-Both take a `player` (the member) and an `amount` option — raw numbers or shorthand like `10m`, `10k`, `1b`, or `10.1m` all work.
-
-Restricted to users with the **Templar** role. Only loaded if `DONATIONS_SHEET_ID`, `DONATIONS_CHANNEL_ID`, and `GOOGLE_SERVICE_ACCOUNT_JSON` are set.
+Both take a `player` and an `amount`: a raw number or shorthand like `10k`, `10m`, `10.1m` or `1b`.
 
 <details>
 <summary><strong>Environment variables</strong></summary>
 
 | Variable | Required | Description |
 |---|---|---|
-| `DONATIONS_SHEET_ID` | Yes | The Google Sheet's ID — the command isn't loaded at all without this, `DONATIONS_CHANNEL_ID`, and `GOOGLE_SERVICE_ACCOUNT_JSON`. |
-| `DONATIONS_CHANNEL_ID` | Yes | Channel where the leaderboard embed is posted. |
-| `GOOGLE_SERVICE_ACCOUNT_JSON` | Yes | Shared with `/pethighscore` — see [Google service account](#google-service-account). |
-| `TEMPLAR_ROLE_ID` | Recommended | Restricts `add`/`remove` to Templars. **This check fails open** — if left unset, `add`/`remove` are usable by anyone. |
-| `DONATION_ZENYTE_THRESHOLD` | No | GP threshold for the Zenyte tier (default `1000000000` / 1B). |
-| `DONATION_ONYX_THRESHOLD` | No | GP threshold for the Onyx tier (default `600000000` / 600M). |
-| `DONATION_DRAGONSTONE_THRESHOLD` | No | GP threshold for the Dragonstone tier (default `300000000` / 300M). |
-| `DONATION_DIAMOND_THRESHOLD` | No | GP threshold for the Diamond tier (default `150000000` / 150M). |
-| `DONATION_RUBY_THRESHOLD` | No | GP threshold for the Ruby tier (default `75000000` / 75M). |
-| `DONATION_ZENYTE_ROLE_ID` / `DONATION_ONYX_ROLE_ID` / `DONATION_DRAGONSTONE_ROLE_ID` / `DONATION_DIAMOND_ROLE_ID` / `DONATION_RUBY_ROLE_ID` | No | Role granted at each tier. Leave a tier's role ID blank to skip role management for just that tier. |
-| `DEFAULT_EMBED_COLOR` | No | Shared accent color used across features when nothing more specific applies (default `006400`). |
+| `DONATIONS_SHEET_ID` | Yes | The Google Sheet's ID. The command isn't loaded without this, `DONATIONS_CHANNEL_ID` and `GOOGLE_SERVICE_ACCOUNT_JSON`. |
+| `DONATIONS_CHANNEL_ID` | Yes | Channel for the leaderboard. |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | Yes | See [Google service account](#google-service-account). |
+| `TEMPLAR_ROLE_ID` | Recommended | Restricts the command to Templars (fails open). |
+| `DONATION_<TIER>_THRESHOLD` | No | GP needed per tier. Defaults: Zenyte 1B, Onyx 600M, Dragonstone 300M, Diamond 150M, Ruby 75M. |
+| `DONATION_<TIER>_ROLE_ID` | No | Role granted at each tier. Leave blank to skip that tier's role. |
+| `DEFAULT_EMBED_COLOR` | No | Embed color (default `006400`). |
+
+`<TIER>` is `ZENYTE`, `ONYX`, `DRAGONSTONE`, `DIAMOND` or `RUBY`.
 
 </details>
 
 <details>
 <summary><strong>How it works</strong></summary>
 
-1. Reads the member's current row from the configured Google Sheet (by Discord ID), or starts a new one if they don't have a row yet.
-2. Adds or subtracts the amount from their total (`remove` clamps at 0 rather than going negative).
-3. Writes the updated row back to the sheet.
-4. Assigns the highest donation tier role the member's new total qualifies for, plus every tier role below it (tiers stack — a Zenyte donor also keeps Onyx, Dragonstone, Diamond, and Ruby), and removes any tier role no longer qualified for. Tiers left without a role ID configured are skipped.
-5. Re-sorts every member by total donated, highest first, and rebuilds the leaderboard embed: the combined total across every donor as the heading (in place of a static title), then one line per member with their highest earned tier's emoji (nothing if they haven't reached one), their mention, and their total — enlarged as a "# " heading for the top donor, a smaller "### " heading for everyone else. A member who's left the server shows their last known name instead of a dead mention.
-6. Posts the leaderboard to the configured channel, or edits the existing leaderboard message(s) in place (no duplicates), the same message-recovery behavior as `/pethighscore` if the tracked message is missing.
+1. Reads the member's row from the `Donations` tab (by Discord ID), or adds one.
+2. Updates their total and writes the row back.
+3. Grants every tier role the new total qualifies for (a Zenyte donor also keeps Onyx, Dragonstone, Diamond and Ruby) and removes the rest.
+4. Rebuilds the leaderboard: the combined total as the heading, then one line per donor with their highest tier's emoji, **display name** and total. The top donor's line is larger.
+5. Edits the existing leaderboard messages in place. If the stored message IDs are missing, it finds its previous post in the channel's recent history instead of posting a duplicate.
+
+Display names are refreshed from the server on every post. Members who left keep their last stored name.
 
 </details>
 
 <details>
 <summary><strong>Setup</strong></summary>
 
-1. Make a copy of `Tanglebot/example/donationhighscores_template.xlsx` as your live Google Sheet — open [sheets.google.com](https://sheets.google.com), **File → Import → Upload**, select the `.xlsx`, and when prompted choose **Create new spreadsheet** (not "Insert new sheet(s)" or just opening the uploaded file from Drive — those can leave it in Office-compatibility mode, which the Sheets API can't read/write and fails with `must not be an Office file`). This becomes your sheet, already set up with the tab the bot expects by exact name: `Donations` (`DiscordID`, `DisplayName`, `Donated` columns). Don't rename the tab. Clear the example rows if you don't want the sample data.
-2. Follow [Google service account](#google-service-account) below to create a service account (or reuse one you've already set up) and share the sheet with it as an **Editor**.
-3. Set `DONATIONS_SHEET_ID` to the sheet's ID (from its URL: `docs.google.com/spreadsheets/d/<THIS_PART>/edit`).
-4. Set `DONATIONS_CHANNEL_ID` to the channel where the leaderboard should be posted.
-5. Optionally set `DONATION_ZENYTE_THRESHOLD`, `DONATION_ONYX_THRESHOLD`, `DONATION_DRAGONSTONE_THRESHOLD`, `DONATION_DIAMOND_THRESHOLD`, and `DONATION_RUBY_THRESHOLD` (defaults: 1B / 600M / 300M / 150M / 75M).
-6. Optionally set `DONATION_ZENYTE_ROLE_ID`, `DONATION_ONYX_ROLE_ID`, `DONATION_DRAGONSTONE_ROLE_ID`, `DONATION_DIAMOND_ROLE_ID`, and `DONATION_RUBY_ROLE_ID` to have the bot manage tier roles. Leave a tier's role ID blank to skip role management for that tier.
+1. Import `Tanglebot/example/donationhighscores_template.xlsx` at [sheets.google.com](https://sheets.google.com) with **File → Import → Upload → Create new spreadsheet**. Other import options can leave it in Office mode, which the Sheets API rejects with `must not be an Office file`. Keep the `Donations` tab name (`DiscordID`, `DisplayName`, `Donated` columns) and clear the example rows.
+2. Share the sheet with your [service account](#google-service-account) as an **Editor**.
+3. Set `DONATIONS_SHEET_ID` (from the URL: `docs.google.com/spreadsheets/d/<THIS_PART>/edit`) and `DONATIONS_CHANNEL_ID`.
+4. Optionally set the tier thresholds and role IDs.
 
-> **Note:** For role management to work, the bot needs the **Manage Roles** permission and its highest role must be positioned **above** the donation tier roles in Server Settings → Roles.
+> The bot needs **Manage Roles**, with its role above the tier roles.
 
 </details>
 
@@ -135,64 +123,55 @@ Restricted to users with the **Templar** role. Only loaded if `DONATIONS_SHEET_I
 
 ### 🐾 `/pethighscore` — Pet High Scores
 
-Tracks which OSRS pets each member has collected in a Google Sheet the bot both reads and writes, posts a ranked leaderboard embed, and grants a Pet Master role once a member reaches a configurable pet count.
-
-**When to use it:**
-- Logging a pet drop for a member and having the leaderboard update automatically
-- Keeping a live, sorted "who has the most pets" leaderboard pinned in a channel
-- Automatically granting a Pet Master role once someone collects enough pets
-
-**Subcommands:**
+Tracks which OSRS pets each member has in a Google Sheet, posts a ranked leaderboard, and grants a Pet Master role at a set pet count.
 
 | Subcommand | Description |
 |------------|-------------|
-| `add` | Adds one or more pets to a member's collection |
-| `remove` | Removes one or more pets from a member's collection (for fixing mistakes) |
-| `new` | Registers a brand-new pet type on the leaderboard — **Owner role only** |
+| `add` | Adds up to five pets to a member (`user`, `pet`, `pet2`–`pet5`) |
+| `remove` | Removes up to five pets from a member |
+| `new` | Adds a new pet type (`name`, `emoji`) to the `Pets` tab — **Owner only** |
 
-`add`/`remove` take a `user` (the member) and up to five pet options (`pet`, `pet2`, `pet3`, `pet4`, `pet5` — only `pet` is required) so several pets can be logged or fixed in one command. Each slot autocompletes independently and skips pets already picked in another slot. Once `user` is filled in, the pet autocomplete is also narrowed to that member's actual state instead of the full catalog: `add` only suggests pets they don't have yet, and `remove` only suggests pets they do. `new` takes a `name` and an `emoji` (paste the custom emoji itself, or its raw numeric ID) and appends it to the `Pets` tab of the Google Sheet on the fly — no code edit or bot restart needed, and it's immediately available in `add`/`remove` autocomplete. This is separate from and stricter than the Templar gate on `add`/`remove`, since it changes the shared pet list rather than one member's data.
-
-Restricted to users with the **Templar** role. Only loaded if `PET_HIGHSCORES_SHEET_ID`, `PET_HIGHSCORES_CHANNEL_ID`, and `GOOGLE_SERVICE_ACCOUNT_JSON` are set.
+Pet slots autocomplete and skip pets picked in another slot. Once `user` is set, `add` only suggests pets the member doesn't have and `remove` only suggests pets they do. For `new`, paste the custom emoji or its numeric ID. The pet is available in autocomplete immediately.
 
 <details>
 <summary><strong>Environment variables</strong></summary>
 
 | Variable | Required | Description |
 |---|---|---|
-| `PET_HIGHSCORES_SHEET_ID` | Yes | The Google Sheet's ID — the command isn't loaded at all without this, `PET_HIGHSCORES_CHANNEL_ID`, and `GOOGLE_SERVICE_ACCOUNT_JSON`. |
-| `PET_HIGHSCORES_CHANNEL_ID` | Yes | Channel where the leaderboard embed is posted. |
-| `GOOGLE_SERVICE_ACCOUNT_JSON` | Yes | Shared with `/donationhighscore` — see [Google service account](#google-service-account). |
-| `TEMPLAR_ROLE_ID` | Recommended | Restricts `add`/`remove` to Templars. **This check fails open** — if left unset, `add`/`remove` are usable by anyone. |
-| `OWNER_ROLE_ID` | Recommended | Restricts `new` (registering a pet type) to Owners. **This check also fails open** — if left unset, `new` is usable by anyone. |
-| `PET_MASTER_ROLE_ID` | No | Role granted once a member reaches `PET_MASTER_THRESHOLD` pets. Leave blank to skip role management. |
-| `PET_MASTER_THRESHOLD` | No | Pet count needed for Pet Master (default `10`). |
-| `DEFAULT_EMBED_COLOR` | No | Shared accent color used across features when nothing more specific applies (default `006400`). |
+| `PET_HIGHSCORES_SHEET_ID` | Yes | The Google Sheet's ID. The command isn't loaded without this, `PET_HIGHSCORES_CHANNEL_ID` and `GOOGLE_SERVICE_ACCOUNT_JSON`. |
+| `PET_HIGHSCORES_CHANNEL_ID` | Yes | Channel for the leaderboard. |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | Yes | See [Google service account](#google-service-account). |
+| `TEMPLAR_ROLE_ID` | Recommended | Restricts `add`/`remove` to Templars (fails open). |
+| `OWNER_ROLE_ID` | Recommended | Restricts `new` to Owners (fails open). |
+| `PET_MASTER_ROLE_ID` | No | Role granted at `PET_MASTER_THRESHOLD` pets. Leave blank to skip. |
+| `PET_MASTER_THRESHOLD` | No | Pets needed for Pet Master (default 10). |
+| `DEFAULT_EMBED_COLOR` | No | Embed color (default `006400`). |
 
 </details>
 
 <details>
 <summary><strong>How it works</strong></summary>
 
-1. Reads the member's current row from the configured Google Sheet (by Discord ID), or starts a new one if they don't have a row yet.
-2. Adds or removes every pet given in one command (skipping any already owned on `add`, or not owned on `remove`, and noting the skips in the reply), keeping each member's pet list stored in a fixed order (the order pets are listed on the `Pets` sheet tab) regardless of the order they were logged in.
-3. Writes the updated row back to the sheet in a single write, whether one pet was given or several.
-4. Re-sorts every member by pet count, highest first, and rebuilds the leaderboard embed: one block per member showing `@mention — N pets` followed by a large row of that member's pet emojis (using the "# heading" markdown trick to enlarge emoji). A member who's left the server shows their last known name instead of a dead mention.
-5. Posts the leaderboard to the configured channel, or edits the existing leaderboard message(s) in place (no duplicates), the same message-recovery behavior as `/donationhighscore` if the tracked message is missing.
-6. If the member's new pet count crosses `PET_MASTER_THRESHOLD` in either direction, grants or revokes the Pet Master role.
+1. Adds or removes every given pet in one sheet write, skipping pets already owned (`add`) or not owned (`remove`) and noting them in the reply. Pets are stored in `Pets` tab order.
+2. Rebuilds the leaderboard sorted by pet count: 🥇🥈🥉 for the top three (ties share a medal), the member's **display name** and count, then a large row of their pet emojis.
+3. Edits the existing leaderboard messages in place, the same way as `/donationhighscore`.
+4. Grants or removes Pet Master when the member's count crosses the threshold.
 
 </details>
 
 <details>
 <summary><strong>Setup</strong></summary>
 
-1. Make a copy of `Tanglebot/example/pethighscores_template.xlsx` as your live Google Sheet — open [sheets.google.com](https://sheets.google.com), **File → Import → Upload**, select the `.xlsx`, and when prompted choose **Create new spreadsheet** (not "Insert new sheet(s)" or just opening the uploaded file from Drive — those can leave it in Office-compatibility mode, which the Sheets API can't read/write and fails with `must not be an Office file`). This becomes your sheet, already set up with two tabs the bot expects by exact name: `Highscores` (member data — `DiscordID`, `DisplayName`, `Pets` columns, the `Pets` column holding a comma-separated list of pet *keys* from the `Pets` tab, e.g. `baby_mole, heron, rocky`, not display names) and `Pets` (the pet catalog — `Key`, `Name`, `EmojiID` columns, pre-filled with the full pet list). Don't rename either tab. Clear the example rows on `Highscores` if you don't want the sample data.
-2. Follow [Google service account](#google-service-account) below to create a service account (or reuse one you've already set up) and share the sheet with it as an **Editor**.
-3. Set `PET_HIGHSCORES_SHEET_ID` to the sheet's ID (from its URL: `docs.google.com/spreadsheets/d/<THIS_PART>/edit`).
-4. Set `PET_HIGHSCORES_CHANNEL_ID` to the channel where the leaderboard should be posted.
-5. Optionally set `PET_MASTER_ROLE_ID` and `PET_MASTER_THRESHOLD` (default: 10) to have the bot manage the Pet Master role.
-6. On the `Pets` tab, fill in each pet's `EmojiID` with the custom Discord emoji ID for that pet (upload the pet emojis to your server/app first, then copy each one's ID). Pets left with an empty `EmojiID` show a ❔ placeholder on the leaderboard instead of failing. New pets released in-game can be added as a new row directly, or by an Owner running `/pethighscore new` — row order is the order pets are displayed in, and new entries are appended to the end. The bot reads this tab once at startup and keeps it in sync in memory as pets are added via `/pethighscore new`; a manual edit to existing rows needs a bot restart to take effect.
+1. Import `Tanglebot/example/pethighscores_template.xlsx` the same way as the donations template. Keep both tab names:
+   - `Highscores` — `DiscordID`, `DisplayName`, `Pets`. `Pets` is a comma-separated list of pet **keys** (e.g. `baby_mole, heron`), not names.
+   - `Pets` — `Key`, `Name`, `EmojiID`, pre-filled with every pet. Row order is display order.
+2. Share the sheet with your [service account](#google-service-account) as an **Editor**.
+3. Set `PET_HIGHSCORES_SHEET_ID` and `PET_HIGHSCORES_CHANNEL_ID`, and optionally `PET_MASTER_ROLE_ID` / `PET_MASTER_THRESHOLD`.
+4. Fill in each pet's `EmojiID` with its custom emoji ID. Pets without one show ❔.
 
-> **Note:** For role management to work, the bot needs the **Manage Roles** permission and its highest role must be positioned **above** the Pet Master role in Server Settings → Roles.
+The `Pets` tab is read once at startup, so hand edits to it need a restart. `/pethighscore new` doesn't.
+
+> The bot needs **Manage Roles**, with its role above Pet Master.
 
 </details>
 
@@ -200,135 +179,87 @@ Restricted to users with the **Templar** role. Only loaded if `PET_HIGHSCORES_SH
 
 ### 🔄 `/refreshboards` — Refresh Leaderboards
 
-Reposts every leaderboard (currently `/pethighscore` and `/donationhighscore`) straight from their Google Sheets, without needing a throwaway `add`/`remove` or a bot restart.
+Reposts the pet and donation leaderboards from their Google Sheets, e.g. after editing a sheet by hand. A board whose env vars aren't set is skipped. The same refresh runs on startup.
 
-**When to use it:**
-- After bulk-editing a leaderboard's sheet by hand (imports, corrections) and wanting the Discord post to catch up immediately
-
-Restricted to users with the **Templar** role. Only loaded if `GOOGLE_SERVICE_ACCOUNT_JSON` is set.
-
-<details>
-<summary><strong>Environment variables</strong></summary>
-
-| Variable | Required | Description |
-|---|---|---|
-| `GOOGLE_SERVICE_ACCOUNT_JSON` | Yes | The command isn't loaded at all without this — see [Google service account](#google-service-account). |
-| `TEMPLAR_ROLE_ID` | Recommended | Restricts the command to Templars. **This check fails open** — if left unset, it's usable by anyone. |
-
-</details>
-
-<details>
-<summary><strong>How it works</strong></summary>
-
-1. Calls each leaderboard's own startup-refresh routine (the same one that runs when the bot boots), one per board.
-2. Each board reads its sheet fresh and reposts, or edits its existing leaderboard message(s) in place — the same message-recovery behavior described under `/pethighscore` and `/donationhighscore`.
-3. A board whose own env vars (e.g. `PET_HIGHSCORES_SHEET_ID`) aren't set is silently skipped rather than failing the whole command, so the other board still refreshes.
-
-</details>
+Requires `GOOGLE_SERVICE_ACCOUNT_JSON` to load. Restricted to Templars (`TEMPLAR_ROLE_ID`, fails open).
 
 ---
 
-### 🔔 `/lfg-roles` — Event Notification Roles
+### 🔔 `/lfg-roles` — Activity Ping Roles
 
-Lets members self-assign notification roles for specific bosses, raids, and skilling/minigame activities, so they only get pinged for exactly what they're interested in.
-
-**When to use it:**
-- Opting in to pings for a specific boss, raid, or minigame without staff having to manage roles by hand
-- Getting notified the moment someone starts an `/lfg-post` group for something you're interested in
-
-<details>
-<summary><strong>Environment variables</strong></summary>
-
-No environment variables are required — activity roles are auto-created on demand.
-
-| Variable | Required | Description |
-|---|---|---|
-| `ADMIN_LOG_CHANNEL_ID` | No | Shared admin alerts channel (also used by `/lfg-post` and the honeypot trap) — reports things like a misconfigured activity color/emoji here if set. |
-
-</details>
+Opens a private menu for opting in to ping roles for bosses, raids and minigames, so members only get pinged for what they care about. Groups made with `/lfg-post` ping these roles.
 
 <details>
 <summary><strong>How it works</strong></summary>
 
-1. Running the command opens a private (ephemeral) menu with three categories: **Bosses**, **Raids**, and **Minigames**.
-2. Clicking a category opens a private submenu listing that category's specific activities (e.g. Yama, CoX, Tempoross), sorted alphabetically and shown with pet emojis where configured.
-3. Clicking an activity toggles that role on or off — selected roles turn red and stay red until clicked again.
-4. Once a member has a role, anyone can `@mention` it to notify everyone who's opted in.
-5. A **Clear All LFG Roles** button on the main menu removes every `LFG-` role the member has in one click.
+1. The menu has a button per category (**Bosses**, **Raids**, **Minigames**) and **Clear All LFG Roles**.
+2. A category opens its activities in alphabetical order. Clicking one toggles its role. Roles you have show red.
+3. Menus delete themselves after 60 seconds. Your roles stay.
+4. Anyone can `@mention` a role to ping everyone who opted in.
 
 </details>
 
 <details>
 <summary><strong>Setup</strong></summary>
 
-The bot auto-creates any missing activity role (prefixed `LFG-`, e.g. `LFG-Yama`; full list in `src/utils/roleMenu.js`) the first time it's needed — no manual role setup required. Each role is colored and (on servers at Boost Level 2+, which unlocks role icons) icon-tagged to match its `CATEGORIES` entry as soon as it's created. On startup, if `CLAN_ID` is set, the bot also re-syncs color/icon onto every already-existing `LFG-` role, so a later edit to `CATEGORIES` reaches roles created before the change. Needs the **Manage Roles** permission, with the bot's own role positioned above the `LFG-` roles once created. Optionally, upload custom pet emojis and add their IDs for a nicer-looking menu.
+Activities are defined in `CATEGORIES` in `src/utils/roleMenu.js`. Each role (`LFG-<activity>`, e.g. `LFG-Yama`) is created on first use with the activity's color, plus its emoji as the role icon on servers with role icons (Boost Level 2+). On startup, if `CLAN_ID` is set, the bot applies `CATEGORIES` colors and icons to existing `LFG-` roles.
+
+The bot needs **Manage Roles**, with its role above the `LFG-` roles. `ADMIN_LOG_CHANNEL_ID` (optional) receives role errors and misconfigured activities.
 
 </details>
 
 ---
 
-### 🔍 `/lfg-post` — Looking For Group (Forum Posts)
+### 🔍 `/lfg-post` — Looking For Group
 
-Creates a post in a configured Forum Channel so members can find and join a group for a specific activity, with automatic role pings, live member tracking, and self-cleanup.
-
-**When to use it:**
-- Starting a group for a boss, raid, or minigame and letting people find/join it without manual coordination
-- Browsing the LFG forum channel to see every currently open group at a glance
+Creates a forum post where members can join a group for an activity, with a role ping, a live member list, a queue, and automatic cleanup.
 
 <details>
 <summary><strong>Environment variables</strong></summary>
 
 | Variable | Required | Description |
 |---|---|---|
-| `LFG_FORUM_CHANNEL_ID` | Yes | Forum Channel where groups get created — the command isn't loaded at all without this set. |
-| `COORDINATOR_ROLE_ID` / `OWNER_ROLE_ID` | No | Lets staff Disband or Start Now any group, not just its own members. If both are left unset, only current group members can manage a group. |
-| `SUPABASE_URL` + `LFG_PLUGIN_TOKEN` | No | Enables the shared LFG backend sync (mirrors groups to/from the RuneLite plugin). `SUPABASE_URL` is shared with the proof intake feature below. |
-| `LFG_DELIVERY_SECRET` | No | Needed on top of the above to push the category/activity catalog to Supabase on startup and to run the delivery worker that pulls plugin-created groups into Discord. |
-| `ADMIN_LOG_CHANNEL_ID` | No | Shared admin alerts channel (also used by `/lfg-roles` and the honeypot trap). |
+| `LFG_FORUM_CHANNEL_ID` | Yes | Forum Channel for group posts. The command isn't loaded without it. |
+| `COORDINATOR_ROLE_ID` / `OWNER_ROLE_ID` | No | Staff who can Start Now, Disband, Cancel Disband and confirm Still Here on any group. |
+| `SUPABASE_URL` + `LFG_PLUGIN_TOKEN` | No | Mirrors groups to the shared LFG backend used by the RuneLite plugin. |
+| `LFG_DELIVERY_SECRET` | No | Also needed to push the activity catalog on startup and to deliver plugin-created groups into Discord. |
+| `ADMIN_LOG_CHANNEL_ID` | No | Receives setup errors and backend sync failures. |
 
 </details>
 
 <details>
 <summary><strong>How it works</strong></summary>
 
-1. Running the command opens a private, step-by-step menu: **Category** (Bosses / Raids / Minigames) → **Activity** → **Group Size** (auto-ranged to that activity's max — some activities also offer a "Mass" option) → **Start Time** (relative offsets like *Now*, *15 Min*, *1 Hour* — no timezone guesswork required).
-2. After the last selection, an optional **description** prompt appears.
-3. The bot creates a forum post pinging the matching role, titled `[Open] - Category: Activity - Start: X`, with the full details as the post's plain-text body (including who started it) and a live member list that updates on every join/leave.
-4. Anyone can **Join** or **Leave** from the post. Someone joining, leaving, or taking a freed spot posts a quiet notice with no group-wide ping — routine churn, not something everyone needs pinged for. Once the group hits its size cap it auto-closes (locks joining, pings everyone "Good luck!"); if people are queued when a spot frees up, the front of the queue gets a 5-minute **Accept/Decline** offer before the spot opens back up to everyone else.
-5. **Disband** is limited to current group members or Coordinator+ staff, and doesn't close the post immediately — it posts a 1-minute closing notice with a **Cancel Disband** button first, in case of a mis-click.
-6. An empty group (everyone's left, nobody rejoins) auto-closes after 15 minutes. Any active group also gets a keep-alive check every 2 hours — if nobody clicks **Still Here** within 10 minutes, it auto-disbands the same way a manual Disband would. There's no cleanup tied to the group's start time passing or to it filling up — a full or "started" group just stays up until it empties out or someone disbands it.
-7. On startup, the bot also posts (or updates) a pinned "Start Here" thread in the forum channel with a walkthrough and a summary of these automations, so members don't need this README to understand the buttons.
+1. A private menu asks for **Category** → **Activity** → **Group Size** (up to the activity's max, some with a **Mass** option) → **Start Time** (Now, 15 or 30 minutes, or 1–6 hours from now), then an optional description.
+2. The bot creates a post titled like `[Open] - Bosses: Yama - Start: in 15 Min`, pinging the activity's role and listing the details and members. The title's countdown updates as the start approaches, and `[Open]` becomes `[Full]` when the group fills.
+3. Buttons on the post:
+   - **Join Group** — joins, or joins the queue if the group is full.
+   - **Leave Group** — leaves the group or the queue.
+   - **Start Now** — starts the group immediately (members or staff).
+   - **Disband Group** — closes the post after a 1-minute grace period with a **Cancel Disband** button (members or staff; anyone in the group or queue can cancel).
+4. Joins and leaves post a notice without pinging the group. Filling up pings everyone with "Group formed, Good luck!"
+5. When a spot frees up in a full group, the first person in the queue gets **Accept Spot** / **Decline Spot** for 5 minutes. Declining or not answering removes them from the queue, and the spot goes to the next person. With nobody queued, the group reopens.
+6. An empty group closes after 15 minutes unless someone rejoins.
+7. Every 2 hours, starting no earlier than the start time, the group is asked if it's still active. No **Still Here** click within 10 minutes disbands it.
+8. On startup the bot posts or updates a pinned **Start Here** post in the forum explaining all of this.
 
-**Shared LFG sync:** when `SUPABASE_URL` and `LFG_PLUGIN_TOKEN` are configured, Discord-created `/lfg-post` groups are mirrored into the shared Supabase LFG backend so the RuneLite plugin can see them. This also runs in reverse: groups created from the RuneLite plugin are delivered into Discord as their own posts (with matching Join/Join Queue/Leave/Leave Queue/Close Group buttons). `LFG_DELIVERY_SECRET` is additionally needed for the bot to push its category/activity catalog (from `src/utils/roleMenu.js`) into Supabase on startup and to run the delivery worker that pulls plugin-created groups into Discord.
+Groups are kept in memory, so buttons on posts made before a restart stop working.
 
 </details>
 
 <details>
-<summary><strong>Advanced: queue, keep-alive &amp; plugin-synced post details</strong></summary>
+<summary><strong>Shared LFG backend (RuneLite plugin)</strong></summary>
 
-**Buttons on a native `/lfg-post` group:** Join Group, Leave Group, Start Now, Disband Group.
+With `SUPABASE_URL` and `LFG_PLUGIN_TOKEN` set, `/lfg-post` groups are mirrored to the shared Supabase backend so the RuneLite plugin can see them. With `LFG_DELIVERY_SECRET` too, the bot pushes its activity catalog (from `roleMenu.js`) on startup and polls for plugin-created groups, posting each as its own thread.
 
-- **Join Group** always shows the same label whether the group is open or full — if it's full, clicking it adds you to the queue instead of erroring, so the button never has to change out from under anyone.
-- **Leave Group** doubles as "leave the queue" if you're queued rather than a member.
-- **Start Now** (group members or Coordinator+ only) starts the group immediately regardless of open/closed status, skipping the rest of the scheduled wait.
-- **Disband Group** (group members or Coordinator+ only) doesn't close the post immediately — see the grace period below.
-
-**Queue mechanics:** once a group is full, further Join clicks add to a FIFO queue shown in the embed, numbered by position. When a spot frees up (someone leaves, or capacity allows more than one spot):
-- If nobody's queued, the group reopens to the public Join button.
-- If someone's queued, the person at the front of the queue gets a private **Accept Spot** / **Decline Spot** offer with a 5-minute window. Missing the window doesn't drop them from the queue — they're cycled to the back and the offer moves to the next person in line.
-
-**Keep-alive checks:** every 2 hours, an active group is asked "is this still active?" with a **Still Here** button posted to the thread. No response within 10 minutes auto-disbands the group exactly as if someone had clicked Disband Group.
-
-**Disband grace period:** clicking Disband Group posts a "closing in 1 minute" notice with a **Cancel Disband** button rather than closing instantly — anyone with standing (a current member, someone queued, or Coordinator+) can cancel it before the timer runs out.
-
-**Plugin-synced posts:** groups created from the RuneLite plugin (delivered via the reverse Supabase sync) render as their own Discord threads with a different button set from native `/lfg-post` groups — separate **Join Group**, **Leave Group**, and **Close Group** buttons, each individually enabled/disabled based on the group's synced status (`OPEN`/`FULL`/`STARTED`/`CLOSED`/`CANCELLED`/`EXPIRED`). **Join Group** stays enabled while `FULL` too — the backend's `join` action queues the caller automatically once a group is full, so there's no separate queue button to click.
+Plugin-created posts have **Join Group**, **Leave Group** and **Close Group** buttons, enabled per the group's status (`OPEN`, `FULL`, `STARTED`, `CLOSED`, `CANCELLED`, `EXPIRED`). Join stays enabled when the group is full, because the backend queues the player.
 
 </details>
 
 <details>
 <summary><strong>Setup</strong></summary>
 
-`LFG_FORUM_CHANNEL_ID` must point to an actual Forum Channel. Uses the same auto-created activity roles as `/lfg-roles`, and needs the bot's role given **Manage Threads** (needed to rename/delete forum posts) in addition to the other permissions below.
+Point `LFG_FORUM_CHANNEL_ID` at a Forum Channel. The bot needs **Manage Threads** there, and **Manage Roles** for the activity roles (shared with `/lfg-roles`). A forum tag named after an activity (e.g. `Yama`) is applied to its posts automatically.
 
 </details>
 
@@ -336,89 +267,74 @@ Creates a post in a configured Forum Channel so members can find and join a grou
 
 ### 🧾 `/submission` — Proof Submission Help
 
-Posts the accepted KC/drop proof formats or shows the latest accepted proof submission.
-
-**Subcommands:**
-
 | Subcommand | Description |
 |------------|-------------|
-| `format` | Posts the KC and drop proof formats for players |
-| `last` | Shows the latest accepted KC or drop proof submission |
-| `showintakeurl` | Shows the current Discord KC intake URL the bot will use |
-| `setintakeurl` | Stores a local override for the Discord KC intake URL |
+| `format` | Posts the KC and drop proof formats |
+| `last` | Shows the latest accepted proof submission |
+| `showintakeurl` | Shows the KC intake URL in use (Manage Server) |
+| `setintakeurl` | Overrides the intake URL without a restart (Manage Server) |
 
-`format` and `last` support a `private` option to show the response only to the person running the command. By default, responses are public so staff can post the format directly in a submission channel.
+`format` and `last` reply publicly unless `private` is set. The URL subcommands always reply privately. The override is saved in `Tanglebot/data/` and takes precedence over `SUPABASE_DISCORD_KC_INTAKE_URL`.
 
-`showintakeurl` and `setintakeurl` require **Manage Server** permission and reply ephemerally. `setintakeurl` writes a local override file on the bot so the intake endpoint can be changed without editing `.env` or restarting the process.
-
-<details>
-<summary><strong>Environment variables</strong></summary>
-
-No environment variables are required to load `/submission` itself, but `last` only has anything to show once the [KC and Drop Proof Intake](#kc-and-drop-proof-intake) message feature below has accepted at least one submission, which needs its own four env vars set.
-
-</details>
-
-### `/channelmap` — Show Channel ID
-
-Restricted to users with **Manage Server** permission. The command replies ephemerally with:
-- the channel mention and ID
-- the value to paste into `event_discord_channels.channel_id`
-- a note that channel routing is read from the web panel / Supabase channel row
+`last` only has something to show once [KC and Drop Proof Intake](#kc-and-drop-proof-intake) has accepted a submission.
 
 ---
 
-### 🏆 `/weeklycomp` — Discord Event + Wise Old Man Competition
+### 🧭 `/channelmap` — Channel ID for the Web Panel
 
-Creates a Discord scheduled event plus one Wise Old Man competition per boss or skill, in one step.
+Replies privately with a channel's ID (the current channel, or the `channel` option) and the values to set on its `event_discord_channels` row in the web panel. Requires **Manage Server**.
 
-**Options:**
+---
+
+### 🏆 `/weeklycomp` — Discord Event + Wise Old Man Competitions
+
+Creates a Discord scheduled event and one Wise Old Man competition per boss or skill, in one step.
 
 | Option | Required | Description |
 |--------|----------|-------------|
-| `prefix` | Yes | Name prefix. Each competition is named `<prefix> <metric>`, e.g. `BOTW T3 Vorkath`, with any leading "The" dropped from the metric. |
-| `metric` | Yes | Boss or skill to track. Autocompletes over everything WOM supports. |
-| `metric2`–`metric4` | No | Extra bosses or skills, each getting its own competition. |
-| `start` | Yes | Start date in Eastern Time: `YYYY-MM-DD`, `YYYY/MM/DD` or `MM/DD/YYYY`, optionally with an hour (`18` or `6pm`). Full ISO 8601 with an offset also works. |
-| `duration` | No | Days the competition runs (1–365, default 7). |
+| `prefix` | Yes | Name prefix. Each competition is named `<prefix> <metric>`, e.g. `BOTW T3 Vorkath`, without a leading "The". |
+| `metric` | Yes | Boss or skill. Autocompletes over everything WOM tracks. |
+| `metric2`–`metric4` | No | More bosses or skills, each with its own competition. |
+| `start` | Yes | Eastern Time date: `YYYY-MM-DD`, `YYYY/MM/DD` or `MM/DD/YYYY`, optionally with an hour (`18` or `6pm`). ISO 8601 with an offset also works. |
+| `duration` | No | Days, 1–365 (default 7). |
 | `group_id` | No | WOM group ID. Only shown when `WOM_GROUP_ID` isn't set. |
-| `verification_code` | No | WOM group verification code. Only shown when `WOM_GROUP_VERIFICATION_CODE` isn't set. **Visible to everyone in the channel when used.** |
+| `verification_code` | No | WOM verification code. Only shown when `WOM_GROUP_VERIFICATION_CODE` isn't set. |
 
-Restricted to the **Templar** role. The reply is private to whoever runs the command.
+Replies privately. **Requires** `TEMPLAR_ROLE_ID`.
 
 <details>
 <summary><strong>Environment variables</strong></summary>
 
 | Variable | Required | Description |
 |---|---|---|
-| `TEMPLAR_ROLE_ID` | Yes | The only role that can run `/weeklycomp`, and the role pinged by the ending reminder. If unset, no one can run the command. |
-| `WOM_GROUP_ID` | Recommended | Your clan's WOM group ID. Also turns on the ending reminder. |
-| `WOM_GROUP_VERIFICATION_CODE` | Recommended | wiseoldman.net → your group → settings → Verification Code. Also used for the reminder's update all. |
-| `WOM_API_KEY` | No | Raises the WOM rate limit from 20 to 100 requests a minute. Ask for one on the Wise Old Man Discord. |
-| `ADMIN_LOG_CHANNEL_ID` | No | Logs each `/weeklycomp` and any creation failures, and receives the ending reminder. Shared with other features. |
+| `TEMPLAR_ROLE_ID` | Yes | The role that can run the command, and the role the ending reminder pings. |
+| `WOM_GROUP_ID` | Recommended | Your WOM group. Also enables the ending reminder. |
+| `WOM_GROUP_VERIFICATION_CODE` | Recommended | wiseoldman.net → your group → settings → Verification Code. Also used by the reminder's update all. |
+| `WOM_API_KEY` | No | Raises WOM's rate limit from 20 to 100 requests a minute. Ask on the Wise Old Man Discord. |
+| `ADMIN_LOG_CHANNEL_ID` | No | Logs each run and any failures, and receives the ending reminder. |
 
 </details>
 
 <details>
 <summary><strong>How it works</strong></summary>
 
-1. Reads `start` as Eastern Time (EST/EDT handled) and shows a private confirmation with the metrics, start, end and duration. Nothing is created unless **Confirm** is clicked within 60 seconds.
-2. Creates one WOM competition per metric inside the group, so its members are tracked automatically.
-3. Creates a Discord event named `<prefix> <first metric>`, with each competition's link in the description and the first metric's WOM background image as the cover.
-4. Replies with links to the event and every competition, and logs it to the admin log.
-5. If a competition or the event fails to create, the reply and the admin log list whatever was created.
+1. Shows a private confirmation with the metrics, start, end and duration. Nothing is created unless **Confirm** is clicked within 60 seconds.
+2. Creates one WOM competition per metric in the group, so its members are tracked automatically.
+3. Creates a Discord event named `<prefix> <first metric>`, with every competition's link in the description and the first metric's WOM image as the cover.
+4. Replies with the links and logs to the admin log. If anything fails, the reply and the log list what was created.
 
 </details>
 
 <details>
 <summary><strong>Competition ending reminder (automatic)</strong></summary>
 
-At :00, :15, :30 and :45 (and once on startup), the bot checks the WOM group for ongoing competitions ending within the hour. When it finds any, it:
+Every 15 minutes (on the quarter hour, and once on startup) the bot checks the WOM group for competitions ending within the hour. For those it finds, it:
 
-1. Runs **update all** on the group once, then waits 5 minutes for WOM to process it.
-2. Posts **one** message in `ADMIN_LOG_CHANNEL_ID` pinging `TEMPLAR_ROLE_ID` to make the announcement, with the top 3 for each ending competition.
-3. Adds a combined top 5 for each category (bossing, skilling, …) with two or more ending competitions. Categories are never mixed.
+1. Runs **update all** on the group, then waits 5 minutes if any players were queued.
+2. Posts **one** message in `ADMIN_LOG_CHANNEL_ID` pinging `TEMPLAR_ROLE_ID`, with the top 3 of each ending competition.
+3. Adds a combined top 5 for each category (bossing, skilling, …) with two or more ending competitions.
 
-Each competition is reminded once. The bot searches the admin log channel for its earlier reminders, since files don't survive a deploy. It checks before update all and again right before sending, which covers restarts and the brief overlap of old and new bots during a deploy. The bot needs **Read Message History** in the admin log channel, or no reminder is sent.
+Each competition is reminded once. The bot checks the admin log channel for its earlier reminders, so this survives restarts and deploys. It needs **Read Message History** in that channel, or no reminder is sent.
 
 Needs `WOM_GROUP_ID` and `ADMIN_LOG_CHANNEL_ID`.
 
@@ -428,35 +344,33 @@ Needs `WOM_GROUP_ID` and `ADMIN_LOG_CHANNEL_ID`.
 
 ### 📊 `/weeklycompstats` — Competition Leaderboard
 
-Shows the standings for every Wise Old Man competition the group is running right now. Anyone can use it, and the reply is visible to the channel. Each person can run it once a minute.
-
-**Options:**
+Shows the standings for every WOM competition the group is running. Anyone can use it; the reply is public. Each person can run it once a minute.
 
 | Option | Required | Description |
 |--------|----------|-------------|
-| `player` | No | A RuneScape name (up to 12 letters, numbers, spaces, `-` or `_`). Opens on that player's page, highlights their row and shows their rank on each leaderboard. Autocompletes from the last fetched standings. |
+| `player` | No | A RuneScape name. Opens on that player's page, highlights them, and shows their rank on each leaderboard. Autocompletes from the last fetched standings. |
 
 <details>
 <summary><strong>Environment variables</strong></summary>
 
 | Variable | Required | Description |
 |---|---|---|
-| `WOM_GROUP_ID` | Yes | Your clan's WOM group ID. The command isn't registered without it. |
-| `WOM_API_KEY` | No | Raises the WOM rate limit from 20 to 100 requests a minute. Ask for one on the Wise Old Man Discord. |
-| `ADMIN_LOG_CHANNEL_ID` | No | Receives an alert, naming who ran the command, when a competition fails to load or the reply fails. Shared with other features. |
+| `WOM_GROUP_ID` | Yes | Your WOM group. The command isn't loaded without it. |
+| `WOM_API_KEY` | No | Raises WOM's rate limit from 20 to 100 requests a minute. |
+| `ADMIN_LOG_CHANNEL_ID` | No | Receives an alert, naming who ran the command, when loading or replying fails. |
 
 </details>
 
 <details>
 <summary><strong>How it works</strong></summary>
 
-1. Lists each running competition on its own line with its total (**Total KC** for bosses, **Total gained** otherwise) and how many participants are active (e.g. `43/264 active`), marking any that end within 24 hours with ⏰. Categories with two or more competitions also get a combined total. Start and end times use Discord timestamps, so everyone sees them in their own timezone.
-2. Competitions in the same category (bossing, skilling, …) are added together per player and sorted by the combined count, with each competition's gains shown under the player. Different categories are never mixed and sit side by side.
-3. Only players who have gained something are listed, 10 per page, with 🥇🥈🥉 for the top 3. Tied players share a rank.
-4. **◀ Prev** / **Next ▶** buttons page through the results for 14 minutes. Only whoever ran the command can use them.
-5. If nothing is running, it says so and names the next competition(s) to start and when. If a competition has no gains yet, it says the competition is active but nothing has been recorded.
+1. Lists each running competition with its total (**Total KC** for bosses, **Total gained** otherwise) and active participants (e.g. `43/264 active`). ⏰ marks competitions ending within 24 hours. Times use Discord timestamps, so they show in each viewer's timezone.
+2. Competitions in the same category are summed per player, with each competition's gains shown underneath. Categories are never mixed and sit side by side.
+3. Players with gains are listed 10 per page, with 🥇🥈🥉 for the top 3. Ties share a rank.
+4. **◀ Prev** / **Next ▶** work for 14 minutes, only for whoever ran the command.
+5. If nothing is running, it names the next competition(s) and when they start.
 
-WOM allows 20 requests a minute (100 with `WOM_API_KEY`), so standings are fetched at most once every 5 minutes and shared by every run in between. They're fetched sooner when a competition starts or ends or `/weeklycomp` creates one, and 1 minute after an error. Each request times out after 20 seconds. The embed's timestamp shows when the data was fetched. Gains are only as fresh as each player's last WOM update. The command doesn't run update all.
+Standings are fetched at most every 5 minutes and shared between runs; sooner when a competition starts or ends or `/weeklycomp` creates one, and 1 minute after an error. Gains are only as fresh as each player's last WOM update. The command doesn't run update all.
 
 </details>
 
@@ -466,28 +380,28 @@ WOM allows 20 requests a minute (100 with `WOM_API_KEY`), so standings are fetch
 
 ### KC and Drop Proof Intake
 
-When configured, Tanglebot watches linked Discord channels for KC and drop proof posts and forwards valid submissions to the site for review — no slash command required.
+Watches submission channels for KC and drop proof posts and forwards valid ones to the site for manual review.
 
 <details>
 <summary><strong>Environment variables</strong></summary>
 
-| Variable | Required | Description |
-|---|---|---|
-| `SUPABASE_URL` | Yes (all four, or none) | Shared with the LFG backend sync above. |
-| `SUPABASE_SERVICE_ROLE_KEY` | Yes (all four, or none) | Service role key used to query `event_discord_channels` and forward submissions. |
-| `SUPABASE_DISCORD_KC_INTAKE_URL` | Yes (all four, or none) | Endpoint submissions are forwarded to. Overridable per-deployment via `/submission setintakeurl`. |
-| `DISCORD_KC_INTAKE_SECRET` | Yes (all four, or none) | Shared secret sent with forwarded submissions. |
+| Variable | Description |
+|---|---|
+| `SUPABASE_URL` | Supabase project URL (shared with the LFG backend). |
+| `SUPABASE_SERVICE_ROLE_KEY` | Used to look up `event_discord_channels`. |
+| `SUPABASE_DISCORD_KC_INTAKE_URL` | Where submissions are sent. Can be overridden with `/submission setintakeurl`. |
+| `DISCORD_KC_INTAKE_SECRET` | Shared secret sent with each submission. |
 
-**Warning:** setting *some but not all four* throws at startup and crashes the bot, rather than degrading gracefully — set all four, or leave all four unset.
+Set all four or none. Setting only some stops the bot at startup.
 
 </details>
 
 <details>
 <summary><strong>How it works</strong></summary>
 
-The bot resolves the event by querying `event_discord_channels` for rows where `channel_kind = submission` and `channel_id` matches the Discord channel, caches the result briefly, and ignores channels with no configured event. Valid submissions are forwarded to the configured Supabase intake endpoint for manual review on the site.
+A channel is a submission channel if `event_discord_channels` has a row with its `channel_id` and `channel_kind = submission` (cached for a minute). In those channels, a message with an image or any proof field is treated as a submission; other chatter is ignored.
 
-Supported KC format:
+KC format (`Monster being Killed` is optional):
 
 ```text
 Task name on Board: <tile title>
@@ -496,25 +410,14 @@ Starting or Ending: Starting
 Starting Kill Count: 1234
 ```
 
-Also accepted:
-
-```text
-Task name on Board: <tile title>
-
-Starting or Ending: Starting
-Starting Kill Count: 1234
-```
-
-Supported drop format:
+Drop format:
 
 ```text
 Task name on Board: <tile title>
 Item Dropped: <item name>
 ```
 
-`Monster being Killed` is optional for KC submissions. Blank lines are allowed in the message body. Each submission must include exactly one image attachment. For ending KC submissions, `Starting or Ending: Ending`, `Ending Kill Count: 1234`, or `Kill Count: 1234` are accepted.
-
-Messages in configured submission channels are only treated as submission attempts when they contain an image attachment or recognizable proof fields, so ordinary chatter is ignored. Validation failures ask the user to resubmit using the required format. If the Supabase channel lookup fails, the bot logs the error and asks the user to retry instead of crashing. The intake stays disabled if none of the four intake environment variables are set, so existing slash-command functionality can run without site integration configured.
+Each submission needs exactly one image. For ending KC, `Starting or Ending: Ending`, `Ending Kill Count: 1234` or `Kill Count: 1234` all work. Invalid submissions get a reply with the formats. If the Supabase lookup fails, the bot asks the user to try again.
 
 </details>
 
@@ -522,38 +425,28 @@ Messages in configured submission channels are only treated as submission attemp
 
 ### Announcement Channel Cleanup
 
-When configured, Tanglebot watches a designated announcement channel and automatically deletes crossposted messages that Discord has replaced with `[Original Message Deleted]`.
-
-<details>
-<summary><strong>How it works</strong></summary>
-
-This happens when a server follows an external announcement channel and the original post is later removed — Discord edits the local copy to show that placeholder rather than removing it. Tanglebot detects that edit and cleans it up immediately.
-
-</details>
-
-<details>
-<summary><strong>Environment variables</strong></summary>
-
-| Variable | Required | Description |
-|---|---|---|
-| `ANNOUNCEMENT_CHANNEL_ID` | Yes | Channel to watch for crosspost cleanup. Leave blank to disable this feature entirely. |
-
-> **Note:** The bot needs the **Manage Messages** permission in the configured channel.
-
-</details>
+When a followed announcement's original post is deleted, Discord replaces the local copy with `[Original Message Deleted]`. The bot deletes those messages in `ANNOUNCEMENT_CHANNEL_ID`. It needs **Manage Messages** there. Leave the variable blank to disable.
 
 ---
 
 ### Honeypot Channel Trap
 
-When configured, Tanglebot turns one or more designated channels into traps for scam bots/compromised accounts, timing out anyone who posts there and alerting staff.
+Turns one or more channels into traps for scam bots and compromised accounts.
 
 <details>
 <summary><strong>How it works</strong></summary>
 
-On startup each trap channel is cleared and a warning embed is posted saying that sending any message there results in a timeout and/or ban. Anyone (other than bots) who posts in a trap channel is immediately timed out for 1 week, their message is deleted (with all image attachments re-uploaded and attached to the report, up to Discord's 10-image-per-message limit), and a report is sent to `ADMIN_LOG_CHANNEL_ID` with a guide field explaining each button and two buttons: **Ban & Delete Messages** (bans the account and does a best-effort scan-and-delete of their recent messages across all text channels/threads/voice channel chats) and **False Positive (Un-Timeout)** (dismisses the alert and lifts the timeout). Only members with the `OWNER_ROLE_ID` or `TEMPLAR_ROLE_ID` role can use those buttons. Once either button is clicked, both buttons are removed and the embed gains an "Action Taken" field recording which action ran, who clicked it, and when.
+On startup each trap channel is cleared and a warning is posted. When anyone (except bots) posts there, the bot:
 
-Use `/honeypot testmode true` to dry-run the trap(s): triggering it still posts the admin report (marked as testing mode) and the buttons still work, but no one is actually timed out, banned, or has messages deleted. Run `/honeypot testmode false` to go back to live. `/honeypot status` shows the current mode.
+1. Times them out for 1 week.
+2. Deletes the message, keeping up to 10 of its images.
+3. Posts a report with the images to `ADMIN_LOG_CHANNEL_ID`, with two buttons:
+   - **Ban & Delete Messages** — bans the account and deletes their messages from the last 100 in each channel the bot can see.
+   - **False Positive (Un-Timeout)** — lifts the timeout.
+
+Only Owners and Templars can use the buttons. After a click, the buttons are removed and the report records the action, who took it and when.
+
+`/honeypot testmode true` turns on test mode: the trap still reports and the buttons still work, but nobody is timed out, banned or has messages deleted. `/honeypot testmode false` turns it off, and `/honeypot status` shows the current mode.
 
 </details>
 
@@ -562,14 +455,14 @@ Use `/honeypot testmode true` to dry-run the trap(s): triggering it still posts 
 
 | Variable | Required | Description |
 |---|---|---|
-| `HONEYPOT_CHANNEL_ID` | Yes (either this or below) | A regular text channel to trap. |
-| `HONEYPOT_VOICE_CHANNEL_ID` | Yes (either this or above) | A voice channel to trap, via its built-in text chat. |
-| `ADMIN_LOG_CHANNEL_ID` | Recommended | Where trap reports (and the Ban/False Positive buttons) get posted. Shared with `/lfg-roles` and `/lfg-post`. Without it, a trigger still times the poster out, but no report is ever sent anywhere. |
-| `OWNER_ROLE_ID` / `TEMPLAR_ROLE_ID` | Recommended | Roles allowed to click **Ban & Delete Messages** / **False Positive**. **This check fails closed** — if both are left unset, no one (not even the Owner) can use those buttons, and a false positive can only be undone by manually removing the timeout in Discord. |
+| `HONEYPOT_CHANNEL_ID` | One of these two | A text channel to trap. |
+| `HONEYPOT_VOICE_CHANNEL_ID` | One of these two | A voice channel's text chat to trap. |
+| `ADMIN_LOG_CHANNEL_ID` | Recommended | Where reports go. Without it the poster is still timed out, but nothing is reported. |
+| `OWNER_ROLE_ID` / `TEMPLAR_ROLE_ID` | Recommended | Who can use the buttons and `/honeypot` (fails closed). |
 
-Set either or both channel vars to enable that trap; leave a var blank to disable just that one. Leave both blank to disable the honeypot entirely — `/honeypot` isn't registered unless at least one is set.
+`/honeypot` is only loaded when a trap channel is set.
 
-> **Note:** The bot needs **Manage Messages** in each trap channel, **Moderate Members** to time out/un-time-out, and **Ban Members** for the ban button.
+> The bot needs **Manage Messages** in each trap channel, **Moderate Members** for timeouts, and **Ban Members** for the ban button.
 
 </details>
 
@@ -579,84 +472,71 @@ Set either or both channel vars to enable that trap; leave a var blank to disabl
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) v18 or later
-- A Discord bot token and application — create one at [discord.com/developers](https://discord.com/developers/applications)
-- The Discord bot's **Server Members Intent** and **Message Content Intent** both enabled in the Developer Portal — the bot requests both unconditionally at startup regardless of which optional features are configured, so it can't log in without them
-
-### Google service account
-
-Some features — need to *write* to a Google Sheet, which requires real authentication. This creates one dedicated Google identity ("service account") that only has access to sheets you explicitly share with it, stored once as `GOOGLE_SERVICE_ACCOUNT_JSON` and reused by every Sheets-based feature.
-
-<details>
-<summary><strong>Steps</strong></summary>
-
-1. Go to the [Google Cloud Console](https://console.cloud.google.com/) and create a new project (or pick an existing one) — top-left project dropdown → **New Project**.
-2. In the search bar, find and open **Google Sheets API**, then click **Enable**.
-3. Go to **APIs & Services → Credentials → Create Credentials → Service account**.
-4. Give it any name (e.g. `tanglebot-sheets`) and click **Done** — you can skip the optional role/access steps.
-5. Click into the new service account → **Keys** tab → **Add Key → Create new key → JSON** → **Create**. This downloads a `.json` key file — treat it like a password, never commit it.
-6. Copy the **`client_email`** field out of that JSON file (looks like `something@your-project.iam.gserviceaccount.com`).
-7. For each Google Sheet a feature needs to access (e.g. your `/pethighscore` sheet) → **Share** → paste that email in → set its role to **Editor** → **Send** (uncheck "Notify people" if you don't want an email sent to a bot). Repeat this step for any other sheet you later want the bot to read/write — no new key needed, just another share.
-8. Minify the downloaded JSON file to a single line and paste it as the value of `GOOGLE_SERVICE_ACCOUNT_JSON` in `.env`. Easiest way to minify:
-   ```bash
-   node -e "console.log(JSON.stringify(require('./path/to/your-key-file.json')))"
-   ```
-   Paste the entire output (starting with `{"type":"service_account",...}`) as one line — no extra quotes needed around it.
-
-</details>
+- [Node.js](https://nodejs.org/) 18 or later (or Docker)
+- A Discord application and bot token from [discord.com/developers](https://discord.com/developers/applications)
+- **Server Members Intent** and **Message Content Intent** enabled for the bot. It requests both at startup and can't log in without them.
 
 ### Install
 
 ```bash
 cd Tanglebot
 npm install
+cp .env.example .env
 ```
 
 ### Environment variables
 
-Copy `.env.example` to `.env` and fill in the values:
+Each feature's variables are listed in its section above. These are the base ones:
 
-```bash
-cp .env.example .env
-```
+| Variable | Description |
+|---|---|
+| `DISCORD_BOT_TOKEN` | Required. The bot won't start without it. |
+| `CLIENT_ID` | Your application ID. |
+| `CLAN_ID` | Your server ID. With `CLIENT_ID`, used to register the slash commands. Also used for the leaderboards and the `LFG-` role sync. |
+| `ADMIN_LOG_CHANNEL_ID` | Optional. Staff channel for alerts, logs and the "Bot is online" message (which pings `OWNER_ROLE_ID`). |
+| `OWNER_ID` | Unused. |
 
-Every optional, feature-specific variable is documented in its own command/feature section above (look for that section's collapsed **Environment variables** summary). The ones below are the only ones actually needed to install, deploy, and start the bot at all — everything else is opt-in on top of this baseline.
+### Google service account
 
-```
-DISCORD_BOT_TOKEN=your_bot_token
-CLIENT_ID=your_application_id
-CLAN_ID=your_server_id
-OWNER_ID=your_owner_role_id
-```
+`/donationhighscore` and `/pethighscore` write to Google Sheets, which needs a service account.
 
-- `DISCORD_BOT_TOKEN` — the bot refuses to start without this one.
-- `CLIENT_ID` and `CLAN_ID` — required by `npm run deploy` to register slash commands with Discord; without them no `/` command works even if the bot process is running. `CLAN_ID` is also read at bot startup to run the `LFG-` role color/icon sync described under [`/lfg-roles`](#-lfg-roles--event-notification-roles) — leave it unset and that sync is skipped (deploy still needs it separately).
-- `OWNER_ID` — the Owner role's ID, for reference; not currently read by any command.
+<details>
+<summary><strong>Steps</strong></summary>
 
-If `/submission setintakeurl` has been used, its locally stored override takes precedence over `SUPABASE_DISCORD_KC_INTAKE_URL` from the [KC and Drop Proof Intake](#kc-and-drop-proof-intake) section.
+1. In the [Google Cloud Console](https://console.cloud.google.com/), create or pick a project.
+2. Enable the **Google Sheets API**.
+3. **APIs & Services → Credentials → Create Credentials → Service account**. Any name works; skip the optional steps.
+4. Open the service account → **Keys → Add Key → Create new key → JSON**. Keep the downloaded file secret.
+5. Share each sheet with the key's `client_email` as an **Editor**.
+6. Put the key in `.env` as one line:
+   ```bash
+   node -e "console.log(JSON.stringify(require('./path/to/key.json')))"
+   ```
+   Paste the output as the value of `GOOGLE_SERVICE_ACCOUNT_JSON`, without quotes.
 
-### Deploy slash commands
+</details>
 
-```bash
-npm run deploy
-```
-
-### Start the bot
+### Run
 
 ```bash
 npm start
 ```
+
+The bot registers its slash commands with your server each time it starts. `npm run deploy` registers them without starting the bot.
+
+To run with Docker instead, use `docker compose up -d --build` from the repo root. It reads `Tanglebot/.env` and keeps `Tanglebot/data/` between restarts.
+
+`Tanglebot/data/` holds small state files: leaderboard message IDs, the LFG start post ID, honeypot test mode, the intake URL override, and the last accepted submission.
 
 ---
 
 ## Built With
 
 - [discord.js](https://discord.js.org/) v14
-- [@napi-rs/canvas](https://github.com/Brooooooklyn/canvas) — wheel frame rendering
-- [gif-encoder-2](https://github.com/benjaminadk/gif-encoder-2) — animated GIF generation
-- [googleapis](https://github.com/googleapis/google-api-nodejs-client) — Google Sheets access for `/donationhighscore` and `/pethighscore`
-- [axios](https://axios-http.com/) — Supabase/LFG backend and proof-intake HTTP calls
-- [@wise-old-man/utils](https://github.com/wise-old-man/wise-old-man) — Wise Old Man API client for `/weeklycomp` and the competition ending reminder
+- [@napi-rs/canvas](https://github.com/Brooooooklyn/canvas) and [gif-encoder-2](https://github.com/benjaminadk/gif-encoder-2) — the `/spinwheel` GIF
+- [googleapis](https://github.com/googleapis/google-api-nodejs-client) — Google Sheets for the high score commands
+- [axios](https://axios-http.com/) — Supabase and the LFG backend
+- [@wise-old-man/utils](https://github.com/wise-old-man/wise-old-man) — Wise Old Man API client
 - [Claude by Anthropic](https://claude.ai/) — AI-assisted development
 
 ---
