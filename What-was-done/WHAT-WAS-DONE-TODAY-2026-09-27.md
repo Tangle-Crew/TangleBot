@@ -1,0 +1,21 @@
+# What Was Done Today - 2026-09-27
+
+- Moved the duplicated `discordTimestamp` and `withTimeout` helpers out of `/weeklycompstats` and the competition ending reminder into `src/utils/db.js`, with `withTimeout` now taking the time limit as an argument.
+- Exported the data folder path from `src/utils/db.js` so features can keep their own files there.
+- Added `getGroupDetails` and `getGroupGains` to `src/utils/wiseOldMan.js` for loading the group's members, clan ranks and XP gains between two dates.
+- Made `updateAllGroupMembers` emit an `updateAll` event naming the feature that ran it, and had the competition ending reminder name itself.
+- Added a Templar-only `/stalemembers` command that lists WOM group members who gained less than a set amount of XP over a number of months, longest inactive first.
+- Added the `time`, `minxp` and `ignore` options, all required, with `minxp` accepting `250k`/`1.5m`/`250,000` and `ignore` taking comma-separated ranks or `None`, autocompleted from the group's own WOM ranks.
+- Skipped ignored ranks and members who joined the WOM group during the time frame, using the earlier of WOM's two join dates so re-added members keep their original date.
+- Listed members within 2 weeks of the time frame as close, marked ⌛ with a live countdown to when they reach it.
+- Showed each member's rank emoji, XP gained and how long ago they were last active in months and weeks, with ⏳ for members WOM hasn't updated in a week and ❓ for members WOM can't track.
+- Built page 1 with when and by whom the list was checked in local time, the options, totals, a legend of only the markers in use and a guide to the buttons, and sized later pages to match its height with the last page padded.
+- Always posted the list in the admin log channel, with a private reply linking to it when the command is run from any other channel.
+- Added Prev/Next, Update, Export and Refresh WOM buttons that work for any Templar with no time limit.
+- Made Export send a private CSV with who checked and exported the list and when, and keep the newest 5 copies in `data/stalemembers-exports`.
+- Made Refresh WOM run WOM's update all, show a local-time countdown, reload the list after 5 minutes and DM everyone waiting, with one refresh at a time for the group that later presses join.
+- Reloaded the list automatically 5 minutes after the competition ending reminder runs update all, showing "auto refreshed" on page 1.
+- Replaced the previous list whenever the command is run again, tracked in `data/stalemembers.json` so it survives restarts, and kept Update and Refresh working on lists posted before a restart.
+- Hooked `/stalemembers` into `src/handlers/eventHandler.js` to route its buttons and start it on startup.
+- Documented `/stalemembers` in the README.
+- Verified the changes with `node --check` and scripted tests against the live WOM group, with Discord interactions and WOM's update all simulated.
