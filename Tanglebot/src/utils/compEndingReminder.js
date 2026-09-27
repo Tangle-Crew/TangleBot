@@ -115,7 +115,7 @@ async function runUpdateAll(config) {
   }
   try {
     console.log(`[CompReminder] Running update all on WOM group ${config.groupId}...`);
-    const result = await updateAllGroupMembers(config.groupId, config.verificationCode);
+    const result = await updateAllGroupMembers(config.groupId, config.verificationCode, 'the competition reminder');
     const count = result?.count ?? 0;
     console.log(`[CompReminder] Update all queued ${count} player(s) in WOM group ${config.groupId}.`);
     return { status: `🔄 Ran update all — ${count} player${count === 1 ? '' : 's'} queued for an update.`, queued: count };

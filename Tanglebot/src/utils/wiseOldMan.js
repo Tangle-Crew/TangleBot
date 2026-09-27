@@ -1,3 +1,4 @@
+const { EventEmitter } = require('events');
 const { WOMClient } = require('@wise-old-man/utils');
 
 const WOM_ASSETS_BASE_URL = 'https://raw.githubusercontent.com/wise-old-man/wise-old-man/master/app/public/img';
@@ -59,9 +60,27 @@ async function getAllGroupCompetitions(groupId) {
   return [...byId.values()];
 }
 
-// Queues a hiscores update for every outdated member of the group.
-function updateAllGroupMembers(groupId, groupVerificationCode) {
-  return womClient().groups.updateAll(groupId, groupVerificationCode);
+// Emits 'updateAll' ({ groupId, count, source }) after each successful update all, so other
+// features can reuse the fresh data.
+const womEvents = new EventEmitter();
+
+// Queues a hiscores update for every outdated member of the group. `source` names the calling
+// feature for womEvents listeners.
+async function updateAllGroupMembers(groupId, groupVerificationCode, source = 'another bot feature') {
+  const result = await womClient().groups.updateAll(groupId, groupVerificationCode);
+  womEvents.emit('updateAll', { groupId, count: result?.count ?? 0, source });
+  return result;
+}
+
+// The group with every membership (player and clan rank).
+function getGroupDetails(groupId) {
+  return womClient().groups.getGroupDetails(groupId);
+}
+
+// Each tracked member's gains in `metric` between the two dates. WOM returns every member at once.
+// Members with no snapshots in the range (e.g. never tracked) are left out.
+function getGroupGains(groupId, metric, startDate, endDate) {
+  return womClient().groups.getGroupGains(groupId, { metric, startDate, endDate });
 }
 
 function getCompetitionDetails(competitionId) {
@@ -89,6 +108,9 @@ module.exports = {
   createGroupCompetition,
   getAllGroupCompetitions,
   updateAllGroupMembers,
+  womEvents,
+  getGroupDetails,
+  getGroupGains,
   getCompetitionDetails,
   isCompetitionOngoing,
   rankParticipants,
