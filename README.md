@@ -169,7 +169,7 @@ Pet slots autocomplete and skip pets picked in another slot. Once `user` is set,
 3. Set `PET_HIGHSCORES_SHEET_ID` and `PET_HIGHSCORES_CHANNEL_ID`, and optionally `PET_MASTER_ROLE_ID` / `PET_MASTER_THRESHOLD`.
 4. Fill in each pet's `EmojiID` with its custom emoji ID. Pets without one show ❔.
 
-The `Pets` tab is read once at startup, so hand edits to it need a restart. `/pethighscore new` doesn't.
+Hand edits to the `Pets` tab take effect on the next restart or `/refreshboards`. Pets added with `/pethighscore new` are available immediately.
 
 > The bot needs **Manage Roles**, with its role above Pet Master.
 

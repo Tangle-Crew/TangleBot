@@ -1,7 +1,7 @@
 const { SlashCommandBuilder, MessageFlags, EmbedBuilder } = require('discord.js');
 const { getRows, updateRow, appendRow, parseAppendedRowNumber } = require('../utils/googleSheets');
 const { DEFAULT_EMBED_COLOR } = require('../utils/embedColor');
-const { withFileLock } = require('../utils/db');
+const { withFileLock, intEnv } = require('../utils/db');
 const { mentionOrName, postLeaderboard: postLeaderboardShared } = require('../utils/leaderboard');
 const { notifyAdminLog } = require('../utils/roleMenu');
 
@@ -16,31 +16,31 @@ const APPEND_RANGE = `${SHEET_TAB}!A:C`;
 const DONATION_TIERS = [
   {
     name:      'Zenyte',
-    threshold: parseInt(process.env.DONATION_ZENYTE_THRESHOLD      ?? '1000000000', 10),
+    threshold: intEnv('DONATION_ZENYTE_THRESHOLD', 1_000_000_000),
     roleEnv:   'DONATION_ZENYTE_ROLE_ID',
     emoji:     '<:Zenyte:1534398798384861214>',
   },
   {
     name:      'Onyx',
-    threshold: parseInt(process.env.DONATION_ONYX_THRESHOLD        ??  '600000000', 10),
+    threshold: intEnv('DONATION_ONYX_THRESHOLD', 600_000_000),
     roleEnv:   'DONATION_ONYX_ROLE_ID',
     emoji:     '<:Onyx:1534398660916543661>',
   },
   {
     name:      'Dragonstone',
-    threshold: parseInt(process.env.DONATION_DRAGONSTONE_THRESHOLD ??  '300000000', 10),
+    threshold: intEnv('DONATION_DRAGONSTONE_THRESHOLD', 300_000_000),
     roleEnv:   'DONATION_DRAGONSTONE_ROLE_ID',
     emoji:     '<:Dragonstone:1534398539201904700>',
   },
   {
     name:      'Diamond',
-    threshold: parseInt(process.env.DONATION_DIAMOND_THRESHOLD     ??  '150000000', 10),
+    threshold: intEnv('DONATION_DIAMOND_THRESHOLD', 150_000_000),
     roleEnv:   'DONATION_DIAMOND_ROLE_ID',
     emoji:     '<:Diamond:1534398533074157568>',
   },
   {
     name:      'Ruby',
-    threshold: parseInt(process.env.DONATION_RUBY_THRESHOLD        ??   '75000000', 10),
+    threshold: intEnv('DONATION_RUBY_THRESHOLD', 75_000_000),
     roleEnv:   'DONATION_RUBY_ROLE_ID',
     emoji:     '<:Ruby:1534398699961188533>',
   },

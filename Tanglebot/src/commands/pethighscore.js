@@ -3,11 +3,11 @@ const { getRows, updateRow, appendRow, parseAppendedRowNumber } = require('../ut
 const { DEFAULT_EMBED_COLOR } = require('../utils/embedColor');
 const { mentionOrName, postLeaderboard: postLeaderboardShared } = require('../utils/leaderboard');
 const { notifyAdminLog } = require('../utils/roleMenu');
-const { withFileLock } = require('../utils/db');
+const { withFileLock, intEnv } = require('../utils/db');
 
 const TEMPLAR_ROLE_ID = process.env.TEMPLAR_ROLE_ID;
 const OWNER_ROLE_ID = process.env.OWNER_ROLE_ID;
-const PET_MASTER_THRESHOLD = parseInt(process.env.PET_MASTER_THRESHOLD ?? '10', 10);
+const PET_MASTER_THRESHOLD = intEnv('PET_MASTER_THRESHOLD', 10);
 
 // withFileLock key (not a file) serializing edits to the pet sheet.
 const PET_LOCK_KEY = 'pethighscores-sheet';
@@ -38,7 +38,7 @@ function rebuildPetIndexes() {
   });
 }
 
-// The pet catalog, loaded once and shared by autocomplete and commands.
+// The pet catalog, shared by autocomplete and commands. Reloaded by reloadPets.
 let petsLoadPromise = null;
 function ensurePetsLoaded() {
   if (!petsLoadPromise) {
@@ -60,6 +60,12 @@ function ensurePetsLoaded() {
       });
   }
   return petsLoadPromise;
+}
+
+// Re-reads the Pets tab. On failure the current catalog stays in use.
+function reloadPets() {
+  petsLoadPromise = null;
+  return ensurePetsLoaded();
 }
 
 function slugify(name) {
@@ -219,7 +225,8 @@ async function fetchEntries() {
     .map(e => ({ ...e, count: e.petKeys.length }));
 }
 
-// Member rows, loaded once and updated in place after writes.
+// Member rows cached for autocomplete. Anything that writes reads the sheet fresh instead, since
+// hand edits can shift rows and a stale row number would overwrite the wrong member.
 let entriesLoadPromise = null;
 function ensureEntriesLoaded() {
   if (!entriesLoadPromise) {
@@ -230,6 +237,13 @@ function ensureEntriesLoaded() {
     });
   }
   return entriesLoadPromise;
+}
+
+// Reads member rows from the sheet and makes them the autocomplete cache.
+async function loadFreshEntries() {
+  const entries = await fetchEntries();
+  entriesLoadPromise = Promise.resolve(entries);
+  return entries;
 }
 
 function sortedForDisplay(entries) {
@@ -244,11 +258,11 @@ async function refreshLeaderboardOnStartup(client) {
   if (!process.env.PET_HIGHSCORES_SHEET_ID || !channelId || !process.env.GOOGLE_SERVICE_ACCOUNT_JSON) return;
 
   try {
-    await ensurePetsLoaded();
+    await reloadPets();
     const guild = await client.guilds.fetch(process.env.CLAN_ID);
     // Locked because the display-name refresh writes rows too.
     await withFileLock(PET_LOCK_KEY, async () => {
-      const entries = await ensureEntriesLoaded();
+      const entries = await loadFreshEntries();
       await postLeaderboard(guild, channelId, sortedForDisplay(entries), client.user.id);
     });
   } catch (err) {
@@ -492,7 +506,7 @@ module.exports = {
       const displayName = member?.displayName || targetUser.username;
 
       const { toApply, skipped, newKeys, appliedNames, noOp } = await withFileLock(PET_LOCK_KEY, async () => {
-        const entries = await ensureEntriesLoaded();
+        const entries = await loadFreshEntries();
         const existingIndex = entries.findIndex(e => e.discordId === targetUser.id);
         const existing = existingIndex === -1 ? null : entries[existingIndex];
         const currentKeys = existing ? existing.petKeys : [];
@@ -521,8 +535,6 @@ module.exports = {
           const appendResult = await appendRow(sheetId, APPEND_RANGE, rowValues);
           const rowNumber = parseAppendedRowNumber(appendResult?.updates?.updatedRange);
           entries.push({ discordId: targetUser.id, displayName, petKeys: newKeys, count: newKeys.length, rowNumber });
-          // Without a row number this entry can't be updated later; reload from the sheet next time.
-          if (rowNumber == null) entriesLoadPromise = null;
         }
 
         // Inside the lock so posts land in write order. A failed post doesn't abort the command.

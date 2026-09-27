@@ -57,4 +57,10 @@ function hasAnyRole(member, roleIds) {
   return roleIds.filter(Boolean).some((roleId) => member.roles?.cache?.has(roleId));
 }
 
-module.exports = { readJson, writeJson, withFileLock, truncate, hasAnyRole };
+// An integer env var, or fallback if it's unset, blank or not a number.
+function intEnv(name, fallback) {
+  const value = parseInt(process.env[name] ?? '', 10);
+  return Number.isNaN(value) ? fallback : value;
+}
+
+module.exports = { readJson, writeJson, withFileLock, truncate, hasAnyRole, intEnv };

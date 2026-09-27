@@ -5,7 +5,7 @@ const {
   ButtonStyle,
 } = require('discord.js');
 const { actOnGroupDetailed } = require('./lfgBackend');
-const { followUpEphemeral, replyEphemeral, isAlreadyGoneError } = require('./roleMenu');
+const { followUpEphemeral, isAlreadyGoneError } = require('./roleMenu');
 const { capMentionLines } = require('./lfgGroup');
 
 const SYNCED_GROUP_BUTTON_PREFIX = 'lfgsyncgroup';
@@ -152,7 +152,7 @@ async function applySyncedGroupUpdate(interaction, group, action = null) {
     : [buildSyncedGroupRow(group.id, group)];
 
   try {
-    await interaction.update({
+    await interaction.editReply({
       embeds: [buildSyncedGroupEmbed(group)],
       components,
     });
@@ -160,7 +160,7 @@ async function applySyncedGroupUpdate(interaction, group, action = null) {
     if (!isAlreadyGoneError(err)) {
       throw err;
     }
-    await replyEphemeral(interaction, '⚠️ This group post no longer exists.');
+    await followUpEphemeral(interaction, '⚠️ This group post no longer exists.').catch(() => {});
     return;
   }
 
@@ -179,6 +179,9 @@ async function handleSyncedGroupButtonInteraction(interaction) {
     return;
   }
 
+  // The backend call can take longer than Discord's 3-second reply window.
+  await interaction.deferUpdate();
+
   let result;
   try {
     result = await actOnGroupDetailed({
@@ -189,15 +192,15 @@ async function handleSyncedGroupButtonInteraction(interaction) {
     });
   } catch (err) {
     console.error(`[LFG] Synced group ${action} failed for ${groupId}:`, err.message);
-    return replyEphemeral(interaction, `⚠️ ${err.message}`);
+    return followUpEphemeral(interaction, `⚠️ ${err.message}`);
   }
 
   if (!result?.success) {
-    return replyEphemeral(interaction, `⚠️ ${result?.message ?? 'Unable to update group.'}`);
+    return followUpEphemeral(interaction, `⚠️ ${result?.message ?? 'Unable to update group.'}`);
   }
 
   if (!result.group) {
-    return replyEphemeral(interaction, '⚠️ Group updated, but no refreshed state was returned.');
+    return followUpEphemeral(interaction, '⚠️ Group updated, but no refreshed state was returned.');
   }
 
   await applySyncedGroupUpdate(interaction, result.group, action);

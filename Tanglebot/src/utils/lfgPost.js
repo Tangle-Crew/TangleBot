@@ -254,14 +254,17 @@ async function openDescriptionModal(interaction) {
 async function abortWithAdminAlert(interaction, title, adminMessage, userMessage) {
   console.log(`[LFG] Aborting: ${title}`);
   await notifyAdminLog(interaction.client, title, adminMessage);
-  return interaction.update({ content: userMessage, components: [] });
+  return interaction.editReply({ content: userMessage, components: [] });
 }
 
 // ---- Modal submit creates the post ----
 async function handleDescriptionModalSubmit(interaction) {
+  // Creating the post can take longer than Discord's 3-second reply window.
+  await interaction.deferUpdate();
+
   const session = getSession(interaction.user.id);
   if (!session.category || !session.activity || !session.size || !session.time) {
-    return interaction.update({
+    return interaction.editReply({
       content: '⚠️ Something went wrong finding your selections — please run /lfg-post again.',
       components: [],
     });
@@ -404,7 +407,7 @@ async function handleDescriptionModalSubmit(interaction) {
   setupSessions.delete(interaction.user.id);
 
   const threadLink = `https://discord.com/channels/${interaction.guildId}/${thread.id}`;
-  await interaction.update({
+  await interaction.editReply({
     content: `✅ Your LFG post has been created: [Click here to view it](${threadLink})`,
     components: [],
   });
