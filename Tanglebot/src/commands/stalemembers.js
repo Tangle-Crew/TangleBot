@@ -6,9 +6,11 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  StringSelectMenuBuilder,
   AttachmentBuilder,
   MessageFlags,
   escapeMarkdown,
+  parseEmoji,
 } = require('discord.js');
 const { GROUP_ROLES, GroupRoleProps } = require('@wise-old-man/utils');
 const { getGroupDetails, getGroupGains, updateAllGroupMembers, womEvents } = require('../utils/wiseOldMan');
@@ -56,7 +58,7 @@ const AUTOCOMPLETE_WAIT_MS = 2000;
 // Posted lists kept in memory for the buttons; past this the oldest is dropped, as on a restart.
 const MAX_LOADED_LISTS = 50;
 const BUTTON_PREFIX = 'stalemembers:';
-// Typed in `ignore` to check every rank, since the option can't be left empty.
+// Typed in `ignore` to check every rank without the picker.
 const IGNORE_NONE = 'None';
 const TITLE = '💤 Stale Members';
 
@@ -152,6 +154,13 @@ function saveGroupRanks(details) {
   for (const m of details.memberships) if (!order.has(m.role)) order.set(m.role, Infinity);
   const ranks = [...order].sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0])).map(([role]) => role);
   groupRanks = { ranks, loadedAt: Date.now() };
+}
+
+// Ranks in the group's rank order (any it doesn't use go last, alphabetically).
+function inRankOrder(roles) {
+  const order = groupRanks?.ranks ?? [];
+  const position = role => (order.includes(role) ? order.indexOf(role) : order.length);
+  return [...roles].sort((a, b) => position(a) - position(b) || a.localeCompare(b));
 }
 
 // The group's ranks, reloaded after RANKS_CACHE_TTL_MS. Waits at most `waitMs` for WOM (the load
@@ -331,7 +340,7 @@ function buildHeader(view) {
   } = view;
 
   // Only ranks the group uses; ignoring any other changes nothing.
-  const shown = [...ignoredRoles].filter(role => groupRoles.has(role));
+  const shown = inRankOrder(ignoredRoles).filter(role => groupRoles.has(role));
   let ignoring = 'none';
   if (shown.length > 0) {
     const labels = shown.map(role => emojis.get(role) ?? rankName(role));
@@ -409,22 +418,26 @@ function exactXp(amount) {
 
 // The command with these options, in the `option:value` form Discord fills in when it's pasted.
 function commandText({ months, minXp, ignoredRoles }) {
-  const ignore = ignoredRoles.size > 0 ? [...ignoredRoles].map(rankName).join(', ') : IGNORE_NONE;
+  const ignore = ignoredRoles.size > 0 ? inRankOrder(ignoredRoles).map(rankName).join(', ') : IGNORE_NONE;
   return `/stalemembers time:${months} minxp:${exactXp(minXp)} ignore:${ignore}`;
 }
 
-// The Update button carries the options so it works after a restart. Ignored ranks are a bitmask
-// over GROUP_ROLES in base 36 (at most 52 characters, within Discord's 100), tagged with the list's
-// length so a changed list isn't misread.
+// The Update button, rank picker and Run button carry the options in their custom ID, so they work
+// after a restart. Ignored ranks are a bitmask over GROUP_ROLES in base 36 (at most 52 characters,
+// within Discord's 100), tagged with the list's length so a changed list isn't misread.
 const RANKS_VERSION = GROUP_ROLES.length.toString(36);
 
-function updateButtonId({ months, minXp, ignoredRoles }) {
+function queryCustomId(action, { months, minXp, ignoredRoles }) {
   let mask = 0n;
   for (const role of ignoredRoles) mask |= 1n << BigInt(GROUP_ROLES.indexOf(role));
-  return `${BUTTON_PREFIX}update:${RANKS_VERSION}:${months}:${minXp.toString(36)}:${mask.toString(36)}`;
+  return `${BUTTON_PREFIX}${action}:${RANKS_VERSION}:${months}:${minXp.toString(36)}:${mask.toString(36)}`;
 }
 
-// The options stored by updateButtonId, or null if they can't be read.
+function updateButtonId(query) {
+  return queryCustomId('update', query);
+}
+
+// The options stored by queryCustomId, or null if they can't be read.
 function queryFromButtonId(customId) {
   const [, , version, months, minXp, ranks] = customId.split(':');
   if (version !== RANKS_VERSION || !/^\d+$/.test(months ?? '') || !/^[0-9a-z]+$/.test(minXp ?? '') || !/^[0-9a-z]+$/.test(ranks ?? '')) {
@@ -983,7 +996,126 @@ function autoRefresh(client, { groupId, count, source }) {
   scheduleFinish(activeRefresh);
 }
 
-// Every click on a list's buttons. Only Templars can use them, though the list is public.
+// Loads the list and posts it in the admin log: as the interaction's reply when `asReply` (the
+// command run there), otherwise as a new message. Then replaces the previous list. Returns the
+// posted message, or null after passing the error to `onError`.
+async function postList(interaction, query, { asReply, onError }) {
+  let view;
+  try {
+    view = await loadView(interaction.client, query, checkedByMember(interaction));
+  } catch (err) {
+    console.error(`[StaleMembers] Failed to load WOM group ${process.env.WOM_GROUP_ID}:`, err);
+    await reportError(interaction, 'Could not load the group', `Loading WOM group ${process.env.WOM_GROUP_ID} failed: ${err.message}`);
+    await onError(`Couldn't load the group from Wise Old Man: ${err.message}`);
+    return null;
+  }
+
+  // Kept until the bot restarts, so the buttons keep working with no time limit.
+  const state = { view, page: 0 };
+  let message;
+  try {
+    if (asReply) {
+      message = await interaction.editReply(render(state));
+    } else {
+      const channel = await interaction.client.channels.fetch(ADMIN_LOG_CHANNEL_ID);
+      message = await channel.send(render(state));
+      console.log(`[StaleMembers] Posted list ${message.id} in the admin log for ${interaction.user.tag}.`);
+    }
+    rememberList(message.id, state);
+  } catch (err) {
+    console.error('[StaleMembers] Failed to send the list:', err);
+    await reportError(interaction, 'Could not send the list', `Sending the stale member list failed: ${err.message}`);
+    await onError('Something went wrong showing the list. The admins have been notified.');
+    return null;
+  }
+  // Only once the new list is up, so a failed run leaves the old one in place.
+  await replaceOldLists(interaction.client, message.id);
+  return message;
+}
+
+// The private rank picker: a tick box of the group's ranks and a Run button, with the matching
+// command to copy. Both components carry the options, including what's ticked.
+function pickerMessage(query, ranks, emojis) {
+  // Discord allows 25 options per menu.
+  const shown = ranks.slice(0, 25);
+  const select = new StringSelectMenuBuilder()
+    .setCustomId(queryCustomId('pick', query))
+    .setPlaceholder('Ranks to ignore (none ticked checks every rank)')
+    .setMinValues(0)
+    .setMaxValues(shown.length)
+    .addOptions(shown.map(role => ({
+      label: rankName(role),
+      value: role,
+      default: query.ignoredRoles.has(role),
+      ...(emojis.has(role) ? { emoji: parseEmoji(emojis.get(role)) } : {}),
+    })));
+  const run = new ButtonBuilder().setCustomId(queryCustomId('run', query)).setLabel('▶ Run').setStyle(ButtonStyle.Primary);
+  return {
+    content: 'Tick the ranks to ignore, then press **▶ Run**. To skip this next time, copy the command:\n' +
+      `\`${commandText(query)}\``,
+    components: [new ActionRowBuilder().addComponents(select), new ActionRowBuilder().addComponents(run)],
+  };
+}
+
+// The command run without `ignore`: shows the rank picker privately.
+async function showRankPicker(interaction, query) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const ranks = await loadGroupRanks(Number(process.env.WOM_GROUP_ID), REQUEST_TIMEOUT_MS);
+  if (!ranks?.length) {
+    console.log(`[StaleMembers] Couldn't show ${interaction.user.tag} the rank picker: the group's ranks didn't load.`);
+    await interaction.editReply("Couldn't load the clan's ranks from Wise Old Man. Type them in `ignore` instead, e.g. `Owner, Templar`, or `None`.");
+    return;
+  }
+  const emojis = await loadRankEmojis(interaction.client);
+  console.log(`[StaleMembers] Showed ${interaction.user.tag} the rank picker.`);
+  await interaction.editReply(pickerMessage(query, ranks, emojis));
+}
+
+// Ticking ranks in the picker: updates the ticks, the Run button and the command to copy.
+async function handleStaleMembersSelect(select) {
+  if (!select.member?.roles.cache.has(TEMPLAR_ROLE_ID)) {
+    console.log(`[StaleMembers] ${select.user.tag} used the rank picker (missing Templar role).`);
+    await select.reply({ content: 'You need the Templar role to use this.', flags: MessageFlags.Ephemeral });
+    return;
+  }
+  const query = queryFromButtonId(select.customId);
+  if (!query) {
+    console.log(`[StaleMembers] ${select.user.tag} used a rank picker whose options couldn't be read.`);
+    await select.reply({ content: 'This picker has expired. Run `/stalemembers` again.', flags: MessageFlags.Ephemeral });
+    return;
+  }
+  query.ignoredRoles = new Set(select.values.filter(role => GROUP_ROLES.includes(role)));
+  // The picker's own options, so updating it never waits on WOM.
+  const ranks = select.component.options.map(option => option.value);
+  const emojis = await loadRankEmojis(select.client);
+  console.log(`[StaleMembers] ${select.user.tag} ticked ${query.ignoredRoles.size} rank(s) to ignore.`);
+  await select.update(pickerMessage(query, ranks, emojis));
+}
+
+// Run in the picker: posts the list, then turns the picker into a link to it plus the command.
+async function runFromPicker(button) {
+  const query = queryFromButtonId(button.customId);
+  if (!query) {
+    console.log(`[StaleMembers] ${button.user.tag} pressed Run on a picker whose options couldn't be read.`);
+    await button.reply({ content: 'This picker has expired. Run `/stalemembers` again.', flags: MessageFlags.Ephemeral });
+    return;
+  }
+  await button.deferUpdate();
+  console.log(`[StaleMembers] ${button.user.tag} ran the list from the rank picker (${commandText(query)}).`);
+  const message = await postList(button, query, {
+    asReply: false,
+    onError: content => button.followUp({ content, flags: MessageFlags.Ephemeral }).catch(() => {}),
+  });
+  if (!message) return;
+  await button.editReply({
+    content: `📋 The stale members list was posted in <#${ADMIN_LOG_CHANNEL_ID}>: ${listLink(button.guildId, message.id)}\n` +
+      `To run it again, copy the command:\n\`${commandText(query)}\``,
+    components: [],
+  }).catch(err => console.warn(`[StaleMembers] Couldn't update ${button.user.tag}'s rank picker:`, err.message));
+}
+
+// Every click on a list's or the picker's buttons. Only Templars can use them, though the list is
+// public.
 async function handleStaleMembersButton(button) {
   if (!button.member?.roles.cache.has(TEMPLAR_ROLE_ID)) {
     console.log(`[StaleMembers] ${button.user.tag} pressed a list button (missing Templar role).`);
@@ -993,6 +1125,7 @@ async function handleStaleMembersButton(button) {
 
   const action = button.customId.slice(BUTTON_PREFIX.length).split(':')[0];
   const state = loadedLists.get(button.message.id);
+  if (action === 'run') return runFromPicker(button);
   if (action === 'update') return updateList(button, state);
   if (action === 'refresh') return refreshList(button, state);
 
@@ -1021,6 +1154,7 @@ module.exports = {
   requiredEnv: ['WOM_GROUP_ID', 'TEMPLAR_ROLE_ID', 'ADMIN_LOG_CHANNEL_ID'],
 
   handleStaleMembersButton,
+  handleStaleMembersSelect,
 
   data: new SlashCommandBuilder()
     .setName('stalemembers')
@@ -1040,8 +1174,7 @@ module.exports = {
     )
     .addStringOption(o =>
       o.setName('ignore')
-        .setDescription('Clan ranks to leave out, comma separated, e.g. Owner, Templar. "None" to check every rank')
-        .setRequired(true)
+        .setDescription('Ranks to leave out, comma separated, or "None". Leave empty to tick them from a list')
         .setMaxLength(1000)
         .setAutocomplete(true)
     ),
@@ -1088,8 +1221,8 @@ module.exports = {
   async execute(interaction) {
     const months = interaction.options.getInteger('time', true);
     const minXpInput = interaction.options.getString('minxp', true).trim();
-    const ignoreInput = interaction.options.getString('ignore', true).trim();
-    console.log(`[StaleMembers] ${interaction.user.tag} ran /stalemembers time:${months} minxp:${minXpInput} ignore:${ignoreInput}`);
+    const ignoreInput = interaction.options.getString('ignore')?.trim() ?? '';
+    console.log(`[StaleMembers] ${interaction.user.tag} ran /stalemembers time:${months} minxp:${minXpInput} ignore:${ignoreInput || '(picker)'}`);
     // Logs why the command was turned down, then tells the user privately.
     const reject = (content) => {
       console.log(`[StaleMembers] Rejected /stalemembers from ${interaction.user.tag}: ${content}`);
@@ -1106,10 +1239,12 @@ module.exports = {
       return reject(`\`${minXpInput}\` isn't a valid XP amount. Use a number of at least 1, like \`250000\`, \`250k\` or \`1.5m\`.`);
     }
 
+    if (!ignoreInput) return showRankPicker(interaction, { months, minXp, ignoredRoles: new Set() });
+
     const ignoreNone = normalizeRank(ignoreInput) === normalizeRank(IGNORE_NONE);
     const { roles: ignoredRoles, unknown } = ignoreNone ? { roles: new Set(), unknown: [] } : parseRanks(ignoreInput);
     if (!ignoreNone && ignoredRoles.size === 0 && unknown.length === 0) {
-      return reject(`List the ranks to ignore, comma separated, or type \`${IGNORE_NONE}\` to check every rank.`);
+      return reject(`List the ranks to ignore, comma separated, type \`${IGNORE_NONE}\` to check every rank, or leave it empty to pick them.`);
     }
     if (unknown.length > 0) {
       return reject(
@@ -1134,39 +1269,10 @@ module.exports = {
       await interaction.followUp({ content, flags: MessageFlags.Ephemeral }).catch(() => {});
     };
 
-    let view;
-    try {
-      view = await loadView(interaction.client, { months, minXp, ignoredRoles }, checkedByMember(interaction));
-    } catch (err) {
-      console.error(`[StaleMembers] Failed to load WOM group ${process.env.WOM_GROUP_ID}:`, err);
-      await reportError(interaction, 'Could not load the group', `Loading WOM group ${process.env.WOM_GROUP_ID} failed: ${err.message}`);
-      await failPrivately(`Couldn't load the group from Wise Old Man: ${err.message}`);
-      return;
-    }
-
-    // Kept until the bot restarts, so the buttons keep working with no time limit.
-    const state = { view, page: 0 };
-    let message;
-    try {
-      if (inAdminLog) {
-        message = await interaction.editReply(render(state));
-      } else {
-        const channel = await interaction.client.channels.fetch(ADMIN_LOG_CHANNEL_ID);
-        message = await channel.send(render(state));
-        console.log(`[StaleMembers] Posted list ${message.id} in the admin log for ${interaction.user.tag}, who ran it in #${interaction.channel?.name ?? interaction.channelId}.`);
-      }
-      rememberList(message.id, state);
-    } catch (err) {
-      console.error('[StaleMembers] Failed to send the list:', err);
-      await reportError(interaction, 'Could not send the list', `Sending the stale member list failed: ${err.message}`);
-      await failPrivately('Something went wrong showing the list. The admins have been notified.');
-      return;
-    }
-    if (!inAdminLog) {
+    const message = await postList(interaction, { months, minXp, ignoredRoles }, { asReply: inAdminLog, onError: failPrivately });
+    if (message && !inAdminLog) {
       await interaction.editReply(`📋 The stale members list was posted in <#${ADMIN_LOG_CHANNEL_ID}>: ${listLink(interaction.guildId, message.id)}`)
         .catch(err => console.warn(`[StaleMembers] Couldn't send ${interaction.user.tag} the link to the list:`, err.message));
     }
-    // Only once the new list is up, so a failed run leaves the old one in place.
-    await replaceOldLists(interaction.client, message.id);
   },
 };

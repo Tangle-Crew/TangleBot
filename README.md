@@ -385,7 +385,9 @@ Lists every member of the WOM group who gained less than a set amount of overall
 |--------|----------|-------------|
 | `time` | Yes | How many months back to check (1–60). |
 | `minxp` | Yes | The XP they must have gained, at least 1, e.g. `250k`, `1.5m` or `250,000`. |
-| `ignore` | Yes | Clan ranks to leave out, comma separated, e.g. `Owner, Templar, Gnome Child`, or `None` to check every rank. Uses WOM's rank names, in any case. Autocompletes from the ranks the group uses, in rank order; any WOM rank can still be typed in full, but only the group's show on the list. |
+| `ignore` | No | Clan ranks to leave out, comma separated, e.g. `Owner, Templar, Gnome Child`, or `None` to check every rank. Uses WOM's rank names, in any case. Autocompletes from the ranks the group uses, in rank order; any WOM rank can still be typed in full, but only the group's show on the list. Leave it empty to tick the ranks from a list instead (see below). |
+
+**Rank picker:** run it without `ignore` (e.g. `/stalemembers time: 6 minxp: 250k`) and you privately get a tick box of the clan's ranks, with their emojis, and a **▶ Run** button. As you tick ranks, the message shows the matching command with `ignore` filled in, ready to copy and paste next time. Run posts the list as usual and leaves you the link and the command. The picker works for Templars only, and after a restart too.
 
 <details>
 <summary><strong>Environment variables</strong></summary>
