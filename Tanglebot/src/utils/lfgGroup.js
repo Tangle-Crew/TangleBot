@@ -194,10 +194,11 @@ function formatCapacity(group) {
   return group.sizeCap === Infinity ? 'Mass' : String(group.sizeCap);
 }
 
-// Keeps whole lines up to maxChars and summarizes the rest ("…and N more"), so a Mass group's
-// roster can't push the post past Discord's 2000-char cap.
+// Keeps whole lines up to maxChars and summarizes the rest ("…and N more").
 const MAX_ROSTER_SECTION_CHARS = 550;
 const MAX_DESCRIPTION_CHARS = 150;
+// The main post's length cap, under Discord's 2000 with some margin.
+const MAX_POST_CHARS = 1900;
 function capMentionLines(lines, maxChars = MAX_ROSTER_SECTION_CHARS) {
   let total = 0;
   const kept = [];
@@ -219,36 +220,50 @@ function capMentionLines(lines, maxChars = MAX_ROSTER_SECTION_CHARS) {
   return kept.join('\n');
 }
 
+// Splits the room left in the post between the member and queue lists. Both are shown in full if
+// they fit; otherwise members come first, but each list gets at least half.
+function splitRosterBudget(memberLines, queueLines, budget) {
+  const need = (lines) => lines.reduce((sum, line) => sum + line.length + 1, 0);
+  const memberNeed = need(memberLines);
+  const queueNeed = need(queueLines);
+  if (memberNeed + queueNeed <= budget) return [memberNeed, queueNeed];
+  if (queueNeed <= budget / 2) return [budget - queueNeed, queueNeed];
+  if (memberNeed <= budget / 2) return [memberNeed, budget - memberNeed];
+  return [Math.ceil(budget / 2), Math.floor(budget / 2)];
+}
+
 // The main post body: role ping first so it notifies, then details, members and queue.
 function buildGroupText(group) {
-  const capDisplay = formatCapacity(group);
-  const memberLines = capMentionLines([...group.members].map((id) => `<@${id}>`));
-
   // group.emoji is validated before the group is created.
   const pingLine = [`<@&${group.roleId}>`, emojiMarkup(group.emoji)].filter(Boolean).join(' ');
   const headline = isGroupFull(group) ? '🔒 **Looking For Group — Full**' : '**Looking For Group**';
-
-  const lines = [
-    pingLine,
-    headline,
-    `**Activity:** ${group.roleLabel}`,
-    `**Start:** <t:${group.timeEpoch}:t> (<t:${group.timeEpoch}:R>)`,
-    `**Group Size:** ${group.sizeLabel}`,
-  ];
-  if (group.description) lines.push('**Description:**', truncate(group.description, MAX_DESCRIPTION_CHARS));
-  lines.push('', `**Members (${group.members.size}/${capDisplay}):**`, memberLines || '_none yet_');
-
+  const memberLines = [...group.members].map((id) => `<@${id}>`);
   // Numbered in queue order.
-  if (group.queue?.length) {
-    const queueLines = capMentionLines(
-      group.queue.map((id, i) => `${i + 1}. <@${id}>${group.pendingOfferUserId === id ? ' 🎟️ _(offer pending)_' : ''}`)
-    );
-    lines.push('', `**Queue (${group.queue.length}):**`, queueLines);
-  }
+  const queueLines = (group.queue ?? []).map(
+    (id, i) => `${i + 1}. <@${id}>${group.pendingOfferUserId === id ? ' 🎟️ _(offer pending)_' : ''}`
+  );
 
-  lines.push('', `_Started by ${group.creatorTag}_`);
-  // Backstop; the section caps above normally keep this well under 2000.
-  return truncate(lines.join('\n'), 1900);
+  const assemble = (membersText, queueText) => {
+    const lines = [
+      pingLine,
+      headline,
+      `**Activity:** ${group.roleLabel}`,
+      `**Start:** <t:${group.timeEpoch}:t> (<t:${group.timeEpoch}:R>)`,
+      `**Group Size:** ${group.sizeLabel}`,
+    ];
+    if (group.description) lines.push('**Description:**', truncate(group.description, MAX_DESCRIPTION_CHARS));
+    lines.push('', `**Members (${group.members.size}/${formatCapacity(group)}):**`, membersText || '_none yet_');
+    if (queueLines.length) lines.push('', `**Queue (${queueLines.length}):**`, queueText);
+    lines.push('', `_Started by ${group.creatorTag}_`);
+    return lines.join('\n');
+  };
+
+  // The lists share whatever room the rest of the post leaves.
+  const budget = MAX_POST_CHARS - assemble('', '').length;
+  const [memberBudget, queueBudget] = splitRosterBudget(memberLines, queueLines, budget);
+  const text = assemble(capMentionLines(memberLines, memberBudget), capMentionLines(queueLines, queueBudget));
+  // Backstop; the budget above keeps it under the cap.
+  return truncate(text, MAX_POST_CHARS);
 }
 
 function makeGroupId() {
