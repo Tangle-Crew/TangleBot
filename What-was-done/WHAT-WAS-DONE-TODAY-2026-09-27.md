@@ -11,16 +11,16 @@
 - Skipped ignored ranks and members who joined the WOM group during the time frame, using the earlier of WOM's two join dates so re-added members keep their original date.
 - Listed members with no XP change over the time frame as "Inactive", including those within 2 weeks of it as close, marked ⌛ with a live countdown to when they reach it, and members active more recently who gained under `minxp` as "Active, but under minxp".
 - Showed each member's rank emoji, XP gained and how long ago they were last active in months and weeks, with ⏳ for members WOM hasn't updated in a week and ❓ for members WOM can't track.
-- Posted a header message with when and by whom the list was checked in local time, the options, totals, a legend of only the markers in use and a guide to the buttons, then each list as its own message with 15 members a page, its title on every page and the last page padded.
+- Posted a header message with when and by whom the list was checked in local time, the options, totals, a legend of only the markers in use and a guide to the buttons, then each list with members as its own message with 15 members a page, its title on every page and any shorter page padded to the same height. An empty list isn't posted, and the header says it's empty.
 - Showed rank names capitalized with spaces instead of underscores, and ignored ranks in the clan's rank order in the copyable command and the header.
 - Always posted the list in the admin log channel, with a private reply linking to it when the command is run from any other channel.
 - Added Update, a red Refresh WOM and a green Export all button under the header, and Prev, Next and a green Export under each list, all working for any Templar with no time limit.
-- Made Export privately send an Excel file of that list, or of both lists as separate tabs for Export all, with who checked and exported it and when, keeping the newest 5 copies in `data/stalemembers-exports`.
+- Made Export privately send an Excel file of that list, or of every list with members as separate tabs for Export all, with who checked and exported it and when, keeping the newest 5 copies in `data/stalemembers-exports`.
 - Made Refresh WOM run WOM's update all, show a local-time countdown, reload the list after 5 minutes and DM everyone waiting, with one refresh at a time for the group that later presses join.
 - Reloaded the list automatically 5 minutes after the competition ending reminder runs update all, showing "auto refreshed" in the header.
-- Made Update and Refresh edit all of a list's messages at once, keeping each list on its page, with an admin log alert if editing them fails.
-- Counted close members whose countdown would already have passed, from month-end dates, as inactive.
-- Replaced the previous list's messages whenever the command is run again, tracked in `data/stalemembers.json` so it survives restarts, kept Update and Refresh working on lists posted before a restart, and reposted a list from an older version, posted as a single message, as three when its Update is pressed.
+- Made Update and Refresh edit all of a list's messages at once, keeping each list on its page, reposting the list when one empties or gains members, with an admin log alert if editing them fails.
+- Counted close members as inactive when month-end dates put their countdown in the past.
+- Replaced the previous list's messages whenever the command is run again, tracked in `data/stalemembers.json` so it survives restarts, and kept Update and Refresh working on lists posted before a restart.
 - Hooked `/stalemembers` into `src/handlers/eventHandler.js` to route its buttons and rank picker menu and start it on startup.
 - Documented `/stalemembers` and its rank picker in the README.
 - Verified the changes with `node --check` and scripted tests against the live WOM group, with Discord interactions and WOM's update all simulated, and opened the exports in Excel.
