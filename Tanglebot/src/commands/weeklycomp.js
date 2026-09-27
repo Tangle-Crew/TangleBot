@@ -56,14 +56,21 @@ const DATE_PATTERNS = [
   { re: /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T](\d{1,2})(?::\d{2})?\s*([AaPp][Mm])?)?$/, order: 'mdy' },
 ];
 
-// 12am is hour 0 and 12pm is hour 12; without am/pm the hour is 24-hour.
+// 12am is hour 0 and 12pm is hour 12; without am/pm the hour is 24-hour. Null if out of range.
 function normalizeHour(hourStr, meridiem) {
   let hour = Number(hourStr ?? 0);
   if (meridiem) {
+    if (hour < 1 || hour > 12) return null;
     hour %= 12;
     if (meridiem.toLowerCase() === 'pm') hour += 12;
   }
-  return hour;
+  return hour <= 23 ? hour : null;
+}
+
+// True if the day exists in that month, e.g. false for Feb 31 (which Date would roll into March).
+function isRealDate(year, month, day) {
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
 }
 
 function parseDateInput(raw) {
@@ -73,9 +80,10 @@ function parseDateInput(raw) {
     const m = trimmed.match(re);
     if (!m) continue;
     const [, a, b, c, hourRaw, meridiem] = m;
-    const [year, month, day] = order === 'ymd' ? [a, b, c] : [c, a, b];
+    const [year, month, day] = (order === 'ymd' ? [a, b, c] : [c, a, b]).map(Number);
     const hour = normalizeHour(hourRaw, meridiem);
-    return zonedTimeToUtc(Number(year), Number(month), Number(day), hour, DEFAULT_TIME_ZONE);
+    if (hour === null || !isRealDate(year, month, day)) return null;
+    return zonedTimeToUtc(year, month, day, hour, DEFAULT_TIME_ZONE);
   }
 
   const date = new Date(trimmed);
@@ -202,11 +210,15 @@ module.exports = {
       });
     }
 
-    const endsAt = new Date(startsAt.getTime() + durationDays * 24 * 60 * 60 * 1000);
-
-    if (endsAt <= new Date()) {
-      return interaction.reply({ content: 'The end date (start + duration) must be in the future.', flags: MessageFlags.Ephemeral });
+    // WOM and Discord both reject a start in the past, so catch it before anything is created.
+    if (startsAt <= new Date()) {
+      return interaction.reply({
+        content: `The start time (<t:${Math.floor(startsAt.getTime() / 1000)}:F>) has already passed. Pick a time in the future.`,
+        flags: MessageFlags.Ephemeral,
+      });
     }
+
+    const endsAt = new Date(startsAt.getTime() + durationDays * 24 * 60 * 60 * 1000);
 
     const groupId = interaction.options.getInteger('group_id') ?? (process.env.WOM_GROUP_ID ? Number(process.env.WOM_GROUP_ID) : null);
     if (!groupId) {

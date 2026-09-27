@@ -295,7 +295,7 @@ Creates a Discord scheduled event and one Wise Old Man competition per boss or s
 | `prefix` | Yes | Name prefix. Each competition is named `<prefix> <metric>`, e.g. `BOTW T3 Vorkath`, without a leading "The". |
 | `metric` | Yes | Boss or skill. Autocompletes over everything WOM tracks. |
 | `metric2`–`metric4` | No | More bosses or skills, each with its own competition. |
-| `start` | Yes | Eastern Time date: `YYYY-MM-DD`, `YYYY/MM/DD` or `MM/DD/YYYY`, optionally with an hour (`18` or `6pm`). ISO 8601 with an offset also works. |
+| `start` | Yes | Eastern Time date: `YYYY-MM-DD`, `YYYY/MM/DD` or `MM/DD/YYYY`, optionally with an hour (`18` or `6pm`). ISO 8601 with an offset also works. Must be in the future. |
 | `duration` | No | Days, 1–365 (default 7). |
 | `group_id` | No | WOM group ID. Only shown when `WOM_GROUP_ID` isn't set. |
 | `verification_code` | No | WOM verification code. Only shown when `WOM_GROUP_VERIFICATION_CODE` isn't set. |
