@@ -79,6 +79,7 @@ function withTimeout(promise, label, ms) {
 }
 
 module.exports = {
+  DATA_DIR,
   readJson,
   writeJson,
   withFileLock,
