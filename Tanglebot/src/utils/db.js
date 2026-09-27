@@ -63,4 +63,28 @@ function intEnv(name, fallback) {
   return Number.isNaN(value) ? fallback : value;
 }
 
-module.exports = { readJson, writeJson, withFileLock, truncate, hasAnyRole, intEnv };
+// A Discord timestamp, shown in each viewer's timezone. Styles: t, T, d, D, f, F, R.
+function discordTimestamp(date, style) {
+  return `<t:${Math.floor(new Date(date).getTime() / 1000)}:${style}>`;
+}
+
+// Rejects with "<label> timed out after Ns" if promise hasn't settled within ms. For calls with no
+// timeout of their own, like the Wise Old Man client's.
+function withTimeout(promise, label, ms) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+module.exports = {
+  readJson,
+  writeJson,
+  withFileLock,
+  truncate,
+  hasAnyRole,
+  intEnv,
+  discordTimestamp,
+  withTimeout,
+};

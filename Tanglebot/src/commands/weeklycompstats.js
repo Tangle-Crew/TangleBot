@@ -18,7 +18,7 @@ const {
 } = require('../utils/wiseOldMan');
 const { CATEGORY_LABELS, shortMetricName, metricCategory, formatNumber, formatAmount } = require('../utils/womMetrics');
 const { DEFAULT_EMBED_COLOR } = require('../utils/embedColor');
-const { truncate } = require('../utils/db');
+const { truncate, discordTimestamp, withTimeout } = require('../utils/db');
 const { notifyAdminLog } = require('../utils/roleMenu');
 
 const PAGE_SIZE = 10;
@@ -47,10 +47,6 @@ let pending = null;
 let cacheGeneration = 0;
 const lastRunByUser = new Map();
 
-function discordTimestamp(date, style) {
-  return `<t:${Math.floor(new Date(date).getTime() / 1000)}:${style}>`;
-}
-
 function describeCompetition(competition) {
   return `"${competition.title}" (#${competition.id}, ${competition.metric})`;
 }
@@ -75,14 +71,6 @@ function normalizeName(name) {
   return String(name ?? '').toLowerCase().replace(/[\s_-]+/g, ' ').trim();
 }
 
-function withTimeout(promise, label) {
-  let timer;
-  const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${label} timed out after ${REQUEST_TIMEOUT_MS / 1000}s`)), REQUEST_TIMEOUT_MS);
-  });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
-}
-
 function reportError(interaction, title, detail) {
   return notifyAdminLog(
     interaction.client,
@@ -96,7 +84,7 @@ function reportError(interaction, title, detail) {
 async function loadStandings(groupId) {
   const now = Date.now();
   console.log(`[WeeklyCompStats] Loading competitions for WOM group ${groupId}...`);
-  const all = await withTimeout(getAllGroupCompetitions(groupId), 'Loading the group competitions');
+  const all = await withTimeout(getAllGroupCompetitions(groupId), 'Loading the group competitions', REQUEST_TIMEOUT_MS);
   const running = all
     .filter(c => isCompetitionOngoing(c, now))
     .sort((a, b) => new Date(a.startsAt) - new Date(b.startsAt) || a.id - b.id);
@@ -109,7 +97,7 @@ async function loadStandings(groupId) {
   );
 
   const settled = await Promise.allSettled(
-    running.map(c => withTimeout(getCompetitionDetails(c.id), `Loading competition #${c.id}`))
+    running.map(c => withTimeout(getCompetitionDetails(c.id), `Loading competition #${c.id}`, REQUEST_TIMEOUT_MS))
   );
   const results = running.map((competition, i) => {
     const result = settled[i];

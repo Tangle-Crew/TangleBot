@@ -8,7 +8,7 @@ const {
   competitionUrl,
 } = require('./wiseOldMan');
 const { CATEGORY_LABELS, metricName, metricCategory, formatAmount } = require('./womMetrics');
-const { truncate } = require('./db');
+const { truncate, discordTimestamp } = require('./db');
 
 // Checks run on the clock at :00, :15, :30 and :45, like a `*/15 * * * *` cron job.
 const CHECK_INTERVAL_MS = 15 * 60 * 1000;
@@ -45,10 +45,6 @@ function formatStandings(rows, metric) {
   return rows
     .map((row, i) => `${RANK_LABELS[i]} **${row.name}** — ${formatAmount(row.gained, metric)}`)
     .join('\n');
-}
-
-function discordTimestamp(date, style) {
-  return `<t:${Math.floor(new Date(date).getTime() / 1000)}:${style}>`;
 }
 
 function buildReminderEmbed(results, updateStatus) {
