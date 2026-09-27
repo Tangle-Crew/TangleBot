@@ -25,19 +25,22 @@ const {
   withTimeout,
 } = require('../utils/db');
 const { notifyAdminLog } = require('../utils/roleMenu');
+const { buildXlsx } = require('../utils/xlsx');
 
 const TEMPLAR_ROLE_ID = process.env.TEMPLAR_ROLE_ID;
 // Every list is posted here, wherever the command is run.
 const ADMIN_LOG_CHANNEL_ID = process.env.ADMIN_LOG_CHANNEL_ID;
-// { messageId } of the newest list, so the next run can delete it even after a restart.
+// { list: { header, inactive, lowXp } }, the newest list's message IDs, so the next run can delete it
+// even after a restart.
 const DATA_FILE = 'stalemembers.json';
 // Every export is also saved here; only the newest few are kept.
 const EXPORT_DIR = path.join(DATA_DIR, 'stalemembers-exports');
 const EXPORT_PREFIX = 'stale-members-export-';
 const MAX_SAVED_EXPORTS = 5;
-// Page 1 also holds the header, so it lists fewer members (see pageSize).
-const FIRST_PAGE_SIZE = 10;
-const MAX_PAGE_SIZE = 24;
+// Each list is posted as its own message under the header message, in this order.
+const SECTIONS = ['inactive', 'lowXp'];
+// Members per page of each list. Well under Discord's 4096-character limit; truncate is the backstop.
+const PAGE_SIZE = 15;
 // How long a refresh waits for WOM to process update all, as the competition reminder does.
 const REFRESH_WAIT_MS = 5 * 60 * 1000;
 // Names this command's own update all, so it doesn't also trigger an automatic refresh.
@@ -46,8 +49,7 @@ const MAX_MONTHS = 60;
 // The WOM client sets no timeout of its own.
 const REQUEST_TIMEOUT_MS = 20 * 1000;
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-// Members who gained enough XP but have been inactive for all but this much of the window are
-// listed as close.
+// Members inactive for all but this much of the window are listed as close.
 const CLOSE_MS = 2 * WEEK_MS;
 // A member whose WOM profile is older than this may have gains WOM hasn't seen yet.
 const OUTDATED_MS = WEEK_MS;
@@ -68,14 +70,16 @@ function normalizeRank(text) {
   return String(text ?? '').toLowerCase().trim().replace(/[\s_-]+/g, '_');
 }
 
+// "deputy_owner" -> "Deputy Owner".
 function rankName(role) {
-  return GroupRoleProps[role]?.name ?? role;
+  return String(GroupRoleProps[role]?.name ?? role).replace(/_/g, ' ').replace(/\b[a-z]/g, c => c.toUpperCase());
 }
 
 let groupRanks = null; // { ranks, loadedAt }, the group's ranks in its own order
 let pendingRanks = null;
 let rankEmojis = null; // rank -> the bot's emoji for it, loaded once
-// Message ID -> { view, page, updating } for each posted list. Lost on restart.
+// Header message ID -> { view, ids, pages, updating } for each posted list: `ids` holds its three
+// message IDs ({ header, inactive, lowXp }) and `pages` each list's page. Lost on restart.
 const loadedLists = new Map();
 // The refresh in progress, or null. One for the whole group, since update all covers everyone.
 // Started by a Refresh press (`requester`, `button`) or another feature's update all (`source`);
@@ -209,7 +213,7 @@ function reportError(interaction, title, detail) {
   );
 }
 
-// "Nickname (username)", readable outside Discord (the CSV). No "@", which spreadsheets read as a
+// "Nickname (username)", readable outside Discord (the export). No "@", which spreadsheets read as a
 // formula.
 function memberName(interaction) {
   const nickname = interaction.member?.displayName;
@@ -221,9 +225,9 @@ function timeOrNull(date) {
   return date ? new Date(date).getTime() : null;
 }
 
-// Members to list, longest inactive first: those outside the ignored ranks, in the group the whole
-// window, who gained under `minXp` (stale) or gained more but have been inactive for all but
-// CLOSE_MS of it (close). No WOM data in the window counts as 0 gained.
+// Members to list, from those outside the ignored ranks and in the group the whole window, in two
+// sections: inactive (no change in the window, or close: none since its first CLOSE_MS), then low
+// XP (active later, but gained under `minXp`). No WOM data in the window counts as 0 gained.
 async function findStaleMembers(groupId, { months, startDate, endDate, minXp, ignoredRoles }) {
   const [details, gains] = await Promise.all([
     withTimeout(getGroupDetails(groupId), 'Loading the group members', REQUEST_TIMEOUT_MS),
@@ -233,6 +237,7 @@ async function findStaleMembers(groupId, { months, startDate, endDate, minXp, ig
   saveGroupRanks(details);
 
   const startMs = startDate.getTime();
+  const endMs = endDate.getTime();
   const notIgnored = details.memberships.filter(m => !ignoredRoles.has(m.role));
   // Skips anyone who joined during the window, by the earlier of WOM's two join dates
   // (clientSyncJoinedAt survives WOM re-adding someone, e.g. after a name change). No date counts
@@ -246,7 +251,11 @@ async function findStaleMembers(groupId, { months, startDate, endDate, minXp, ig
     .map(m => {
       const gained = gainedById.get(m.player.id) ?? null;
       const lastChangedAt = timeOrNull(m.player.lastChangedAt);
-      const stale = (gained ?? 0) < minXp;
+      const inactive = lastChangedAt === null || lastChangedAt <= startMs + CLOSE_MS;
+      const lowXp = !inactive && (gained ?? 0) < minXp;
+      // When a close member will have been inactive for the whole window. Month-end clamping can put
+      // that in the past, and then they already have.
+      const closeAt = inactive && lastChangedAt > startMs ? addMonths(lastChangedAt, months) : null;
       return {
         name: m.player.displayName,
         role: m.role,
@@ -254,18 +263,19 @@ async function findStaleMembers(groupId, { months, startDate, endDate, minXp, ig
         gained,
         lastChangedAt,
         updatedAt: timeOrNull(m.player.updatedAt),
-        // When a close member will have been inactive for the whole window.
-        closeAt: !stale && lastChangedAt !== null && lastChangedAt <= startMs + CLOSE_MS ? addMonths(lastChangedAt, months) : null,
-        stale,
+        section: inactive ? 'inactive' : lowXp ? 'lowXp' : null,
+        closeAt: closeAt > endMs ? closeAt : null,
       };
     })
-    .filter(row => row.stale || row.closeAt !== null)
+    .filter(row => row.section !== null)
     // Never seen changing sorts first, then the oldest change, then the least gained.
     .sort((a, b) =>
       (a.lastChangedAt ?? -Infinity) - (b.lastChangedAt ?? -Infinity) ||
       (a.gained ?? -1) - (b.gained ?? -1) ||
       a.name.localeCompare(b.name)
     );
+  const sections = Object.fromEntries(SECTIONS.map(section => [section, listed.filter(row => row.section === section)]));
+  const closeCount = sections.inactive.filter(row => row.closeAt !== null).length;
 
   return {
     groupRoles: new Set(groupRanks.ranks),
@@ -273,13 +283,15 @@ async function findStaleMembers(groupId, { months, startDate, endDate, minXp, ig
     ignored: details.memberships.length - notIgnored.length,
     joinedRecently: notIgnored.length - checked.length,
     untracked: checked.filter(m => !gainedById.has(m.player.id)).length,
-    staleCount: listed.filter(row => row.stale).length,
-    closeCount: listed.filter(row => !row.stale).length,
+    inactiveCount: sections.inactive.length - closeCount,
+    closeCount,
+    lowXpCount: sections.lowXp.length,
     listed,
+    sections,
   };
 }
 
-// The markers a row gets, with what each means for the legend and the CSV notes.
+// The markers a row gets, with what each means for the legend and the export notes.
 const MARKERS = [
   {
     emoji: '⏳',
@@ -313,19 +325,24 @@ function formatRow(row, index, view) {
     (flags ? ` ${flags}` : '');
 }
 
-// Members per page after page 1: its 10 members plus its header lines, so pages match in height.
-// Capped to stay under Discord's 4096-character limit; truncate is the backstop.
-function pageSize(view) {
-  return Math.min(FIRST_PAGE_SIZE + buildHeader(view).split('\n').length + 1, MAX_PAGE_SIZE);
+// A list's title, without and with its emoji.
+function sectionName(section, view) {
+  return section === 'inactive'
+    ? `Inactive for ${plural(view.months, 'month')}`
+    : `Active, but under ${formatXp(view.minXp)} XP`;
 }
 
-function pageCount(view) {
-  return 1 + Math.max(0, Math.ceil((view.listed.length - FIRST_PAGE_SIZE) / pageSize(view)));
+function sectionTitle(section, view) {
+  return `${section === 'inactive' ? '😴' : '📉'} ${sectionName(section, view)}`;
 }
 
-// Index of the first member on `page`.
-function pageStart(view, page) {
-  return page === 0 ? 0 : FIRST_PAGE_SIZE + (page - 1) * pageSize(view);
+function pageCount(view, section) {
+  return Math.max(1, Math.ceil(view.sections[section].length / PAGE_SIZE));
+}
+
+// Each list's page, kept in range after a reload changed its length.
+function clampPages(view, pages) {
+  return Object.fromEntries(SECTIONS.map(section => [section, Math.min(pages?.[section] ?? 0, pageCount(view, section) - 1)]));
 }
 
 // Refresh needs the verification code, since it asks WOM to update the whole group.
@@ -333,10 +350,11 @@ function canRefresh() {
   return Boolean(process.env.WOM_GROUP_VERIFICATION_CODE);
 }
 
-// Page 1 only: the options, result, marker legend and button help (buttons can't show hover text).
+// The header message: the options, result, marker legend and button help (buttons can't show hover
+// text).
 function buildHeader(view) {
   const {
-    listed, staleCount, closeCount, checked, ignored, joinedRecently, ignoredRoles, groupRoles, months, minXp, startMs, untracked, emojis,
+    listed, inactiveCount, closeCount, lowXpCount, checked, ignored, joinedRecently, ignoredRoles, groupRoles, months, minXp, startMs, untracked, emojis,
   } = view;
 
   // Only ranks the group uses; ignoring any other changes nothing.
@@ -357,13 +375,20 @@ function buildHeader(view) {
     `**Ignoring:** ${ignoring}`,
   ];
 
+  const xp = `**${formatXp(minXp)} XP**`;
   const result = [
-    staleCount === 0
-      ? `All **${checked}** members checked gained at least **${formatXp(minXp)} XP**.`
-      : `**${staleCount}** of **${checked}** members checked gained less than **${formatXp(minXp)} XP**. Longest inactive first.`,
+    listed.length === 0
+      ? `All **${checked}** members checked were active and gained at least ${xp}.`
+      : `Of **${checked}** members checked (each list below is longest inactive first):`,
+    ...(listed.length > 0
+      ? [`**${inactiveCount}** ${inactiveCount === 1 ? "hasn't" : "haven't"} been active in ${plural(months, 'month')}.`]
+      : []),
     ...(closeCount > 0
-      ? [`**${closeCount}** more ${closeCount === 1 ? 'is' : 'are'} close (⌛): inactive for at least ` +
-        `${formatDuration(startMs + CLOSE_MS, view.now)}, but gained more before that. ⌛ shows when they reach ${plural(months, 'month')}.`]
+      ? [`**${closeCount}** ${closeCount === 1 ? 'is' : 'are'} close (⌛): inactive for at least ` +
+        `${formatDuration(startMs + CLOSE_MS, view.now)}. ⌛ shows when they reach ${plural(months, 'month')}.`]
+      : []),
+    ...(listed.length > 0
+      ? [`**${lowXpCount}** ${lowXpCount === 1 ? 'was' : 'were'} active more recently, but gained less than ${xp}.`]
       : []),
     ...(untracked > 0
       ? [`${untracked} member${untracked === 1 ? ' has' : 's have'} no WOM data in this window and count as 0 XP.`]
@@ -373,38 +398,50 @@ function buildHeader(view) {
       : []),
   ];
 
-  // Only the markers this list uses.
+  // Only the markers the lists use.
   const legend = MARKERS
     .filter(marker => listed.some(row => marker.applies(row, view)))
     .map(marker => `${marker.emoji} ${marker.legend}`);
 
   const buttons = [
-    "🔄 **Update** reloads the list with WOM's latest data.",
+    "🔄 **Update** reloads both lists with WOM's latest data.",
     ...(canRefresh()
-      ? [`🔃 **Refresh WOM** has WOM re-check everyone's hiscores first, then updates the list in about ${REFRESH_WAIT_MS / 60000} minutes and DMs you.`]
+      ? [`🔃 **Refresh WOM** has WOM re-check everyone's hiscores first, then updates the lists in about ${REFRESH_WAIT_MS / 60000} minutes and DMs you.`]
       : []),
-    '📄 **Export** sends you the whole list as a spreadsheet.',
+    '📄 **Export all** sends you both lists as a spreadsheet, one tab each. Each list has its own ◀ ▶ pages and 📄 **Export**.',
   ];
 
   return [options, result, ...(legend.length > 0 ? [legend] : []), buttons].map(lines => lines.join('\n')).join('\n\n');
 }
 
-function buildEmbed(view, page) {
-  const totalPages = pageCount(view);
-  const size = page === 0 ? FIRST_PAGE_SIZE : pageSize(view);
-  const start = pageStart(view, page);
-  const rows = view.listed.slice(start, start + size).map((row, i) => formatRow(row, start + i, view));
-  // Pads the last page to the same height so the buttons don't move. Discord trims trailing empty
-  // lines, so each pad is a zero-width space.
-  if (totalPages > 1 && page === totalPages - 1) {
-    while (rows.length < size) rows.push('\u200b');
-  }
-  const description = [...(page === 0 ? [buildHeader(view)] : []), ...(rows.length ? [rows.join('\n')] : [])].join('\n\n');
+function buildHeaderEmbed(view) {
   return new EmbedBuilder()
     .setColor(DEFAULT_EMBED_COLOR)
     .setTitle(TITLE)
-    .setDescription(truncate(description, 4096))
-    .setFooter({ text: `Page ${page + 1}/${totalPages} · ${plural(view.listed.length, 'member')}` })
+    .setDescription(truncate(buildHeader(view), 4096))
+    .setTimestamp(view.now);
+}
+
+function buildSectionEmbed(view, section, page) {
+  const all = view.sections[section];
+  const totalPages = pageCount(view, section);
+  const start = page * PAGE_SIZE;
+  const rows = all.slice(start, start + PAGE_SIZE).map((row, i) => formatRow(row, start + i, view));
+  if (rows.length === 0) {
+    rows.push(section === 'inactive'
+      ? `Nobody has been inactive for ${plural(view.months, 'month')}.`
+      : `Nobody active more recently gained less than ${formatXp(view.minXp)} XP.`);
+  }
+  // Pads the last page to the same height so the buttons don't move. Discord trims trailing empty
+  // lines, so each pad is a zero-width space.
+  if (totalPages > 1 && page === totalPages - 1) {
+    while (rows.length < PAGE_SIZE) rows.push('\u200b');
+  }
+  return new EmbedBuilder()
+    .setColor(DEFAULT_EMBED_COLOR)
+    .setTitle(sectionTitle(section, view))
+    .setDescription(truncate(rows.join('\n'), 4096))
+    .setFooter({ text: `Page ${page + 1}/${totalPages} · ${plural(all.length, 'member')}` })
     .setTimestamp(view.now);
 }
 
@@ -461,32 +498,53 @@ function isOlder(id, than) {
   return BigInt(id) < BigInt(than);
 }
 
-// Deletes every list but the newest: those in memory plus the one in the data file (from before a
-// restart). Keeping the newest by message age means overlapping runs leave the later list. Failures
-// are logged and skipped.
-function replaceOldLists(client, newId) {
-  return withFileLock(DATA_FILE, async () => {
-    const saved = readJson(DATA_FILE).messageId;
-    const known = new Set([newId, ...loadedLists.keys(), ...(saved ? [saved] : [])]);
-    const newest = [...known].reduce((a, b) => (isOlder(a, b) ? b : a));
-    const targets = [...known].filter(id => id !== newest);
+// The newest list's message IDs from the data file, or null. A saved `messageId` is a list posted as
+// one message, so only its header is known.
+function savedList() {
+  const data = readJson(DATA_FILE);
+  if (data.list?.header) return data.list;
+  return data.messageId ? { header: data.messageId } : null;
+}
 
-    let channel = null;
-    for (const id of targets) {
-      loadedLists.delete(id);
+// Every message of a list, header first.
+function messageIdsOf(ids) {
+  return [ids.header, ...SECTIONS.map(section => ids[section])].filter(Boolean);
+}
+
+// Deletes every list but the newest: those in memory, the one in the data file (from before a
+// restart) and `others`. Lists are told apart by their header, and keeping the newest by message age
+// means overlapping runs leave the later list. Failures are logged and skipped.
+function replaceOldLists(client, newIds, others = []) {
+  return withFileLock(DATA_FILE, async () => {
+    const saved = savedList();
+    const known = new Map();
+    for (const ids of [newIds, ...[...loadedLists.values()].map(state => state.ids), ...(saved ? [saved] : []), ...others]) {
+      known.set(ids.header, { ...known.get(ids.header), ...ids });
+    }
+    const newest = [...known.keys()].reduce((a, b) => (isOlder(a, b) ? b : a));
+
+    const old = [...known].filter(([header]) => header !== newest);
+    if (old.length > 0) {
       try {
-        channel ??= await client.channels.fetch(ADMIN_LOG_CHANNEL_ID);
-        await channel.messages.delete(id);
-        console.log(`[StaleMembers] Deleted old list ${id}.`);
+        const channel = await client.channels.fetch(ADMIN_LOG_CHANNEL_ID);
+        // Every old message at once.
+        await Promise.all(old.flatMap(([header, ids]) => {
+          loadedLists.delete(header);
+          console.log(`[StaleMembers] Deleting old list ${header}.`);
+          return messageIdsOf(ids).map(id => channel.messages.delete(id).catch(err => {
+            // 10008 Unknown Message: it was already deleted.
+            if (err?.code !== 10008) console.warn(`[StaleMembers] Couldn't delete message ${id} of old list ${header}:`, err.message);
+          }));
+        }));
       } catch (err) {
-        // 10008 Unknown Message: it was already deleted.
-        if (err?.code !== 10008) console.warn(`[StaleMembers] Couldn't delete old list ${id}:`, err.message);
+        console.warn("[StaleMembers] Couldn't load the admin log to delete old lists:", err.message);
       }
     }
 
-    if (saved !== newest) {
+    const keep = known.get(newest);
+    if (messageIdsOf(keep).join() !== (saved ? messageIdsOf(saved).join() : '')) {
       try {
-        writeJson(DATA_FILE, { messageId: newest });
+        writeJson(DATA_FILE, { list: keep });
       } catch (err) {
         console.error(`[StaleMembers] Couldn't save list ${newest} to ${DATA_FILE}:`, err.message);
       }
@@ -494,153 +552,231 @@ function replaceOldLists(client, newId) {
   });
 }
 
-// The page a posted list is on, read from its footer, for lists loaded again after a restart.
-function pageFromMessage(message) {
-  const match = message.embeds[0]?.footer?.text?.match(/^Page (\d+)\//);
-  return match ? Number(match[1]) - 1 : 0;
-}
-
-function buildButtons({ view, page }) {
-  const totalPages = pageCount(view);
-  const buttons = [];
-  if (totalPages > 1) {
-    buttons.push(
-      new ButtonBuilder()
-        .setCustomId(`${BUTTON_PREFIX}prev`)
-        .setLabel('◀ Prev')
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(page === 0),
-      new ButtonBuilder()
-        .setCustomId(`${BUTTON_PREFIX}next`)
-        .setLabel('Next ▶')
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(page >= totalPages - 1)
-    );
-  }
-  buttons.push(
+// Update, Refresh WOM and Export all, under the header.
+function headerButtons({ view }) {
+  return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(updateButtonId(view))
       .setLabel('🔄 Update')
       .setStyle(ButtonStyle.Primary),
+    // Red, since it has WOM re-check the whole group.
     ...(canRefresh()
-      ? [new ButtonBuilder().setCustomId(`${BUTTON_PREFIX}refresh`).setLabel('🔃 Refresh WOM').setStyle(ButtonStyle.Secondary)]
+      ? [new ButtonBuilder().setCustomId(`${BUTTON_PREFIX}refresh`).setLabel('🔃 Refresh WOM').setStyle(ButtonStyle.Danger)]
       : []),
     new ButtonBuilder()
       .setCustomId(`${BUTTON_PREFIX}export`)
-      .setLabel('📄 Export')
-      .setStyle(ButtonStyle.Secondary)
+      .setLabel('📄 Export all')
+      .setStyle(ButtonStyle.Success)
       .setDisabled(view.listed.length === 0)
   );
-  return new ActionRowBuilder().addComponents(buttons);
 }
 
-function csvCell(value) {
-  // Numbers pass through, so negatives stay numbers.
-  if (typeof value === 'number') return String(value);
-  let text = String(value ?? '');
-  // Text starting with = + - @, a tab or a carriage return would make a spreadsheet run it as a
-  // formula; a leading ' keeps it plain text.
-  if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
-  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+// Prev, Next and Export under a list, each naming the list in its custom ID.
+function sectionButtons({ view, pages }, section) {
+  const page = pages[section];
+  const totalPages = pageCount(view, section);
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`${BUTTON_PREFIX}prev:${section}`)
+      .setLabel('◀ Prev')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(page === 0),
+    new ButtonBuilder()
+      .setCustomId(`${BUTTON_PREFIX}next:${section}`)
+      .setLabel('Next ▶')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(page >= totalPages - 1),
+    new ButtonBuilder()
+      .setCustomId(`${BUTTON_PREFIX}export:${section}`)
+      .setLabel('📄 Export')
+      .setStyle(ButtonStyle.Success)
+      .setDisabled(view.sections[section].length === 0)
+  );
 }
 
-function csvDate(time) {
+function exportDate(time) {
   return time === null ? '' : new Date(time).toISOString().slice(0, 10);
 }
 
-// "2026-09-27 14:30 UTC". CSV can't use Discord's local-time stamps.
-function csvTime(time) {
+// "2026-09-27 14:30 UTC". A spreadsheet can't use Discord's local-time stamps.
+function exportTime(time) {
   return `${new Date(time).toISOString().slice(0, 16).replace('T', ' ')} UTC`;
 }
 
-// The whole list as CSV, in embed order, after lines for when it was checked, the options, and who
-// exported it and when.
-function buildCsv(view, { exportedBy, exportedAt }) {
+// Each column's title and width in characters.
+const EXPORT_COLUMNS = [
+  ['#', 5], ['Name', 16], ['Rank', 14], ['Status', 36], ['XP gained', 11],
+  ['Last active', 12], ['Inactive for', 18], ['WOM last updated', 17], ['Notes', 45],
+];
+
+// One list as a spreadsheet tab, in embed order, after rows for which list it is, when it was
+// checked, who exported it and when, and the options.
+function exportSheet(view, section, { exportedBy, exportedAt }) {
   const info = [
     ['Stale Members export'],
-    ['Data checked', csvTime(view.now), 'by', view.checkedBy.name],
-    ['Exported', csvTime(exportedAt), 'by', exportedBy],
+    ['List', sectionName(section, view)],
+    ['Data checked', exportTime(view.now), 'by', view.checkedBy.name],
+    ['Exported', exportTime(exportedAt), 'by', exportedBy],
     ['Options', commandText(view)],
     [],
   ];
-  const header = ['#', 'Name', 'Rank', 'Status', 'XP gained', 'Last active', 'Inactive for', 'WOM last updated', 'Notes'];
-  const rows = view.listed.map((row, i) => [
+  const rows = view.sections[section].map((row, i) => [
     i + 1,
     row.name,
     rankName(row.role),
-    row.stale ? 'Stale' : `Close (${plural(view.months, 'month')} inactive on ${csvDate(row.closeAt)})`,
+    row.closeAt !== null
+      ? `Close (${plural(view.months, 'month')} inactive on ${exportDate(row.closeAt)})`
+      : row.section === 'inactive' ? 'Inactive' : `Active, under ${exactXp(view.minXp)} XP`,
     row.gained ?? '',
-    csvDate(row.lastChangedAt),
+    exportDate(row.lastChangedAt),
     row.lastChangedAt ? formatDuration(row.lastChangedAt, view.now) : 'never seen active',
-    csvDate(row.updatedAt),
+    exportDate(row.updatedAt),
     [
       ...(row.gained === null ? ['no WOM data'] : []),
       ...markersFor(row, view).map(marker => (typeof marker.note === 'function' ? marker.note(row) : marker.note)),
     ].join('; '),
   ]);
-  // The byte order mark tells Excel the file is UTF-8.
-  return '\ufeff' + [...info, header, ...rows].map(cells => cells.map(csvCell).join(',')).join('\r\n');
+  return {
+    name: sectionName(section, view),
+    rows: [...info, EXPORT_COLUMNS.map(([title]) => title), ...rows],
+    widths: EXPORT_COLUMNS.map(([, width]) => width),
+    boldRows: [0, info.length],
+  };
 }
 
-// "stale-members-export-2026-09-27_14-30-05.csv" (UTC), so exports sort oldest to newest.
-function exportFileName(time) {
-  return `${EXPORT_PREFIX}${new Date(time).toISOString().slice(0, 19).replace('T', '_').replace(/:/g, '-')}.csv`;
+// "stale-members-export-2026-09-27_14-30-05.xlsx" (UTC), so exports sort oldest to newest. One list's
+// export ends in its name, e.g. "-inactive".
+function exportFileName(time, section) {
+  const suffix = section ? `-${section === 'inactive' ? 'inactive' : 'low-xp'}` : '';
+  return `${EXPORT_PREFIX}${new Date(time).toISOString().slice(0, 19).replace('T', '_').replace(/:/g, '-')}${suffix}.xlsx`;
 }
 
 // Saves a copy in EXPORT_DIR, keeping the newest MAX_SAVED_EXPORTS. A same-second name gets "_2" and
 // so on ("_" sorts after ".", so it counts as newer). Returns the name used.
-function saveExport(name, csv) {
+function saveExport(name, file) {
   return withFileLock(EXPORT_DIR, async () => {
     fs.mkdirSync(EXPORT_DIR, { recursive: true });
     let saveAs = name;
-    for (let n = 2; fs.existsSync(path.join(EXPORT_DIR, saveAs)); n++) saveAs = name.replace(/\.csv$/, `_${n}.csv`);
-    fs.writeFileSync(path.join(EXPORT_DIR, saveAs), csv, 'utf8');
+    for (let n = 2; fs.existsSync(path.join(EXPORT_DIR, saveAs)); n++) saveAs = name.replace(/\.xlsx$/, `_${n}.xlsx`);
+    fs.writeFileSync(path.join(EXPORT_DIR, saveAs), file);
     const old = fs.readdirSync(EXPORT_DIR)
-      .filter(file => file.startsWith(EXPORT_PREFIX) && file.endsWith('.csv'))
+      .filter(entry => entry.startsWith(EXPORT_PREFIX) && entry.endsWith('.xlsx'))
       .sort()
       .slice(0, -MAX_SAVED_EXPORTS);
-    for (const file of old) {
-      fs.rmSync(path.join(EXPORT_DIR, file), { force: true });
-      console.log(`[StaleMembers] Deleted old export ${file}, keeping the newest ${MAX_SAVED_EXPORTS}.`);
+    for (const entry of old) {
+      fs.rmSync(path.join(EXPORT_DIR, entry), { force: true });
+      console.log(`[StaleMembers] Deleted old export ${entry}, keeping the newest ${MAX_SAVED_EXPORTS}.`);
     }
     return saveAs;
   });
 }
 
-// Sends the list as a CSV file, privately to whoever pressed Export, and keeps a copy on the bot.
-async function exportList(button, state) {
+// Sends one list, or with no `section` both as a tab each, as a spreadsheet, privately to whoever
+// pressed Export, and keeps a copy on the bot.
+async function exportList(button, state, section) {
   const { view } = state;
+  const sections = section ? [section] : SECTIONS;
   const exportedAt = Date.now();
   const exportedBy = memberName(button);
-  const csv = buildCsv(view, { exportedBy, exportedAt });
-  let name = exportFileName(exportedAt);
+  const file = buildXlsx(sections.map(s => exportSheet(view, s, { exportedBy, exportedAt })));
+  const count = plural(sections.reduce((sum, s) => sum + view.sections[s].length, 0), 'member');
+  let name = exportFileName(exportedAt, section);
 
   let saved = true;
   try {
-    name = await saveExport(name, csv);
+    name = await saveExport(name, file);
   } catch (err) {
     saved = false;
     console.error(`[StaleMembers] Couldn't save export ${name}:`, err.message);
   }
-  console.log(`[StaleMembers] ${button.user.tag} exported list ${button.message.id} (${plural(view.listed.length, 'member')}) as ${name}.`);
+  console.log(`[StaleMembers] ${button.user.tag} exported ${section ?? 'both lists'} from list ${state.ids.header} (${count}) as ${name}.`);
 
+  const what = section ? `${count} from the ${sectionTitle(section, view)} list` : `Both lists (${count}), one tab each`;
   await button.reply({
-    content: `${plural(view.listed.length, 'member')} from the list checked ${discordTimestamp(view.now, 'f')}. ` +
-      'Opens in Excel or Google Sheets. ' +
+    content: `${what}, checked ${discordTimestamp(view.now, 'f')}. Opens in Excel or Google Sheets. ` +
       (saved ? `A copy is saved on the bot (the last ${MAX_SAVED_EXPORTS} are kept).` : "Couldn't save a copy on the bot."),
-    files: [new AttachmentBuilder(Buffer.from(csv, 'utf8'), { name })],
+    files: [new AttachmentBuilder(file, { name })],
     flags: MessageFlags.Ephemeral,
   });
 }
 
-function render(state) {
-  return { embeds: [buildEmbed(state.view, state.page)], components: [buildButtons(state)] };
+function renderHeader(state) {
+  return { embeds: [buildHeaderEmbed(state.view)], components: [headerButtons(state)] };
 }
 
-function rememberList(messageId, state) {
-  loadedLists.delete(messageId);
-  loadedLists.set(messageId, state);
+function renderSection(state, section) {
+  return { embeds: [buildSectionEmbed(state.view, section, state.pages[section])], components: [sectionButtons(state, section)] };
+}
+
+// A loaded list, by any of its message IDs.
+function findList(messageId) {
+  for (const state of loadedLists.values()) {
+    if (messageIdsOf(state.ids).includes(messageId)) return state;
+  }
+  return null;
+}
+
+function rememberList(state) {
+  loadedLists.delete(state.ids.header);
+  loadedLists.set(state.ids.header, state);
   if (loadedLists.size > MAX_LOADED_LISTS) loadedLists.delete(loadedLists.keys().next().value);
+}
+
+// Posts a list in the admin log: the header (through `postHeader` when given, e.g. as the command's
+// reply), then each list under it. If any part fails, deletes what was posted and throws. Returns the
+// message IDs.
+async function sendList(client, state, postHeader) {
+  const channel = await client.channels.fetch(ADMIN_LOG_CHANNEL_ID);
+  const posted = [];
+  try {
+    const header = postHeader ? await postHeader(renderHeader(state)) : await channel.send(renderHeader(state));
+    posted.push(header.id);
+    const ids = { header: header.id };
+    for (const section of SECTIONS) {
+      ids[section] = (await channel.send(renderSection(state, section))).id;
+      posted.push(ids[section]);
+    }
+    return ids;
+  } catch (err) {
+    await Promise.all(posted.map(id => channel.messages.delete(id).catch(() => {})));
+    throw err;
+  }
+}
+
+// Edits all of a posted list's messages at once. Throws 10008 Unknown Message if one was deleted.
+async function editList(client, state) {
+  const channel = await client.channels.fetch(ADMIN_LOG_CHANNEL_ID);
+  await Promise.all([
+    channel.messages.edit(state.ids.header, renderHeader(state)),
+    ...SECTIONS.map(section => channel.messages.edit(state.ids[section], renderSection(state, section))),
+  ]);
+}
+
+// Shows reloaded data on a posted list, keeping each list's page. If only its header is known (a
+// list posted as one message), it's posted again in its place. Returns the list's message IDs, or
+// null if it was deleted or a newer list replaced it.
+async function showReloaded(client, headerId, view) {
+  const old = loadedLists.get(headerId);
+  const saved = savedList();
+  if (!old && saved && isOlder(headerId, saved.header)) return null;
+  const ids = old?.ids ?? (saved?.header === headerId ? saved : { header: headerId });
+  const state = { view, ids, pages: clampPages(view, old?.pages) };
+
+  if (SECTIONS.every(section => ids[section])) {
+    try {
+      await editList(client, state);
+    } catch (err) {
+      if (err?.code !== 10008) throw err;
+      return null;
+    }
+    rememberList(state);
+    return ids;
+  }
+  state.ids = await sendList(client, state);
+  rememberList(state);
+  await replaceOldLists(client, state.ids, [ids]);
+  console.log(`[StaleMembers] Posted list ${headerId} again as list ${state.ids.header}.`);
+  return state.ids;
 }
 
 // Who a list was checked by: whoever ran the command or pressed Update/Refresh.
@@ -648,8 +784,8 @@ function checkedByMember(interaction) {
   return { id: interaction.user.id, name: memberName(interaction) };
 }
 
-// A list reloaded after another feature's update all. `name` (for the CSV) says what triggered it;
-// page 1 shows `label`.
+// A list reloaded after another feature's update all. `name` (for the export) says what triggered it;
+// the header shows `label`.
 function checkedByAutoRefresh(source) {
   return { id: null, name: `auto-refresh after ${source} updated WOM`, label: 'auto refreshed' };
 }
@@ -665,9 +801,9 @@ async function loadView(client, { months, minXp, ignoredRoles }, checkedBy) {
   const emojisLoad = loadRankEmojis(client);
   const result = await findStaleMembers(groupId, { months, startDate, endDate: new Date(now), minXp, ignoredRoles });
   console.log(
-    `[StaleMembers] ${result.staleCount} of ${result.checked} member(s) gained under ${minXp} XP in ${months} month(s), ` +
-    `${result.closeCount} close (${result.ignored} ignored by rank, ${result.joinedRecently} joined too recently, ` +
-    `${result.untracked} with no WOM data).`
+    `[StaleMembers] Of ${result.checked} member(s), ${result.inactiveCount} inactive for ${months} month(s), ` +
+    `${result.closeCount} close, ${result.lowXpCount} active but under ${minXp} XP (${result.ignored} ignored by rank, ` +
+    `${result.joinedRecently} joined too recently, ${result.untracked} with no WOM data).`
   );
   return {
     ...result,
@@ -681,8 +817,8 @@ async function loadView(client, { months, minXp, ignoredRoles }, checkedBy) {
   };
 }
 
-// Reloads a list with the same options, keeping its page. After a restart the options come from the
-// button.
+// Reloads a list with the same options, keeping each list's page. After a restart the options come
+// from the button.
 async function updateList(button, state) {
   const query = state?.view ?? queryFromButtonId(button.customId);
   if (!query) {
@@ -713,18 +849,21 @@ async function updateList(button, state) {
       await button.followUp({ content: `Couldn't update the list from Wise Old Man: ${err.message}`, flags: MessageFlags.Ephemeral }).catch(() => {});
       return;
     }
-    const page = state?.page ?? pageFromMessage(button.message);
-    const updated = { view, page: Math.min(page, pageCount(view) - 1) };
+    let ids;
     try {
-      await button.editReply(render(updated));
+      ids = await showReloaded(button.client, button.message.id, view);
     } catch (err) {
-      // 10008 Unknown Message: a newer run deleted this list meanwhile.
-      if (err?.code !== 10008) throw err;
-      console.log(`[StaleMembers] List ${button.message.id} was deleted while updating, dropping the update.`);
+      console.error(`[StaleMembers] Failed to show the updated list ${button.message.id}:`, err);
+      await reportError(button, 'Could not update the list', `Editing the list messages failed: ${err.message}`);
+      await button.followUp({ content: 'Something went wrong updating the list. The admins have been notified.', flags: MessageFlags.Ephemeral }).catch(() => {});
       return;
     }
-    rememberList(button.message.id, updated);
-    console.log(`[StaleMembers] Updated list ${button.message.id}, showing page ${updated.page + 1}/${pageCount(view)}.`);
+    if (!ids) {
+      console.log(`[StaleMembers] List ${button.message.id} was deleted or replaced while updating, dropping the update.`);
+      await button.followUp({ content: 'This list was deleted or replaced by a newer one, so it wasn\'t updated.', flags: MessageFlags.Ephemeral }).catch(() => {});
+      return;
+    }
+    console.log(`[StaleMembers] Updated list ${ids.header}.`);
   } finally {
     if (state) state.updating = false;
   }
@@ -752,16 +891,14 @@ async function notifyWaiter(client, user, content) {
   }
 }
 
-// A posted list's options and page: from memory, or read off the message (Update button and footer)
-// after a restart. Null if neither works.
-async function listSettings(client, messageId) {
+// A posted list's options: from memory, or read off its header's Update button after a restart. Null
+// if neither works.
+async function listQuery(client, messageId) {
   const state = loadedLists.get(messageId);
-  if (state) return { query: state.view, page: state.page };
+  if (state) return state.view;
   try {
     const channel = await client.channels.fetch(ADMIN_LOG_CHANNEL_ID);
-    const message = await channel.messages.fetch(messageId);
-    const query = queryFromMessage(message);
-    return query ? { query, page: pageFromMessage(message) } : null;
+    return queryFromMessage(await channel.messages.fetch(messageId));
   } catch (err) {
     // 10008 Unknown Message: the list was deleted.
     if (err?.code !== 10008) console.warn(`[StaleMembers] Couldn't read list ${messageId}:`, err.message);
@@ -773,14 +910,13 @@ async function listSettings(client, messageId) {
 // DM, and a line for their private message). Null if there's no list.
 async function finishRefresh(refresh) {
   const { client, button } = refresh;
-  const targetId = readJson(DATA_FILE).messageId ?? refresh.messageId;
+  const targetId = savedList()?.header ?? refresh.messageId;
   if (!targetId) {
     console.log('[StaleMembers] Refresh finished, but there is no list to reload.');
     return null;
   }
-  const link = listLink(refresh.guildId, targetId);
-  const settings = await listSettings(client, targetId);
-  if (!settings) {
+  const query = await listQuery(client, targetId);
+  if (!query) {
     return {
       dm: 'WOM has finished updating, but the stale members list is gone. Run `/stalemembers` again to see the new data.',
       status: '✅ WOM finished updating, but the list is gone. Run `/stalemembers` again to see the new data.',
@@ -790,41 +926,29 @@ async function finishRefresh(refresh) {
   const checkedBy = refresh.requester ? checkedByMember(button) : checkedByAutoRefresh(refresh.source);
   let view;
   try {
-    view = await loadView(client, settings.query, checkedBy);
+    view = await loadView(client, query, checkedBy);
   } catch (err) {
     console.error(`[StaleMembers] Failed to reload list ${targetId} after a refresh:`, err);
     await notifyAdminLog(client, '⚠️ /stalemembers: Could not reload the list after a refresh', truncate(`Reloading the list from WOM failed: ${err.message}`, 4096));
     return {
-      dm: `WOM has finished updating, but the stale members list couldn't be reloaded (${err.message}). Press 🔄 **Update** on it to try again: ${link}`,
+      dm: `WOM has finished updating, but the stale members list couldn't be reloaded (${err.message}). ` +
+        `Press 🔄 **Update** on it to try again: ${listLink(refresh.guildId, targetId)}`,
       status: "⚠️ WOM finished updating, but the list couldn't be reloaded. Press 🔄 **Update** to try again.",
     };
   }
 
-  // The page it's on now, in case someone paged through it during the wait.
-  const page = loadedLists.get(targetId)?.page ?? settings.page;
-  const updated = { view, page: Math.min(page, pageCount(view) - 1) };
-  try {
-    if (button && targetId === refresh.messageId) {
-      // The Refresh press was acknowledged with deferUpdate, so its reply is still the list itself.
-      await button.editReply(render(updated));
-    } else {
-      // An automatic refresh, or a newer list than the one Refresh was pressed on: edit it directly.
-      const channel = await client.channels.fetch(ADMIN_LOG_CHANNEL_ID);
-      await channel.messages.edit(targetId, render(updated));
-    }
-  } catch (err) {
-    if (err?.code !== 10008) throw err;
-    // 10008 Unknown Message: the list was deleted while WOM was updating.
+  // Keeps each list's page as it is now, in case someone paged through it during the wait.
+  const ids = await showReloaded(client, targetId, view);
+  if (!ids) {
     console.log(`[StaleMembers] List ${targetId} was deleted during a refresh.`);
     return {
       dm: 'WOM has finished updating, but the stale members list was deleted. Run `/stalemembers` again to see the new data.',
       status: '✅ WOM finished updating, but the list was deleted. Run `/stalemembers` again to see the new data.',
     };
   }
-  rememberList(targetId, updated);
-  console.log(`[StaleMembers] Refreshed list ${targetId} (${checkedBy.name}).`);
+  console.log(`[StaleMembers] Refreshed list ${ids.header} (${checkedBy.name}).`);
   return {
-    dm: `The stale members list is updated with fresh WOM data: ${link}`,
+    dm: `The stale members list is updated with fresh WOM data: ${listLink(refresh.guildId, ids.header)}`,
     status: '✅ WOM finished updating and the list is updated.',
   };
 }
@@ -921,7 +1045,7 @@ async function refreshList(button, state) {
   };
 
   try {
-    // deferUpdate rather than a reply, so the list stays this interaction's message to edit later.
+    // Acknowledges the press without changing the list; the notice below is a private follow-up.
     await button.deferUpdate();
     const groupId = Number(process.env.WOM_GROUP_ID);
     let count;
@@ -976,7 +1100,7 @@ function autoRefresh(client, { groupId, count, source }) {
     console.log(`[StaleMembers] ${source} ran update all during a refresh, which will pick up the new data.`);
     return;
   }
-  if (!readJson(DATA_FILE).messageId) {
+  if (!savedList()) {
     console.log(`[StaleMembers] ${source} ran update all, but there is no list to refresh.`);
     return;
   }
@@ -996,9 +1120,9 @@ function autoRefresh(client, { groupId, count, source }) {
   scheduleFinish(activeRefresh);
 }
 
-// Loads the list and posts it in the admin log: as the interaction's reply when `asReply` (the
-// command run there), otherwise as a new message. Then replaces the previous list. Returns the
-// posted message, or null after passing the error to `onError`.
+// Loads the list and posts it in the admin log, with the header as the interaction's reply when
+// `asReply` (the command run there). Then replaces the previous list. Returns the list's message IDs,
+// or null after passing the error to `onError`.
 async function postList(interaction, query, { asReply, onError }) {
   let view;
   try {
@@ -1011,17 +1135,11 @@ async function postList(interaction, query, { asReply, onError }) {
   }
 
   // Kept until the bot restarts, so the buttons keep working with no time limit.
-  const state = { view, page: 0 };
-  let message;
+  const state = { view, pages: clampPages(view) };
   try {
-    if (asReply) {
-      message = await interaction.editReply(render(state));
-    } else {
-      const channel = await interaction.client.channels.fetch(ADMIN_LOG_CHANNEL_ID);
-      message = await channel.send(render(state));
-      console.log(`[StaleMembers] Posted list ${message.id} in the admin log for ${interaction.user.tag}.`);
-    }
-    rememberList(message.id, state);
+    state.ids = await sendList(interaction.client, state, asReply ? content => interaction.editReply(content) : null);
+    rememberList(state);
+    console.log(`[StaleMembers] Posted list ${state.ids.header} in the admin log for ${interaction.user.tag}.`);
   } catch (err) {
     console.error('[StaleMembers] Failed to send the list:', err);
     await reportError(interaction, 'Could not send the list', `Sending the stale member list failed: ${err.message}`);
@@ -1029,8 +1147,8 @@ async function postList(interaction, query, { asReply, onError }) {
     return null;
   }
   // Only once the new list is up, so a failed run leaves the old one in place.
-  await replaceOldLists(interaction.client, message.id);
-  return message;
+  await replaceOldLists(interaction.client, state.ids);
+  return state.ids;
 }
 
 // The private rank picker: a tick box of the group's ranks and a Run button, with the matching
@@ -1050,8 +1168,11 @@ function pickerMessage(query, ranks, emojis) {
       ...(emojis.has(role) ? { emoji: parseEmoji(emojis.get(role)) } : {}),
     })));
   const run = new ButtonBuilder().setCustomId(queryCustomId('run', query)).setLabel('▶ Run').setStyle(ButtonStyle.Primary);
+  // The closed tick box only shows emojis, so the ticked ranks are named here too.
+  const ticked = inRankOrder(query.ignoredRoles).map(role => (emojis.has(role) ? `${emojis.get(role)} ${rankName(role)}` : rankName(role)));
   return {
-    content: 'Tick the ranks to ignore, then press **▶ Run**. To skip this next time, copy the command:\n' +
+    content: `**Ignoring:** ${ticked.length ? ticked.join(', ') : 'none'}\n` +
+      'Tick the ranks to ignore, then press **▶ Run**. To skip this next time, copy the command:\n' +
       `\`${commandText(query)}\``,
     components: [new ActionRowBuilder().addComponents(select), new ActionRowBuilder().addComponents(run)],
   };
@@ -1102,13 +1223,13 @@ async function runFromPicker(button) {
   }
   await button.deferUpdate();
   console.log(`[StaleMembers] ${button.user.tag} ran the list from the rank picker (${commandText(query)}).`);
-  const message = await postList(button, query, {
+  const ids = await postList(button, query, {
     asReply: false,
     onError: content => button.followUp({ content, flags: MessageFlags.Ephemeral }).catch(() => {}),
   });
-  if (!message) return;
+  if (!ids) return;
   await button.editReply({
-    content: `📋 The stale members list was posted in <#${ADMIN_LOG_CHANNEL_ID}>: ${listLink(button.guildId, message.id)}\n` +
+    content: `📋 The stale members list was posted in <#${ADMIN_LOG_CHANNEL_ID}>: ${listLink(button.guildId, ids.header)}\n` +
       `To run it again, copy the command:\n\`${commandText(query)}\``,
     components: [],
   }).catch(err => console.warn(`[StaleMembers] Couldn't update ${button.user.tag}'s rank picker:`, err.message));
@@ -1123,30 +1244,35 @@ async function handleStaleMembersButton(button) {
     return;
   }
 
-  const action = button.customId.slice(BUTTON_PREFIX.length).split(':')[0];
-  const state = loadedLists.get(button.message.id);
+  // A list's own buttons name it: "next:inactive". Export all has none.
+  const [action, part] = button.customId.slice(BUTTON_PREFIX.length).split(':');
+  const section = SECTIONS.includes(part) ? part : null;
+  const state = findList(button.message.id);
   if (action === 'run') return runFromPicker(button);
   if (action === 'update') return updateList(button, state);
   if (action === 'refresh') return refreshList(button, state);
 
   // Prev, Next and Export need the list in memory, which Update reloads.
   if (!state) {
-    console.log(`[StaleMembers] ${button.user.tag} pressed ${action} on list ${button.message.id}, which isn't loaded.`);
+    console.log(`[StaleMembers] ${button.user.tag} pressed ${button.customId} on message ${button.message.id}, whose list isn't loaded.`);
+    // Only the header's Update button carries the options.
     const query = queryFromMessage(button.message);
     await button.reply({
-      content: 'This list has expired (the bot has restarted since it was posted). Press 🔄 **Update** to reload it' +
+      content: 'This list has expired (the bot has restarted since it was posted). Press 🔄 **Update** on the list to reload it' +
         (query ? `, or run it again:\n\`${commandText(query)}\`` : '.'),
       flags: MessageFlags.Ephemeral,
     });
     return;
   }
 
-  if (action === 'export') return exportList(button, state);
+  if (action === 'export') return exportList(button, state, section);
+  if (!section) return;
 
-  const totalPages = pageCount(state.view);
-  state.page = action === 'prev' ? Math.max(0, state.page - 1) : Math.min(totalPages - 1, state.page + 1);
-  console.log(`[StaleMembers] ${button.user.tag} moved list ${button.message.id} to page ${state.page + 1}/${totalPages}.`);
-  await button.update(render(state));
+  const totalPages = pageCount(state.view, section);
+  const page = state.pages[section];
+  state.pages[section] = action === 'prev' ? Math.max(0, page - 1) : Math.min(totalPages - 1, page + 1);
+  console.log(`[StaleMembers] ${button.user.tag} moved the ${section} list of ${state.ids.header} to page ${state.pages[section] + 1}/${totalPages}.`);
+  await button.update(renderSection(state, section));
 }
 
 module.exports = {
@@ -1269,9 +1395,9 @@ module.exports = {
       await interaction.followUp({ content, flags: MessageFlags.Ephemeral }).catch(() => {});
     };
 
-    const message = await postList(interaction, { months, minXp, ignoredRoles }, { asReply: inAdminLog, onError: failPrivately });
-    if (message && !inAdminLog) {
-      await interaction.editReply(`📋 The stale members list was posted in <#${ADMIN_LOG_CHANNEL_ID}>: ${listLink(interaction.guildId, message.id)}`)
+    const ids = await postList(interaction, { months, minXp, ignoredRoles }, { asReply: inAdminLog, onError: failPrivately });
+    if (ids && !inAdminLog) {
+      await interaction.editReply(`📋 The stale members list was posted in <#${ADMIN_LOG_CHANNEL_ID}>: ${listLink(interaction.guildId, ids.header)}`)
         .catch(err => console.warn(`[StaleMembers] Couldn't send ${interaction.user.tag} the link to the list:`, err.message));
     }
   },
