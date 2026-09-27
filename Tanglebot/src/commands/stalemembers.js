@@ -30,14 +30,14 @@ const { buildXlsx } = require('../utils/xlsx');
 const TEMPLAR_ROLE_ID = process.env.TEMPLAR_ROLE_ID;
 // Every list is posted here, wherever the command is run.
 const ADMIN_LOG_CHANNEL_ID = process.env.ADMIN_LOG_CHANNEL_ID;
-// { list: { header, inactive, lowXp } }, the newest list's message IDs, so the next run can delete it
-// even after a restart.
+// { list: { header, inactive, lowXp } }, the newest list's message IDs (without any empty list), so
+// the next run can delete it even after a restart.
 const DATA_FILE = 'stalemembers.json';
 // Every export is also saved here; only the newest few are kept.
 const EXPORT_DIR = path.join(DATA_DIR, 'stalemembers-exports');
 const EXPORT_PREFIX = 'stale-members-export-';
 const MAX_SAVED_EXPORTS = 5;
-// Each list is posted as its own message under the header message, in this order.
+// Each list with members is posted as its own message under the header message, in this order.
 const SECTIONS = ['inactive', 'lowXp'];
 // Members per page of each list. Well under Discord's 4096-character limit; truncate is the backstop.
 const PAGE_SIZE = 15;
@@ -78,8 +78,9 @@ function rankName(role) {
 let groupRanks = null; // { ranks, loadedAt }, the group's ranks in its own order
 let pendingRanks = null;
 let rankEmojis = null; // rank -> the bot's emoji for it, loaded once
-// Header message ID -> { view, ids, pages, updating } for each posted list: `ids` holds its three
-// message IDs ({ header, inactive, lowXp }) and `pages` each list's page. Lost on restart.
+// Header message ID -> { view, ids, pages, updating } for each posted list: `ids` holds its message
+// IDs ({ header, inactive, lowXp }, without any empty list) and `pages` each list's page. Lost on
+// restart.
 const loadedLists = new Map();
 // The refresh in progress, or null. One for the whole group, since update all covers everyone.
 // Started by a Refresh press (`requester`, `button`) or another feature's update all (`source`);
@@ -336,6 +337,11 @@ function sectionTitle(section, view) {
   return `${section === 'inactive' ? '😴' : '📉'} ${sectionName(section, view)}`;
 }
 
+// The lists with anyone in them, in posting order. Only these get a message.
+function shownSections(view) {
+  return SECTIONS.filter(section => view.sections[section].length > 0);
+}
+
 function pageCount(view, section) {
   return Math.max(1, Math.ceil(view.sections[section].length / PAGE_SIZE));
 }
@@ -354,7 +360,7 @@ function canRefresh() {
 // text).
 function buildHeader(view) {
   const {
-    listed, inactiveCount, closeCount, lowXpCount, checked, ignored, joinedRecently, ignoredRoles, groupRoles, months, minXp, startMs, untracked, emojis,
+    listed, sections, inactiveCount, closeCount, lowXpCount, checked, ignored, joinedRecently, ignoredRoles, groupRoles, months, minXp, startMs, untracked, emojis,
   } = view;
 
   // Only ranks the group uses; ignoring any other changes nothing.
@@ -376,27 +382,32 @@ function buildHeader(view) {
   ];
 
   const xp = `**${formatXp(minXp)} XP**`;
-  const result = [
-    listed.length === 0
-      ? `All **${checked}** members checked were active and gained at least ${xp}.`
-      : `Of **${checked}** members checked (each list below is longest inactive first):`,
-    ...(listed.length > 0
-      ? [`**${inactiveCount}** ${inactiveCount === 1 ? "hasn't" : "haven't"} been active in ${plural(months, 'month')}.`]
-      : []),
+  // An empty list isn't posted, so its line here says so.
+  const everyone = checked === 1 ? 'The **1** member checked was' : `All **${checked}** members checked were`;
+  const none = checked === 0
+    ? 'No members were checked, so there are no lists.'
+    : `${everyone} active and gained at least ${xp}, so there are no lists.`;
+  const result = listed.length === 0 ? [none] : [
+    `Of **${checked}** ${checked === 1 ? 'member' : 'members'} checked (${shownSections(view).length === 1 ? 'the list below is' : 'each list below is'} longest inactive first):`,
+    sections.inactive.length > 0
+      ? `**${inactiveCount}** ${inactiveCount === 1 ? "hasn't" : "haven't"} been active in ${plural(months, 'month')}.`
+      : `Nobody has been inactive for ${plural(months, 'month')}, so that list is empty.`,
     ...(closeCount > 0
       ? [`**${closeCount}** ${closeCount === 1 ? 'is' : 'are'} close (⌛): inactive for at least ` +
         `${formatDuration(startMs + CLOSE_MS, view.now)}. ⌛ shows when they reach ${plural(months, 'month')}.`]
       : []),
-    ...(listed.length > 0
-      ? [`**${lowXpCount}** ${lowXpCount === 1 ? 'was' : 'were'} active more recently, but gained less than ${xp}.`]
-      : []),
+    sections.lowXp.length > 0
+      ? `**${lowXpCount}** ${lowXpCount === 1 ? 'was' : 'were'} active more recently, but gained less than ${xp}.`
+      : `Nobody active more recently gained less than ${xp}, so that list is empty.`,
+  ];
+  result.push(
     ...(untracked > 0
       ? [`${untracked} member${untracked === 1 ? ' has' : 's have'} no WOM data in this window and count as 0 XP.`]
       : []),
     ...(joinedRecently > 0
       ? [`${plural(joinedRecently, 'member')} joined the WOM group in the last ${plural(months, 'month')} and ${joinedRecently === 1 ? "isn't" : "aren't"} checked.`]
       : []),
-  ];
+  );
 
   // Only the markers the lists use.
   const legend = MARKERS
@@ -404,11 +415,11 @@ function buildHeader(view) {
     .map(marker => `${marker.emoji} ${marker.legend}`);
 
   const buttons = [
-    "🔄 **Update** reloads both lists with WOM's latest data.",
+    "🔄 **Update** reloads the lists with WOM's latest data.",
     ...(canRefresh()
       ? [`🔃 **Refresh WOM** has WOM re-check everyone's hiscores first, then updates the lists in about ${REFRESH_WAIT_MS / 60000} minutes and DMs you.`]
       : []),
-    '📄 **Export all** sends you both lists as a spreadsheet, one tab each. Each list has its own ◀ ▶ pages and 📄 **Export**.',
+    '📄 **Export all** sends you the lists as a spreadsheet, one tab each. Each list has its own ◀ ▶ pages and 📄 **Export**.',
   ];
 
   return [options, result, ...(legend.length > 0 ? [legend] : []), buttons].map(lines => lines.join('\n')).join('\n\n');
@@ -427,16 +438,9 @@ function buildSectionEmbed(view, section, page) {
   const totalPages = pageCount(view, section);
   const start = page * PAGE_SIZE;
   const rows = all.slice(start, start + PAGE_SIZE).map((row, i) => formatRow(row, start + i, view));
-  if (rows.length === 0) {
-    rows.push(section === 'inactive'
-      ? `Nobody has been inactive for ${plural(view.months, 'month')}.`
-      : `Nobody active more recently gained less than ${formatXp(view.minXp)} XP.`);
-  }
-  // Pads the last page to the same height so the buttons don't move. Discord trims trailing empty
-  // lines, so each pad is a zero-width space.
-  if (totalPages > 1 && page === totalPages - 1) {
-    while (rows.length < PAGE_SIZE) rows.push('\u200b');
-  }
+  // Pads every page to PAGE_SIZE lines, so both lists and all their pages are the same height and
+  // the buttons don't move. Discord trims trailing empty lines, so each pad is a zero-width space.
+  while (rows.length < PAGE_SIZE) rows.push('\u200b');
   return new EmbedBuilder()
     .setColor(DEFAULT_EMBED_COLOR)
     .setTitle(sectionTitle(section, view))
@@ -498,12 +502,10 @@ function isOlder(id, than) {
   return BigInt(id) < BigInt(than);
 }
 
-// The newest list's message IDs from the data file, or null. A saved `messageId` is a list posted as
-// one message, so only its header is known.
+// The newest list's message IDs from the data file, or null.
 function savedList() {
-  const data = readJson(DATA_FILE);
-  if (data.list?.header) return data.list;
-  return data.messageId ? { header: data.messageId } : null;
+  const { list } = readJson(DATA_FILE);
+  return list?.header ? list : null;
 }
 
 // Every message of a list, header first.
@@ -571,7 +573,8 @@ function headerButtons({ view }) {
   );
 }
 
-// Prev, Next and Export under a list, each naming the list in its custom ID.
+// Prev, Next and Export under a list, each naming the list in its custom ID. Only lists with members
+// are posted, so Export always has something to send.
 function sectionButtons({ view, pages }, section) {
   const page = pages[section];
   const totalPages = pageCount(view, section);
@@ -590,7 +593,6 @@ function sectionButtons({ view, pages }, section) {
       .setCustomId(`${BUTTON_PREFIX}export:${section}`)
       .setLabel('📄 Export')
       .setStyle(ButtonStyle.Success)
-      .setDisabled(view.sections[section].length === 0)
   );
 }
 
@@ -671,11 +673,11 @@ function saveExport(name, file) {
   });
 }
 
-// Sends one list, or with no `section` both as a tab each, as a spreadsheet, privately to whoever
-// pressed Export, and keeps a copy on the bot.
+// Sends one list, or with no `section` every list with members as a tab each, as a spreadsheet,
+// privately to whoever pressed Export, and keeps a copy on the bot.
 async function exportList(button, state, section) {
   const { view } = state;
-  const sections = section ? [section] : SECTIONS;
+  const sections = section ? [section] : shownSections(view);
   const exportedAt = Date.now();
   const exportedBy = memberName(button);
   const file = buildXlsx(sections.map(s => exportSheet(view, s, { exportedBy, exportedAt })));
@@ -689,9 +691,9 @@ async function exportList(button, state, section) {
     saved = false;
     console.error(`[StaleMembers] Couldn't save export ${name}:`, err.message);
   }
-  console.log(`[StaleMembers] ${button.user.tag} exported ${section ?? 'both lists'} from list ${state.ids.header} (${count}) as ${name}.`);
+  console.log(`[StaleMembers] ${button.user.tag} exported ${sections.join(' and ')} from list ${state.ids.header} (${count}) as ${name}.`);
 
-  const what = section ? `${count} from the ${sectionTitle(section, view)} list` : `Both lists (${count}), one tab each`;
+  const what = sections.length === 1 ? `${count} from the ${sectionTitle(sections[0], view)} list` : `Both lists (${count}), one tab each`;
   await button.reply({
     content: `${what}, checked ${discordTimestamp(view.now, 'f')}. Opens in Excel or Google Sheets. ` +
       (saved ? `A copy is saved on the bot (the last ${MAX_SAVED_EXPORTS} are kept).` : "Couldn't save a copy on the bot."),
@@ -723,8 +725,8 @@ function rememberList(state) {
 }
 
 // Posts a list in the admin log: the header (through `postHeader` when given, e.g. as the command's
-// reply), then each list under it. If any part fails, deletes what was posted and throws. Returns the
-// message IDs.
+// reply), then each list with members under it. If any part fails, deletes what was posted and
+// throws. Returns the message IDs.
 async function sendList(client, state, postHeader) {
   const channel = await client.channels.fetch(ADMIN_LOG_CHANNEL_ID);
   const posted = [];
@@ -732,7 +734,7 @@ async function sendList(client, state, postHeader) {
     const header = postHeader ? await postHeader(renderHeader(state)) : await channel.send(renderHeader(state));
     posted.push(header.id);
     const ids = { header: header.id };
-    for (const section of SECTIONS) {
+    for (const section of shownSections(state.view)) {
       ids[section] = (await channel.send(renderSection(state, section))).id;
       posted.push(ids[section]);
     }
@@ -748,13 +750,14 @@ async function editList(client, state) {
   const channel = await client.channels.fetch(ADMIN_LOG_CHANNEL_ID);
   await Promise.all([
     channel.messages.edit(state.ids.header, renderHeader(state)),
-    ...SECTIONS.map(section => channel.messages.edit(state.ids[section], renderSection(state, section))),
+    ...shownSections(state.view).map(section => channel.messages.edit(state.ids[section], renderSection(state, section))),
   ]);
 }
 
-// Shows reloaded data on a posted list, keeping each list's page. If only its header is known (a
-// list posted as one message), it's posted again in its place. Returns the list's message IDs, or
-// null if it was deleted or a newer list replaced it.
+// Shows reloaded data on a posted list, keeping each list's page. When a list emptied or gained
+// members, or its list messages aren't known (not in memory or the data file), it's posted again in
+// its place, so the lists stay in order under the header. Returns the list's message IDs, or null if
+// it was deleted or a newer list replaced it.
 async function showReloaded(client, headerId, view) {
   const old = loadedLists.get(headerId);
   const saved = savedList();
@@ -762,7 +765,8 @@ async function showReloaded(client, headerId, view) {
   const ids = old?.ids ?? (saved?.header === headerId ? saved : { header: headerId });
   const state = { view, ids, pages: clampPages(view, old?.pages) };
 
-  if (SECTIONS.every(section => ids[section])) {
+  // Every list with members has a message, and no other list does.
+  if (SECTIONS.every(section => Boolean(ids[section]) === view.sections[section].length > 0)) {
     try {
       await editList(client, state);
     } catch (err) {
@@ -1359,7 +1363,7 @@ module.exports = {
       return reject('You need the Templar role to use this command.');
     }
 
-    // At least 1: with 0 nobody could gain less, so the list would always be empty.
+    // At least 1: with 0 nobody could gain less, so the low XP list would always be empty.
     const minXp = parseXp(minXpInput);
     if (minXp === null || minXp < 1) {
       return reject(`\`${minXpInput}\` isn't a valid XP amount. Use a number of at least 1, like \`250000\`, \`250k\` or \`1.5m\`.`);
