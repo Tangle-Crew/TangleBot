@@ -99,20 +99,38 @@ function findExistingStartThread(threads, botUserId) {
   return threads.find((t) => t.ownerId === botUserId && t.name === START_POST_TITLE) ?? null;
 }
 
-// Last resort: a forum allows only one pinned post, so reuse the one already pinned.
-function findAnyPinnedThread(threads) {
-  return threads.find((t) => t.flags?.has(ChannelFlags.Pinned)) ?? null;
+// Last resort: a pinned post of the bot's own, e.g. the start page under an old title. Posts by
+// anyone else are left alone, since the bot can't edit them.
+function findOwnPinnedThread(threads, botUserId) {
+  return threads.find((t) => t.ownerId === botUserId && t.flags?.has(ChannelFlags.Pinned)) ?? null;
 }
 
-// Creates and pins the start post and stores its id.
-async function createStartPost(forumChannel, embeds) {
+// Pins the start post if it isn't already. A forum allows only one pinned post, so this fails if
+// another post has the slot; that's reported rather than treated as the whole setup failing.
+async function pinStartPost(client, thread) {
+  if (thread.flags?.has(ChannelFlags.Pinned)) return;
+  try {
+    await thread.pin();
+  } catch (err) {
+    console.error('[LFG] Could not pin the LFG start page post:', err.message);
+    await notifyAdminLog(
+      client,
+      '⚠️ LFG Start Page Not Pinned',
+      `<#${thread.id}> is the LFG start page but couldn't be pinned: ${err.message}. A forum can only have one pinned post, so unpin the other one and pin this one.`
+    );
+  }
+}
+
+// Creates and pins the start post. Its id is stored first, so a failed pin doesn't lead to a
+// second post on the next restart.
+async function createStartPost(client, forumChannel, embeds) {
   const thread = await forumChannel.threads.create({
     name: START_POST_TITLE,
     message: { embeds },
   });
-  await thread.pin();
   writeJson(START_POST_DATA_FILE, { threadId: thread.id });
   console.log(`[LFG] Created start page post: thread ${thread.id}`);
+  await pinStartPost(client, thread);
 }
 
 // Called on startup: updates the existing start post, or creates one.
@@ -135,7 +153,7 @@ async function ensureLfgStartPost(client) {
     const threads = await fetchAllThreads(forumChannel);
     thread = findExistingStartThread(threads, client.user.id);
     if (!thread) {
-      thread = findAnyPinnedThread(threads);
+      thread = findOwnPinnedThread(threads, client.user.id);
       adopted = Boolean(thread);
     }
   }
@@ -146,14 +164,14 @@ async function ensureLfgStartPost(client) {
     try {
       if (thread.archived) await thread.setArchived(false);
       await thread.messages.edit(thread.id, { embeds });
-      if (!thread.flags?.has(ChannelFlags.Pinned)) await thread.pin();
       writeJson(START_POST_DATA_FILE, { threadId: thread.id });
+      await pinStartPost(client, thread);
       if (adopted) {
-        console.log(`[LFG] Adopted the already-pinned thread as the LFG start page: ${thread.id}`);
+        console.log(`[LFG] Adopted the bot's pinned thread as the LFG start page: ${thread.id}`);
         await notifyAdminLog(
           client,
           'ℹ️ LFG Start Page Adopted an Existing Pinned Post',
-          `The forum's pin slot was already taken, so <#${thread.id}> was turned into the LFG start page instead of creating a new post. Its replies were left as-is — only the starter message changed.`
+          `The start page post couldn't be found, so the bot's pinned post <#${thread.id}> was turned into the LFG start page instead of creating a new one. Its replies were left as-is — only the starter message changed.`
         );
       }
       return;
@@ -169,7 +187,7 @@ async function ensureLfgStartPost(client) {
   }
 
   try {
-    await createStartPost(forumChannel, embeds);
+    await createStartPost(client, forumChannel, embeds);
   } catch (err) {
     console.error('[LFG] Could not create LFG start page post:', err.message);
     await notifyAdminLog(client, '⚠️ LFG Start Page Creation Failed', `Failed to create the LFG start page post: ${err.message}`);
