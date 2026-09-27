@@ -18,4 +18,8 @@
 - Replaced the previous list whenever the command is run again, tracked in `data/stalemembers.json` so it survives restarts, and kept Update and Refresh working on lists posted before a restart.
 - Hooked `/stalemembers` into `src/handlers/eventHandler.js` to route its buttons and start it on startup.
 - Documented `/stalemembers` in the README.
+- Made `ignore` optional: leaving it empty privately shows a tick box of the clan's ranks with their emojis and a Run button, showing the matching command with `ignore` filled in to copy for next time.
+- Showed ignored ranks in the clan's rank order in the copyable command and on page 1.
+- Routed the rank picker's menu through `src/handlers/eventHandler.js`.
+- Documented the rank picker in the README.
 - Verified the changes with `node --check` and scripted tests against the live WOM group, with Discord interactions and WOM's update all simulated.
