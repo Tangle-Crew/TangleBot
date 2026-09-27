@@ -55,7 +55,10 @@ const DONATION_LOCK_KEY = 'donations-sheet';
 
 // Parses "300M", "10.1m", "75,000,000", etc. Returns null if unreadable.
 function parseDonationAmount(raw) {
-  const str = String(raw).trim().toUpperCase().replace(/,/g, '');
+  const input = String(raw).trim().toUpperCase();
+  // Commas only as thousands separators, so a decimal comma like "1,5m" is rejected, not read as 15m.
+  if (input.includes(',') && !/^\d{1,3}(,\d{3})+(\.\d+)?[KMBT]?$/.test(input)) return null;
+  const str = input.replace(/,/g, '');
   // At most one decimal point, so typos like "1.2.3m" or "1.500.000" are rejected, not misread.
   const m = str.match(/^(\d+(?:\.\d+)?)([KMBT]?)$/);
   if (!m) return null;
