@@ -17,6 +17,7 @@ const {
 const { ensureLfgStartPost } = require('../utils/lfgStartPage');
 const { refreshLeaderboard: refreshPetLeaderboard } = require('../commands/pethighscore');
 const { refreshLeaderboard: refreshDonationLeaderboard } = require('../commands/donationhighscore');
+const { handleStaleMembersButton, start: startStaleMembers } = require('../commands/stalemembers');
 const { syncDiscordCatalog, isConfigured: isLfgBackendConfigured } = require('../utils/lfgBackend');
 const { startLfgDeliveryWorker } = require('../utils/lfgDeliveryWorker');
 const { startCompEndingReminder } = require('../utils/compEndingReminder');
@@ -29,6 +30,7 @@ const BUTTON_ROUTES = [
   { prefix: 'roles:', handler: handleRoleMenuButtonInteraction, errorLabel: '[LFG] Role menu button interaction error:', errorReply: 'Something went wrong updating your roles.' },
   { prefix: 'lfgpostgroup:', handler: handleLfgPostGroupButtonInteraction, errorLabel: '[LFG] Post group button interaction error:', errorReply: 'Something went wrong updating that group.' },
   { prefix: 'lfgsyncgroup:', handler: handleSyncedGroupButtonInteraction, errorLabel: '[LFG] Synced group button interaction error:', errorReply: 'Something went wrong updating that shared LFG group.' },
+  { prefix: 'stalemembers:', handler: handleStaleMembersButton, errorLabel: '[StaleMembers] Button interaction error:', errorReply: 'Something went wrong with that stale members list.' },
 ];
 const SELECT_ROUTES = [
   { prefix: 'lfgpost:', handler: handleLfgPostSelectInteraction, errorLabel: '[LFG] Post select interaction error:', errorReply: 'Something went wrong updating your LFG post setup.' },
@@ -68,6 +70,8 @@ function loadEvents(client) {
     } catch (err) {
       console.error('[Commands] Failed to sync slash commands:', err);
     }
+    // Preloads ranks in the background and listens for update all; never throws.
+    if (client.commands.has('stalemembers')) startStaleMembers(client);
     // Early, so buttons on existing LFG posts work again as soon as possible.
     try {
       await restoreLfgGroups(client);
