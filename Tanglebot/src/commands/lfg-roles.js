@@ -10,7 +10,7 @@ const {
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('lfg-roles')
-    .setDescription('Get your private LFG Roles menu (Bosses / Raids)'),
+    .setDescription('Get your private LFG Roles menu (Bosses / Raids / Minigames)'),
 
   async execute(interaction) {
     console.log(`[LFG] /lfg-roles invoked by ${interaction.user.username}`);

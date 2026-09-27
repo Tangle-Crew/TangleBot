@@ -61,5 +61,6 @@ const rest = new REST().setToken(discordBotToken);
       );
     }
     console.error(err);
+    process.exitCode = 1;
   }
 })();
