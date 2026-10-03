@@ -266,6 +266,48 @@ Point `LFG_FORUM_CHANNEL_ID` at a Forum Channel. The bot needs **Manage Threads*
 
 ---
 
+### 🔗 `/link` and `/linkalt` — Verified Clan Account Linking
+
+Associates the Discord member running the command with an active account in the clan Wise Old Man roster.
+
+| Command | Description |
+|---|---|
+| `/link rsn:<name>` | Links the RSN as the member's primary account. |
+| `/linkalt rsn:<name>` | Adds the RSN to the member's existing profile as an alternate account. A primary link must exist first. |
+
+Both commands reply privately with a single-use website confirmation link that expires after 15 minutes. The user must sign into the existing clan website with the same Discord account that ran the command. Typing an RSN alone never transfers ownership. Accounts already associated with another Discord ID are rejected and must be corrected by an administrator.
+
+<details>
+<summary><strong>Environment variables</strong></summary>
+
+| Variable | Required | Description |
+|---|---|---|
+| `SUPABASE_URL` | Yes | Existing Supabase project URL. |
+| `SUPABASE_SERVICE_ROLE_KEY` | Yes | Server-only key used to create a Discord-bound challenge. Never expose this in the website. |
+| `CLAN_WEBSITE_URL` | No | Website origin used in the confirmation link. Defaults to `https://tanglecrew.group`. |
+
+</details>
+
+The commands load only when both required Supabase variables are present. The database migration `20260917140000_add_verified_clan_account_linking.sql` and the matching website deployment are required before enabling them.
+
+---
+
+### 📋 `/rankreview` — Rank Review Summary
+
+Generates the administrator-facing “Members requiring rank review this week” Discord summary from rules configured in `/admin/roster`. It includes the current and recommended ranks, clan tenure, and time in the current rank. Recommendations never change ranks automatically.
+
+The command requires **Manage Server**, uses the same `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`, and supports a `private` option. The database migration `20260917150000_add_configurable_rank_reviews.sql` is required.
+
+---
+
+### 👥 `/gimrolesync` — Group Ironman Roles
+
+Synchronizes optional Discord roles configured for GIM groups in `/admin/roster`. The command adds the desired GIM role and removes other configured GIM roles from each Discord-linked active member, so moving or removing a member is reflected cleanly.
+
+The command requires **Manage Roles**, replies privately with an update/error summary, and never creates or deletes Discord roles. The bot's own Discord role must sit above every configured GIM role. It uses the existing Supabase server credentials and requires `20260917160000_add_clan_gim_groups.sql`.
+
+---
+
 ### 🧾 `/submission` — Proof Submission Help
 
 | Subcommand | Description |
