@@ -1,3 +1,4 @@
+const { commandDisabledReason } = require('./utils/commandAvailability');
 require('dotenv').config({ quiet: true });
 const { REST, Routes } = require('discord.js');
 const fs = require('fs');
@@ -21,16 +22,9 @@ for (const file of fs.readdirSync(commandsPath).filter(f => f.endsWith('.js'))) 
   const command = require(path.join(commandsPath, file));
   if (!command.data) continue;
 
-  if (command.requiredEnv) {
-    const missing = command.requiredEnv.filter(k => !process.env[k]);
-    if (missing.length > 0) {
-      console.log(`[Deploy] Skipping /${command.data.name}: missing env var(s): ${missing.join(', ')}`);
-      continue;
-    }
-  }
-
-  if (command.requiredEnvAny && !command.requiredEnvAny.some(k => process.env[k])) {
-    console.log(`[Deploy] Skipping /${command.data.name}: none of the env var(s) set: ${command.requiredEnvAny.join(', ')}`);
+  const disabledReason = commandDisabledReason(command);
+  if (disabledReason) {
+    console.log(`[Deploy] Skipping /${command.data.name}: ${disabledReason}`);
     continue;
   }
 

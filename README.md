@@ -266,6 +266,49 @@ Point `LFG_FORUM_CHANNEL_ID` at a Forum Channel. The bot needs **Manage Threads*
 
 ---
 
+### 🔗 `/link` and `/linkalt` — Verified Clan Account Linking
+
+Associates the Discord member running the command with an active account in the clan Wise Old Man roster.
+
+| Command | Description |
+|---|---|
+| `/link rsn:<name>` | Links the RSN as the member's primary account. |
+| `/linkalt rsn:<name>` | Adds the RSN to the member's existing profile as an alternate account. A primary link must exist first. |
+
+Both commands reply privately with a single-use website confirmation link that expires after 15 minutes. The user must sign into the existing clan website with the same Discord account that ran the command. Typing an RSN alone never transfers ownership. Accounts already associated with another Discord ID are rejected and must be corrected by an administrator.
+
+<details>
+<summary><strong>Environment variables</strong></summary>
+
+| Variable | Required | Description |
+|---|---|---|
+| `SUPABASE_URL` | Yes | Existing Supabase project URL. |
+| `SUPABASE_SERVICE_ROLE_KEY` | Yes | Server-only key used to create a Discord-bound challenge. Never expose this in the website. |
+| `CLAN_ROSTER_COMMANDS_ENABLED` | Yes | Set to `true` after applying all three roster migrations and deploying the website. Defaults off. |
+| `CLAN_WEBSITE_URL` | No | Website origin used in the confirmation link. Defaults to `https://tanglecrew.group`. |
+
+</details>
+
+All four roster commands load/register only when both Supabase variables are present and `CLAN_ROSTER_COMMANDS_ENABLED=true`. Values such as `false` do not enable them. Run `npm run deploy` and restart after enabling. Blank or whitespace-only `CLAN_WEBSITE_URL` values use the default website. The database migration `20260917140000_add_verified_clan_account_linking.sql` and the matching website deployment are required before enabling them.
+
+---
+
+### 📋 `/rankreview` — Rank Review Summary
+
+Generates the administrator-facing “Members requiring rank review this week” Discord summary from rules configured in `/admin/roster`. It includes the current and recommended ranks, clan tenure, and time in the current rank. Recommendations never change ranks automatically.
+
+The command requires **Manage Server**, uses the same `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`, and defaults to a private reply. Set `private:false` explicitly to publish the report in the current channel. The database migration `20260917150000_add_configurable_rank_reviews.sql` is required.
+
+---
+
+### 👥 `/gimrolesync` — Group Ironman Roles
+
+Synchronizes configured GIM roles against the complete plan. One bulk member fetch includes existing role holders, so former, inactive, or unlinked roster members lose stale GIM roles. Assignments for the same Discord identity are merged: main/alt accounts in different groups retain all assigned GIM roles, without changing unrelated roles. Invalid Discord IDs are reported and skipped. Missing permissions, uneditable roles, and failed changes are reported rather than counted as already correct. A time budget stops additional work before the interaction expires and reports remaining members for another run.
+
+The command requires **Manage Roles**, replies privately with an update/error summary, and never creates or deletes Discord roles. The bot needs Manage Roles, the Server Members intent, and a role above every configured GIM role. `CLAN_ROSTER_COMMANDS_ENABLED=true` is required. It uses the existing Supabase server credentials and requires `20260917160000_add_clan_gim_groups.sql`.
+
+---
+
 ### 🧾 `/submission` — Proof Submission Help
 
 | Subcommand | Description |
@@ -601,3 +644,11 @@ To run with Docker instead, use `docker compose up -d --build` from the repo roo
 ## License
 
 [MIT](LICENSE)
+
+### PR review regression checks
+
+Run `cd Tanglebot && npm test` with Node 20 or newer. These offline tests use mocked Discord and Supabase clients; no roles, messages, or live accounts are changed. They cover role cleanup, duplicate identities, missing IDs, permission failures, private defaults, command opt-in, URL fallback, safe errors, phase aliases, and image-only intake signaling.
+
+Submission intake accepts `Start`/`Starting` and `End`/`Ending`, including `Start or End:` and `Phase:` labels. Ordinary `Drop:`/`Boss:` chat without an image is ignored. Complete KC or drop submission text in a configured proof channel gets a missing-photo reminder; proof still requires exactly one image. The matching website intake supports loose task/item/monster matching and either task or monster names; its deployment was confirmed by the operator during the PR review. These review fixes require no new website Edge Function or database migration. Keep backend deployment ahead of bot rollout when installing elsewhere.
+
+Linking commands display known actionable account-validation messages from HTTP 400 / `P0001` responses. Authentication, server, and unexpected database errors stay private, and each service failure is logged once. GIM synchronization only checks editability for roles that actually need adding/removing, and overlapping runs receive an explicit already-running reply.
