@@ -1,5 +1,6 @@
 const { EmbedBuilder, MessageFlags, PermissionFlagsBits, SlashCommandBuilder } = require('discord.js');
 const { callServiceRpc } = require('../utils/clanAccountLink');
+const { logClanError } = require('../utils/clanErrors');
 
 const CATEGORY_LABELS = {
   potential_rank_up: 'Potential rank-up review',
@@ -8,6 +9,7 @@ const CATEGORY_LABELS = {
 };
 
 module.exports = {
+  requiredFeature: 'CLAN_ROSTER_COMMANDS_ENABLED',
   requiredEnv: ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'],
 
   data: new SlashCommandBuilder()
@@ -19,7 +21,7 @@ module.exports = {
       .setDescription('Show the summary only to you instead of posting it in this channel')),
 
   async execute(interaction) {
-    const privateReply = interaction.options.getBoolean('private') ?? false;
+    const privateReply = interaction.options.getBoolean('private') ?? true;
     await interaction.deferReply({ flags: privateReply ? MessageFlags.Ephemeral : undefined });
 
     try {
@@ -51,7 +53,8 @@ module.exports = {
 
       await interaction.editReply({ embeds: [embed] });
     } catch (error) {
-      await interaction.editReply({ content: error?.response?.data?.message ?? error?.message ?? 'Unable to generate rank reviews.' });
+      logClanError('/rankreview', error);
+      await interaction.editReply({ content: 'Unable to generate rank reviews. Please contact an administrator.' });
     }
   },
 };

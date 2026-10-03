@@ -1,10 +1,12 @@
 const axios = require('axios');
+const { normalizeBaseUrl } = require('./baseUrl');
+const { logClanError } = require('./clanErrors');
 
 function getConfig(env = process.env) {
   return {
-    supabaseUrl: (env.SUPABASE_URL ?? '').trim().replace(/\/+$/, ''),
+    supabaseUrl: normalizeBaseUrl(env.SUPABASE_URL),
     serviceRoleKey: (env.SUPABASE_SERVICE_ROLE_KEY ?? '').trim(),
-    websiteUrl: (env.CLAN_WEBSITE_URL ?? 'https://tanglecrew.group').trim().replace(/\/+$/, ''),
+    websiteUrl: normalizeBaseUrl(env.CLAN_WEBSITE_URL) || 'https://tanglecrew.group',
   };
 }
 
@@ -36,10 +38,8 @@ async function createAccountLinkChallenge({ discordUserId, rsn, linkKind }, env 
       linkKind: challenge.link_kind,
     };
   } catch (error) {
-    const backendMessage = error?.response?.data?.message
-      ?? error?.response?.data?.error
-      ?? error?.message;
-    throw new Error(backendMessage || 'Unable to start account linking.');
+    logClanError('create account link challenge', error, env);
+    throw new Error('Unable to start account linking. Please contact an administrator.');
   }
 }
 
@@ -49,15 +49,20 @@ async function callServiceRpc(name, body = {}, env = process.env) {
     throw new Error('The clan roster service is not configured on this bot.');
   }
 
-  const response = await axios.post(`${config.supabaseUrl}/rest/v1/rpc/${name}`, body, {
-    timeout: 10_000,
-    headers: {
-      apikey: config.serviceRoleKey,
-      Authorization: `Bearer ${config.serviceRoleKey}`,
-      'Content-Type': 'application/json',
-    },
-  });
-  return response.data;
+  try {
+    const response = await axios.post(`${config.supabaseUrl}/rest/v1/rpc/${name}`, body, {
+      timeout: 10_000,
+      headers: {
+        apikey: config.serviceRoleKey,
+        Authorization: `Bearer ${config.serviceRoleKey}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    return response.data;
+  } catch (error) {
+    logClanError(`RPC ${name}`, error, env);
+    throw new Error('The clan service is unavailable. Please contact an administrator.');
+  }
 }
 
 module.exports = { callServiceRpc, createAccountLinkChallenge, getConfig };

@@ -119,7 +119,8 @@ function parseSubmissionBody(content) {
     }
 
     if (/^(?:starting or ending|start or end|phase)$/.test(label)) {
-      const normalizedValue = normalizeLabel(value);
+      const phaseValue = normalizeLabel(value);
+      const normalizedValue = { start: 'starting', end: 'ending' }[phaseValue] ?? phaseValue;
       if (normalizedValue === 'starting' || normalizedValue === 'ending') {
         result.phase = normalizedValue;
       }
@@ -306,20 +307,12 @@ function saveLastAcceptedSubmission({ attachment, eventId, isDrop, message, pars
   return submission;
 }
 
-function hasSubmissionSignal(message, parsed) {
-  const hasImageAttachment = [...message.attachments.values()]
-    .some(attachment => attachment.contentType?.startsWith('image/'));
-
-  return hasImageAttachment
-    || !!parsed.taskName
-    || !!parsed.monsterName
-    || !!parsed.itemDropped
-    || !!parsed.phase
-    || parsed.kcValue !== null;
-}
-
 async function handleSubmissionMessage(message, config) {
   if (!config.enabled || message.author.bot) return;
+  // Ignore ordinary chat before routing or replying; proof always needs a photo.
+  const imageAttachments = [...message.attachments.values()]
+    .filter(attachment => attachment.contentType?.startsWith('image/'));
+  if (imageAttachments.length === 0) return;
 
   let eventId;
   try {
@@ -332,7 +325,6 @@ async function handleSubmissionMessage(message, config) {
   if (!eventId) return;
 
   const parsed = parseSubmissionBody(message.content);
-  if (!hasSubmissionSignal(message, parsed)) return;
 
   const isKc = isKcSubmission(parsed);
   const isDrop = isDropSubmission(parsed);
@@ -341,8 +333,6 @@ async function handleSubmissionMessage(message, config) {
     return;
   }
 
-  const imageAttachments = [...message.attachments.values()]
-    .filter(attachment => attachment.contentType?.startsWith('image/'));
   if (imageAttachments.length !== 1) {
     await message.reply(buildResubmitMessage('Your submission must include exactly one image attachment showing the KC or drop proof.'));
     return;

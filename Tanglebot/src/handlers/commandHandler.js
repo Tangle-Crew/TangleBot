@@ -1,3 +1,4 @@
+const { commandDisabledReason } = require('../utils/commandAvailability');
 const fs = require('fs');
 const path = require('path');
 const { REST, Routes } = require('discord.js');
@@ -10,16 +11,9 @@ function loadCommands(client) {
     const command = require(path.join(commandsPath, file));
     if (!command.data || !command.execute) continue;
 
-    if (command.requiredEnv) {
-      const missing = command.requiredEnv.filter(k => !process.env[k]);
-      if (missing.length > 0) {
-        console.log(`[Commands] Skipping /${command.data.name}: missing env var(s): ${missing.join(', ')}`);
-        continue;
-      }
-    }
-
-    if (command.requiredEnvAny && !command.requiredEnvAny.some(k => process.env[k])) {
-      console.log(`[Commands] Skipping /${command.data.name}: none of the env var(s) set: ${command.requiredEnvAny.join(', ')}`);
+    const disabledReason = commandDisabledReason(command);
+    if (disabledReason) {
+      console.log(`[Commands] Skipping /${command.data.name}: ${disabledReason}`);
       continue;
     }
 

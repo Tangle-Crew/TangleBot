@@ -1,9 +1,7 @@
 const axios = require('axios');
 const { buildDiscordLfgCatalog } = require('./roleMenu');
 
-function normalizeBaseUrl(value) {
-  return (value ?? '').trim().replace(/\/+$/, '');
-}
+const { normalizeBaseUrl } = require('./baseUrl');
 
 function describeErrorPayload(value) {
   if (value == null) return '';

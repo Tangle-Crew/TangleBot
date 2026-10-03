@@ -1,7 +1,10 @@
 const { EmbedBuilder, MessageFlags, PermissionFlagsBits, SlashCommandBuilder } = require('discord.js');
 const { callServiceRpc } = require('../utils/clanAccountLink');
+const { reconcileGimRoles } = require('../utils/gimRoleSync');
+const { logClanError } = require('../utils/clanErrors');
 
 module.exports = {
+  requiredFeature: 'CLAN_ROSTER_COMMANDS_ENABLED',
   requiredEnv: ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'],
 
   data: new SlashCommandBuilder()
@@ -14,44 +17,16 @@ module.exports = {
 
     try {
       const plan = await callServiceRpc('get_clan_gim_role_sync');
-      const configuredRoleIds = Array.isArray(plan?.roleIds) ? plan.roleIds.filter(Boolean) : [];
-      const assignments = Array.isArray(plan?.assignments) ? plan.assignments : [];
-
-      await interaction.guild.roles.fetch();
-      const usableRoleIds = configuredRoleIds.filter(roleId => interaction.guild.roles.cache.get(roleId)?.editable);
-      const unusableRoleIds = configuredRoleIds.filter(roleId => !usableRoleIds.includes(roleId));
-      let updated = 0;
-      let unchanged = 0;
-      const failures = [];
-
-      for (const assignment of assignments) {
-        const member = await interaction.guild.members.fetch(assignment.discordUserId).catch(() => null);
-        if (!member) {
-          failures.push(`${assignment.displayName}: Discord member not found`);
-          continue;
-        }
-
-        const desiredRoleId = usableRoleIds.includes(assignment.roleId) ? assignment.roleId : null;
-        const rolesToRemove = usableRoleIds.filter(roleId => roleId !== desiredRoleId && member.roles.cache.has(roleId));
-        const shouldAdd = desiredRoleId && !member.roles.cache.has(desiredRoleId);
-
-        try {
-          if (rolesToRemove.length) await member.roles.remove(rolesToRemove, 'Clan roster GIM role synchronization');
-          if (shouldAdd) await member.roles.add(desiredRoleId, 'Clan roster GIM role synchronization');
-          if (rolesToRemove.length || shouldAdd) updated += 1;
-          else unchanged += 1;
-        } catch (error) {
-          failures.push(`${assignment.displayName}: ${error.message}`);
-        }
-      }
+      const { updated, unchanged, failures, unusableRoleIds, unprocessed } = await reconcileGimRoles(interaction.guild, plan);
 
       const embed = new EmbedBuilder()
-        .setColor(failures.length || unusableRoleIds.length ? 0xd4a017 : 0x2e8b57)
-        .setTitle('GIM role synchronization complete')
+        .setColor(failures.length || unusableRoleIds.length || unprocessed ? 0xd4a017 : 0x2e8b57)
+        .setTitle(failures.length || unusableRoleIds.length || unprocessed ? 'GIM role synchronization needs attention' : 'GIM role synchronization complete')
         .addFields(
           { name: 'Updated members', value: String(updated), inline: true },
           { name: 'Already correct', value: String(unchanged), inline: true },
           { name: 'Failures', value: String(failures.length), inline: true },
+          { name: 'Not processed (run again)', value: String(unprocessed), inline: true },
         )
         .setTimestamp();
 
@@ -64,7 +39,8 @@ module.exports = {
 
       await interaction.editReply({ embeds: [embed] });
     } catch (error) {
-      await interaction.editReply({ content: error?.response?.data?.message ?? error?.message ?? 'Unable to synchronize GIM roles.' });
+      logClanError('/gimrolesync', error);
+      await interaction.editReply({ content: 'Unable to synchronize GIM roles. Ask an administrator to check the bot permissions and logs.' });
     }
   },
 };
