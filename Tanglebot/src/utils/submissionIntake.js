@@ -309,10 +309,13 @@ function saveLastAcceptedSubmission({ attachment, eventId, isDrop, message, pars
 
 async function handleSubmissionMessage(message, config) {
   if (!config.enabled || message.author.bot) return;
-  // Ignore ordinary chat before routing or replying; proof always needs a photo.
+  // Ignore casual chat, but tell complete proof submissions when a photo is missing.
   const imageAttachments = [...message.attachments.values()]
     .filter(attachment => attachment.contentType?.startsWith('image/'));
-  if (imageAttachments.length === 0) return;
+  const parsed = parseSubmissionBody(message.content);
+  const isKc = isKcSubmission(parsed);
+  const isDrop = isDropSubmission(parsed);
+  if (imageAttachments.length === 0 && !(isKc !== isDrop)) return;
 
   let eventId;
   try {
@@ -324,10 +327,6 @@ async function handleSubmissionMessage(message, config) {
 
   if (!eventId) return;
 
-  const parsed = parseSubmissionBody(message.content);
-
-  const isKc = isKcSubmission(parsed);
-  const isDrop = isDropSubmission(parsed);
   if ((!isKc && !isDrop) || (isKc && isDrop)) {
     await message.reply(buildResubmitMessage('Your submission is missing one or more required fields.'));
     return;

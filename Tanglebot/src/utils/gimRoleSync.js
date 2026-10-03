@@ -1,10 +1,11 @@
 const { PermissionFlagsBits } = require('discord.js');
-const { logClanError } = require('./clanErrors');
+const { logClanError, ClanCommandError } = require('./clanErrors');
 const isSnowflake = value => typeof value === 'string' && /^\d{17,20}$/.test(value);
 const runningGuilds = new Set();
 
 async function reconcileGimRoles(guild, plan, { deadline = Date.now() + 12 * 60 * 1000 } = {}) {
-  if (!guild || runningGuilds.has(guild.id)) throw new Error('A GIM sync is already running or the server is unavailable.');
+  if (!guild) throw new Error('Discord server is unavailable.');
+  if (runningGuilds.has(guild.id)) throw new ClanCommandError('A GIM role sync is already running for this server. Please wait for it to finish.');
   runningGuilds.add(guild.id);
   try {
     // Malformed/incomplete responses must never be interpreted as an empty plan.
@@ -60,7 +61,7 @@ async function reconcileGimRoles(guild, plan, { deadline = Date.now() + 12 * 60 
       const desired = desiredByUser.get(userId) ?? new Set();
       const remove = roleIds.filter(id => member.roles.cache.has(id) && !desired.has(id));
       const add = [...desired].filter(id => !member.roles.cache.has(id));
-      const blocked = [...new Set([...remove, ...desired])].filter(id => unusableRoleIds.includes(id));
+      const blocked = [...new Set([...remove, ...add])].filter(id => unusableRoleIds.includes(id));
       if (blocked.length || ((add.length || remove.length) && !member.manageable)) {
         failures.push(`Member ${userId}: bot cannot manage the member or required roles.`);
         continue;

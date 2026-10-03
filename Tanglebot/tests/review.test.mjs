@@ -95,13 +95,13 @@ test('null Discord IDs are reported without stopping remaining assignments', asy
   assert.equal(f.fetches.length, 1);
 });
 
-test('uneditable roles are failures, not Already correct', async () => {
+test('only required changes to uneditable roles are failures', async () => {
   const { reconcileGimRoles } = load('utils/gimRoleSync.js');
   const f = guildFixture({ editable: false });
   const result = await reconcileGimRoles(f.guild, plan([assignment(ids.a, ids.roleA)]));
-  assert.equal(result.unchanged, 0);
+  assert.equal(result.unchanged, 1);
   assert.equal(result.updated, 0);
-  assert.equal(result.failures.length, 2);
+  assert.equal(result.failures.length, 1);
   assert.equal(f.changes.length, 0);
 });
 
@@ -202,7 +202,7 @@ test('ordinary text chat never routes or replies, even with submission labels', 
   const { handleSubmissionMessage } = load('utils/submissionIntake.js', { axios: {
     get: async () => { requests++; throw new Error('Must not route ordinary chat'); },
   } });
-  for (const content of ['Drop: rate is awful lol', 'Boss: is annoying', 'Item: looks nice', 'KC: 42', 'Monster: Zulrah\nStart KC: 123']) {
+  for (const content of ['Drop: rate is awful lol', 'Boss: is annoying', 'Item: looks nice', 'KC: 42']) {
     const replies = [];
     await handleSubmissionMessage({ author: { bot: false }, content, attachments: new Map(), reply: async message => replies.push(message) }, { enabled: true });
     assert.equal(replies.length, 0);
@@ -234,4 +234,79 @@ test('intake still rejects multiple photos and forwards valid monster-only proof
   assert.equal(bodies[0].monsterName, 'Zulra');
   assert.equal(bodies[0].phase, 'starting');
   assert.match(edits[0], /sent to the site/);
+});
+
+test('link commands show actionable database errors and log each failure once', async () => {
+  const env = { SUPABASE_URL: 'url', SUPABASE_SERVICE_ROLE_KEY: 'key' };
+  for (const commandName of ['link', 'linkalt']) {
+    for (const message of ['Link a primary account with /link before adding an alt.', 'That account is already linked to another Discord member. Contact an administrator.']) {
+      const logs = [];
+      const command = load(`commands/${commandName}.js`, { env, logs, axios: {
+        post: async () => { throw { response: { status: 400, data: { code: 'P0001', message } } }; },
+      } });
+      let reply;
+      await command.execute({ user: { id: ids.a }, options: { getString: () => 'Player' },
+        deferReply: async () => {}, editReply: async value => { reply = value.content; },
+      });
+      assert.equal(reply, message);
+      assert.equal(logs.length, 1);
+    }
+  }
+});
+
+test('link commands keep auth, server and unknown database errors private, logging once', async () => {
+  const env = { SUPABASE_URL: 'url', SUPABASE_SERVICE_ROLE_KEY: 'key' };
+  for (const [status, code, message] of [[401, 'P0001', 'Invalid API key'], [500, 'P0001', 'internal failure'],
+    [400, 'P0001', 'Service role access is required.'], [400, '42P01', 'missing table'], [400, 'P0001', 'Unexpected internal database problem']]) {
+    const logs = [];
+    const command = load('commands/link.js', { env, logs, axios: {
+      post: async () => { throw { response: { status, data: { code, message } } }; },
+    } });
+    let reply;
+    await command.execute({ user: { id: ids.a }, options: { getString: () => 'Player' },
+      deferReply: async () => {}, editReply: async value => { reply = value.content; },
+    });
+    assert.match(reply, /clan service is unavailable/);
+    assert.equal(reply.includes(message), false);
+    assert.equal(logs.length, 1);
+  }
+});
+
+test('complete proof text gets a missing-image reminder only in configured channels', async () => {
+  const { handleSubmissionMessage } = load('utils/submissionIntake.js', { axios: {
+    get: async (_, options) => ({ data: options.params.channel_id === 'eq.proofs' ? [{ event_id: 'event' }] : [] }),
+  } });
+  for (const channelId of ['proofs', 'chat']) {
+    for (const content of ['Monster: Zulrah\nPhase: Start\nKC: 12', 'Task: Bandos\nDrop: Bandos chestplate']) {
+      const replies = [];
+      await handleSubmissionMessage({ channelId, author: { bot: false }, content, attachments: new Map(),
+        reply: async text => replies.push(text),
+      }, { enabled: true, supabaseUrl: 'url' });
+      assert.equal(replies.length, channelId === 'proofs' ? 1 : 0);
+      if (channelId === 'proofs') assert.match(replies[0], /exactly one image/);
+    }
+  }
+});
+
+test('concurrent GIM command reports already running and releases lock afterward', async () => {
+  const f = guildFixture();
+  let release;
+  const pending = new Promise(resolve => { release = resolve; });
+  f.guild.roles.fetch = () => pending;
+  const command = load('commands/gimrolesync.js', {
+    env: { SUPABASE_URL: 'url', SUPABASE_SERVICE_ROLE_KEY: 'key' },
+    axios: { post: async () => ({ data: plan([assignment(ids.a, ids.roleA)]) }) },
+  });
+  const replies = [];
+  const interaction = { guild: f.guild, deferReply: async () => {}, editReply: async value => replies.push(value) };
+  const first = command.execute(interaction);
+  // Let the first command acquire the lock and wait for roles.fetch.
+  await new Promise(resolve => setImmediate(resolve));
+  await command.execute(interaction);
+  assert.match(replies[0].content, /already running/);
+  assert.doesNotMatch(replies[0].content, /check.*permissions/);
+  release();
+  await first;
+  await command.execute(interaction);
+  assert.ok(replies.at(-1).embeds);
 });

@@ -1,7 +1,7 @@
 const { EmbedBuilder, MessageFlags, PermissionFlagsBits, SlashCommandBuilder } = require('discord.js');
 const { callServiceRpc } = require('../utils/clanAccountLink');
 const { reconcileGimRoles } = require('../utils/gimRoleSync');
-const { logClanError } = require('../utils/clanErrors');
+const { logClanError, clanErrorMessage } = require('../utils/clanErrors');
 
 module.exports = {
   requiredFeature: 'CLAN_ROSTER_COMMANDS_ENABLED',
@@ -40,7 +40,7 @@ module.exports = {
       await interaction.editReply({ embeds: [embed] });
     } catch (error) {
       logClanError('/gimrolesync', error);
-      await interaction.editReply({ content: 'Unable to synchronize GIM roles. Ask an administrator to check the bot permissions and logs.' });
+      await interaction.editReply({ content: clanErrorMessage(error, 'Unable to synchronize GIM roles. Ask an administrator to check the bot permissions and logs.') });
     }
   },
 };

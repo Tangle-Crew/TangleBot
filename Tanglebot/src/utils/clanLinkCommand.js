@@ -1,6 +1,6 @@
 const { MessageFlags, SlashCommandBuilder } = require('discord.js');
 const { createAccountLinkChallenge } = require('./clanAccountLink');
-const { logClanError } = require('./clanErrors');
+const { logClanError, clanErrorMessage } = require('./clanErrors');
 
 function createLinkCommand({ name, linkKind, description, rsnDescription }) {
   return {
@@ -27,7 +27,7 @@ function createLinkCommand({ name, linkKind, description, rsnDescription }) {
         ].join('\n') });
       } catch (error) {
         logClanError(`/${name}`, error);
-        await interaction.editReply({ content: 'Unable to start account linking. Please contact an administrator.' });
+        await interaction.editReply({ content: clanErrorMessage(error, 'Unable to start account linking. Please contact an administrator.') });
       }
     },
   };
