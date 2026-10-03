@@ -16,6 +16,7 @@ const channelEventCache = new Map();
 
 const SUBMISSION_FORMAT_MESSAGE = [
   '**KC proof format**',
+  'Provide at least one of task name or monster name. You can include both. Minor typos and distinctive partial names are accepted.',
   '```',
   'Task name on Board: <tile title>',
   'Monster being Killed: <monster name>',
@@ -23,12 +24,13 @@ const SUBMISSION_FORMAT_MESSAGE = [
   'Starting Kill Count: 1234',
   '```',
   '```',
-  'Task name on Board: <tile title>',
+  'Monster being Killed: <monster name>',
   '',
   'Starting or Ending: Starting',
   'Starting Kill Count: 1234',
   '```',
   '**Drop proof format**',
+  'A monster name can replace the task name when it identifies one configured drop task.',
   '```',
   'Task name on Board: <tile title>',
   'Item Dropped: <item name>',
@@ -37,7 +39,7 @@ const SUBMISSION_FORMAT_MESSAGE = [
 ].join('\n');
 
 function normalizeLabel(value) {
-  return value.trim().toLowerCase();
+  return value.trim().toLowerCase().replace(/[*_`]/g, '').replace(/\s+/g, ' ');
 }
 
 function getDiscordIdentity(user) {
@@ -51,7 +53,7 @@ function getDiscordIdentity(user) {
 function buildResubmitMessage(extraReason) {
   return [
     extraReason,
-    'Please resubmit using one of these exact formats:',
+    'Please resubmit using one of these formats (names can contain minor typos or a distinctive partial name):',
     SUBMISSION_FORMAT_MESSAGE,
   ].join('\n');
 }
@@ -98,25 +100,25 @@ function parseSubmissionBody(content) {
     if (separatorIndex === -1) continue;
 
     const label = normalizeLabel(line.slice(0, separatorIndex));
-    const value = line.slice(separatorIndex + 1).trim();
+    const value = line.slice(separatorIndex + 1).replace(/^[\s*_`]+|[\s*_`]+$/g, '').trim();
     if (!value) continue;
 
-    if (label === 'task name on board') {
+    if (/^(?:task(?: name)?(?: on (?:the )?board)?|tile(?: name)?|board task)$/.test(label)) {
       result.taskName = value;
       continue;
     }
 
-    if (label === 'monster being killed') {
+    if (/^(?:monster(?: being killed| name)?|boss(?: name)?)$/.test(label)) {
       result.monsterName = value;
       continue;
     }
 
-    if (label === 'item dropped') {
+    if (/^(?:item(?: dropped| name)?|drop(?: name)?)$/.test(label)) {
       result.itemDropped = value;
       continue;
     }
 
-    if (label === 'starting or ending') {
+    if (/^(?:starting or ending|start or end|phase)$/.test(label)) {
       const normalizedValue = normalizeLabel(value);
       if (normalizedValue === 'starting' || normalizedValue === 'ending') {
         result.phase = normalizedValue;
@@ -124,14 +126,14 @@ function parseSubmissionBody(content) {
       continue;
     }
 
-    if (label === 'starting kill count' || label === 'ending kill count' || label === 'kill count') {
+    if (/^(?:(?:starting|ending|start|end) )?(?:kill count|kc)$/.test(label)) {
       const parsed = Number.parseInt(value.replace(/[^0-9]/g, ''), 10);
       if (Number.isFinite(parsed)) {
         result.kcValue = parsed;
-        if (!result.phase && label === 'ending kill count') {
+        if (!result.phase && /^(?:ending|end) /.test(label)) {
           result.phase = 'ending';
         }
-        if (!result.phase && label === 'starting kill count') {
+        if (!result.phase && /^(?:starting|start) /.test(label)) {
           result.phase = 'starting';
         }
       }
@@ -142,11 +144,11 @@ function parseSubmissionBody(content) {
 }
 
 function isKcSubmission(parsed) {
-  return !!parsed.taskName && !!parsed.phase && parsed.kcValue !== null;
+  return !!(parsed.taskName || parsed.monsterName) && !!parsed.phase && parsed.kcValue !== null;
 }
 
 function isDropSubmission(parsed) {
-  return !!parsed.taskName && !!parsed.itemDropped;
+  return !!(parsed.taskName || parsed.monsterName) && !!parsed.itemDropped;
 }
 
 function loadSubmissionConfig(env = process.env) {
