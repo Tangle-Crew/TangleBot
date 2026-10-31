@@ -1,17 +1,31 @@
 const { escapeMarkdown } = require('discord.js');
-const { getAllGroupCompetitions, getCompetitionDetails, rankParticipants, competitionUrl } = require('./wiseOldMan');
+const {
+  getAllGroupCompetitions,
+  getCompetitionDetails,
+  getCompetitionTopHistory,
+  getGroupGains,
+  rankParticipants,
+  competitionUrl,
+} = require('./wiseOldMan');
 const { metricName, shortMetricName, metricCategory, metricUnit, formatNumber } = require('./womMetrics');
 const { readJson, writeJson, withTimeout, truncate } = require('./db');
 const { findPetEmoji } = require('./bossPets');
 
 // The WOM client sets no timeout of its own.
 const REQUEST_TIMEOUT_MS = 20 * 1000;
-// Competition details are reused for this long, unless loaded with fresh (as when sending).
-const DETAILS_CACHE_TTL_MS = 5 * 60 * 1000;
-const detailsCache = new Map(); // competition ID -> { details, loadedAt }
+// This feature's WOM calls run one at a time with this gap, inside WOM's limit of 20 requests a
+// minute (100 with WOM_API_KEY), leaving room for the bot's other features.
+const WOM_CALL_GAP_MS = process.env.WOM_API_KEY ? 700 : 3500;
+// WOM responses are reused for this long, unless loaded with fresh (as when sending).
+const WOM_CACHE_TTL_MS = 5 * 60 * 1000;
+const womCache = new Map(); // key -> { value, loadedAt }
+let womQueue = Promise.resolve();
+let lastWomCallAt = 0;
 const PLACES = ['🥇', '🥈', '🥉'];
 const WINNERS_INTRO = 'Hello @everyone , It is time to announce the winners of this weeks event';
 const UNIT_LABELS = { kc: 'KC', xp: 'XP' };
+const DAY_MS = 24 * 60 * 60 * 1000;
+const CHART_PLAYERS = 5;
 
 // { drafts: { <id>: draft } }. Read from disk on every call, so drafts survive restarts.
 const DATA_FILE = 'weeklyannounce.json';
@@ -24,8 +38,31 @@ const ANNOUNCEMENT_SEPARATOR = '\n\n';
 // Drafts not changed for this long are dropped on the next save.
 const DRAFT_LIFETIME_MS = 14 * 24 * 60 * 60 * 1000;
 
+// Queues fn behind this feature's earlier WOM calls, spaced WOM_CALL_GAP_MS apart.
+function womCall(label, fn) {
+  const run = womQueue.then(async () => {
+    const wait = lastWomCallAt + WOM_CALL_GAP_MS - Date.now();
+    if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
+    lastWomCallAt = Date.now();
+    return withTimeout(fn(), label, REQUEST_TIMEOUT_MS);
+  });
+  womQueue = run.catch(() => {});
+  return run;
+}
+
+async function cachedWomCall(key, label, fn, { fresh = false } = {}) {
+  const cached = womCache.get(key);
+  if (!fresh && cached && Date.now() - cached.loadedAt < WOM_CACHE_TTL_MS) return cached.value;
+  const value = await womCall(label, fn);
+  womCache.set(key, { value, loadedAt: Date.now() });
+  for (const [k, entry] of womCache) {
+    if (Date.now() - entry.loadedAt >= WOM_CACHE_TTL_MS) womCache.delete(k);
+  }
+  return value;
+}
+
 function loadGroupCompetitions(groupId) {
-  return withTimeout(getAllGroupCompetitions(groupId), 'Loading the group competitions', REQUEST_TIMEOUT_MS);
+  return womCall('Loading the group competitions', () => getAllGroupCompetitions(groupId));
 }
 
 // Of all (the group's competitions), those with the earliest end time still in the future.
@@ -54,7 +91,7 @@ function competitionChoices(all, { fixedSendAt = null, now = Date.now() } = {}) 
 
 // The group's competitions with the latest end time at or before `at`, for a typed send time.
 async function findLastEndedBy(groupId, at) {
-  const all = await withTimeout(getAllGroupCompetitions(groupId), 'Loading the group competitions', REQUEST_TIMEOUT_MS);
+  const all = await loadGroupCompetitions(groupId);
   const ended = all.filter(c => new Date(c.endsAt).getTime() <= new Date(at).getTime());
   if (ended.length === 0) return [];
   const endsAt = Math.max(...ended.map(c => new Date(c.endsAt).getTime()));
@@ -67,12 +104,8 @@ async function competitionsForDraft(draft, groupId) {
   return draft.competitions.length ? draft.competitions : findLastEndedBy(groupId, draft.sendAt);
 }
 
-async function loadCompetitionDetails(id, { fresh = false } = {}) {
-  const cached = detailsCache.get(id);
-  if (!fresh && cached && Date.now() - cached.loadedAt < DETAILS_CACHE_TTL_MS) return cached.details;
-  const details = await withTimeout(getCompetitionDetails(id), `Loading competition #${id}`, REQUEST_TIMEOUT_MS);
-  detailsCache.set(id, { details, loadedAt: Date.now() });
-  return details;
+function loadCompetitionDetails(id, options) {
+  return cachedWomCall(`details:${id}`, `Loading competition #${id}`, () => getCompetitionDetails(id), options);
 }
 
 // A title split before its metric's name: "BOTW T1: Amoxliatl" -> { prefix: 'BOTW T1: ', name:
@@ -202,6 +235,80 @@ function buildWinnersText(lists, context = { emojis: [], mentions: new Map() }) 
   return truncate(`${WINNERS_INTRO}\n${sections.join('\n\n')}`, MESSAGE_LIMIT);
 }
 
+// Day marks from the start, every 24 hours, then the end, cut off at `now` for a competition still
+// running. A 7-day competition has 8.
+function chartMarks(startsAt, endsAt, now) {
+  const last = Math.min(endsAt, now);
+  const marks = [];
+  for (let t = startsAt; t < last; t += DAY_MS) marks.push(t);
+  marks.push(last);
+  return marks;
+}
+
+// A player's gains in one competition at each mark, from WOM's top history (lifetime values,
+// newest first). The last mark is their gains from the competition details. Values before the
+// player's first update, or unranked (-1), count as no gains yet.
+function playerGainsAt(marks, history, progress) {
+  const baseline = progress.end - progress.gained;
+  return marks.map((t, i) => {
+    if (i === marks.length - 1) return progress.gained;
+    const snapshot = history.find(h => new Date(h.date).getTime() <= t);
+    if (!snapshot || snapshot.value < 0) return 0;
+    return Math.min(Math.max(snapshot.value - baseline, 0), progress.gained);
+  });
+}
+
+// What the progress chart of a winners list draws: the top 5 players' gains and the clan's total
+// gains (every participant who gained) at each day mark. Null when nobody gained.
+async function loadChartData(list, { fresh = false, now = Date.now() } = {}) {
+  if (list.ranked.length === 0) return null;
+  const startsAt = Math.min(...list.competitions.map(c => new Date(c.startsAt).getTime()));
+  const endsAt = Math.max(...list.competitions.map(c => new Date(c.endsAt).getTime()));
+  const marks = chartMarks(startsAt, endsAt, now);
+  const top = list.ranked.slice(0, CHART_PLAYERS);
+  const players = top.map(row => ({ name: row.name, final: row.gained, values: marks.map(() => 0) }));
+  const total = marks.map(() => 0);
+
+  for (const competition of list.competitions) {
+    const history = await cachedWomCall(
+      `tophistory:${competition.id}`,
+      `Loading the top history of competition #${competition.id}`,
+      () => getCompetitionTopHistory(competition.id),
+      { fresh }
+    );
+    const historyByPlayer = new Map(history.map(entry => [entry.player.id, entry.history]));
+    const progressByPlayer = new Map(competition.participations.map(p => [p.player.id, p.progress]));
+
+    top.forEach((row, i) => {
+      const progress = progressByPlayer.get(row.id);
+      if (!progress) return;
+      playerGainsAt(marks, historyByPlayer.get(row.id) ?? [], progress).forEach((value, m) => {
+        players[i].values[m] += value;
+      });
+    });
+
+    // Marks in between come from the group's gains since the start; the last is the details' total.
+    const participantIds = new Set(competition.participations.map(p => p.player.id));
+    for (let m = 1; m < marks.length; m++) {
+      let gains;
+      if (m === marks.length - 1) {
+        gains = competition.participations.map(p => p.progress.gained);
+      } else {
+        const rows = await cachedWomCall(
+          `gains:${competition.id}:${marks[m]}`,
+          `Loading the group's gains for competition #${competition.id}`,
+          () => getGroupGains(competition.groupId, competition.metric, new Date(competition.startsAt), new Date(marks[m])),
+          { fresh }
+        );
+        gains = rows.filter(r => participantIds.has(r.player.id)).map(r => r.data.gained);
+      }
+      total[m] += gains.reduce((sum, gained) => sum + Math.max(gained, 0), 0);
+    }
+  }
+
+  return { title: list.title, metric: list.metric, marks, players, total };
+}
+
 function readStore() {
   const store = readJson(DATA_FILE);
   return { ...store, drafts: store.drafts ?? {} };
@@ -280,6 +387,7 @@ module.exports = {
   competitionsForDraft,
   loadWinnerLists,
   buildWinnersText,
+  loadChartData,
   createDraft,
   getDraft,
   updateDraft,
