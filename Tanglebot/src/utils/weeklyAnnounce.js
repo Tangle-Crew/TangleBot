@@ -41,6 +41,8 @@ const MESSAGE_LIMIT = 2000;
 const ANNOUNCEMENT_SEPARATOR = '\n\n';
 // Drafts not changed for this long are dropped on the next save.
 const DRAFT_LIFETIME_MS = 14 * 24 * 60 * 60 * 1000;
+// Sent and failed jobs are kept this long after their send time as a record.
+const FINISHED_JOB_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
 
 // Queues fn behind this feature's earlier WOM calls, spaced WOM_CALL_GAP_MS apart.
 function womCall(label, fn) {
@@ -369,11 +371,34 @@ function readStore() {
 }
 
 function saveStore(store) {
-  const cutoff = Date.now() - DRAFT_LIFETIME_MS;
+  const draftCutoff = Date.now() - DRAFT_LIFETIME_MS;
   for (const [id, draft] of Object.entries(store.drafts)) {
-    if (new Date(draft.updatedAt).getTime() < cutoff) delete store.drafts[id];
+    if (new Date(draft.updatedAt).getTime() < draftCutoff) delete store.drafts[id];
+  }
+  const jobCutoff = Date.now() - FINISHED_JOB_LIFETIME_MS;
+  for (const [id, job] of Object.entries(store.jobs)) {
+    if ((job.status === 'sent' || job.status === 'failed') && new Date(job.sendAt).getTime() < jobCutoff) delete store.jobs[id];
   }
   writeJson(DATA_FILE, store);
+}
+
+function getJob(id) {
+  return readStore().jobs[id] ?? null;
+}
+
+// Jobs still to send: scheduled, or claimed by a send that may have been interrupted.
+function listPendingJobs() {
+  return Object.values(readStore().jobs).filter(job => job.status === 'scheduled' || job.status === 'sending');
+}
+
+// Runs change(job) and saves the result. Null if the job no longer exists.
+function updateJob(id, change) {
+  const store = readStore();
+  const job = store.jobs[id];
+  if (!job) return null;
+  change(job);
+  saveStore(store);
+  return job;
 }
 
 function makeDraftId() {
@@ -581,6 +606,9 @@ module.exports = {
   updateDraft,
   deleteDraft,
   acceptDraft,
+  getJob,
+  listPendingJobs,
+  updateJob,
   joinAnnouncements,
   announcementParts,
   buildPost,

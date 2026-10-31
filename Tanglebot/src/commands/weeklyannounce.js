@@ -36,6 +36,7 @@ const { competitionUrl } = require('../utils/wiseOldMan');
 const { discordTimestamp, truncate } = require('../utils/db');
 const { DEFAULT_EMBED_COLOR } = require('../utils/embedColor');
 const { notifyAdminLog } = require('../utils/roleMenu');
+const { scheduleJob } = require('../utils/weeklyAnnounceSchedule');
 
 const TEMPLAR_ROLE_ID = process.env.TEMPLAR_ROLE_ID;
 const WOM_GROUP_ID = Number(process.env.WOM_GROUP_ID);
@@ -404,6 +405,7 @@ async function acceptPreview(interaction, draft) {
     return interaction.update(closedMessage('This draft was already scheduled or discarded.'));
   }
   previewSessions.delete(draft.id);
+  scheduleJob(interaction.client, job);
   console.log(`[WeeklyAnnounce] ${interaction.user.tag} scheduled job ${job.id} for ${job.sendAt} in channel ${job.channelId}`);
 
   const when = `${discordTimestamp(job.sendAt, 'F')} (${discordTimestamp(job.sendAt, 'R')})`;

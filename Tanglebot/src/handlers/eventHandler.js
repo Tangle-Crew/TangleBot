@@ -23,6 +23,7 @@ const { startLfgDeliveryWorker } = require('../utils/lfgDeliveryWorker');
 const { startCompEndingReminder } = require('../utils/compEndingReminder');
 const { handleSyncedGroupButtonInteraction } = require('../utils/lfgSyncedPost');
 const { handleWeeklyAnnounceButton, handleWeeklyAnnounceSelect, handleWeeklyAnnounceModal } = require('../commands/weeklyannounce');
+const { restoreWeeklyAnnouncements, stopWeeklyAnnouncements } = require('../utils/weeklyAnnounceSchedule');
 
 // customId prefix -> handler, per interaction kind. The honeypot route has no errorReply, so its
 // failures stay silent.
@@ -95,6 +96,14 @@ function loadEvents(client) {
     }
     stopLfgDeliveryWorker = startLfgDeliveryWorker();
     stopCompEndingReminder = startCompEndingReminder(client);
+    // Before the slower startup steps, so a post due while the bot was down goes out promptly.
+    if (client.commands.has('weeklyannounce')) {
+      try {
+        restoreWeeklyAnnouncements(client);
+      } catch (err) {
+        console.error('[WeeklyAnnounce] Failed to restore scheduled posts:', err);
+      }
+    }
 
     try {
       await sendHoneypotStartupMessage(client, honeypotConfig);
@@ -223,6 +232,7 @@ function loadEvents(client) {
       stopCompEndingReminder();
       stopCompEndingReminder = null;
     }
+    stopWeeklyAnnouncements();
   });
 }
 
