@@ -11,6 +11,7 @@ const {
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
+  AttachmentBuilder,
   StringSelectMenuBuilder,
   escapeMarkdown,
 } = require('discord.js');
@@ -26,11 +27,15 @@ const {
   getDraft,
   updateDraft,
   deleteDraft,
+  acceptDraft,
   joinAnnouncements,
+  announcementParts,
+  buildPost,
 } = require('../utils/weeklyAnnounce');
 const { competitionUrl } = require('../utils/wiseOldMan');
 const { discordTimestamp, truncate } = require('../utils/db');
 const { DEFAULT_EMBED_COLOR } = require('../utils/embedColor');
+const { notifyAdminLog } = require('../utils/roleMenu');
 
 const TEMPLAR_ROLE_ID = process.env.TEMPLAR_ROLE_ID;
 const WOM_GROUP_ID = Number(process.env.WOM_GROUP_ID);
@@ -43,7 +48,13 @@ const CHANNEL_ID = process.env.WEEKLY_ANNOUNCE_CHANNEL_ID?.trim() || null;
 const ID_PREFIX = 'weeklyannounce';
 // The panel's side stripe turns amber once the announcements are over MESSAGE_LIMIT.
 const OVER_LIMIT_COLOR = 0xf0a020;
+const BLOCKED_COLOR = 0xed4245;
 const TITLE_MAX = 80;
+// Discord lets a Preview press remove its private messages for this long.
+const PREVIEW_CLEANUP_WINDOW_MS = 15 * 60 * 1000;
+// Draft ID -> { interaction, messageIds }: the Preview press and its preview messages, removed with
+// the panel on Edit or Cancel. Lost on restart, when the old messages just stay.
+const previewSessions = new Map();
 
 // What the bot needs in the target channel to post the winners chart and announcements.
 const SEND_PERMISSIONS = [
@@ -197,7 +208,7 @@ function buildPanel(draft) {
     button('add', draft.id, `Add announcement (${announcements.length}/${MAX_ANNOUNCEMENTS})`, ButtonStyle.Primary, {
       disabled: announcements.length >= MAX_ANNOUNCEMENTS,
     }),
-    button('preview', draft.id, 'Preview', ButtonStyle.Success, { disabled: true }),
+    button('preview', draft.id, 'Preview', ButtonStyle.Success),
     button('cancel', draft.id, 'Cancel', ButtonStyle.Danger)
   ));
 
@@ -230,6 +241,189 @@ function buildTextModal(draftId, index, text) {
     .addComponents(new ActionRowBuilder().addComponents(input));
 }
 
+function formatCount(count) {
+  return count.toLocaleString('en-US');
+}
+
+// Who the post pings, warning when the bot can't: @everyone, @here and roles that aren't
+// mentionable need Mention Everyone in the channel.
+function describePings(text, channel) {
+  const everyone = [...new Set(text.match(/@(?:everyone|here)/g) ?? [])];
+  const roleIds = [...new Set([...text.matchAll(/<@&(\d+)>/g)].map(m => m[1]))];
+  if (everyone.length === 0 && roleIds.length === 0) return '✅ No @here, @everyone or role pings';
+  const labels = [...everyone, ...roleIds.map(id => `<@&${id}>`)].join(', ');
+  const canMentionAll = channel?.permissionsFor(channel.client.user)?.has(PermissionFlagsBits.MentionEveryone);
+  const needsMentionAll = everyone.length > 0 || roleIds.some(id => channel?.guild?.roles.cache.get(id)?.mentionable === false);
+  if (needsMentionAll && !canMentionAll) {
+    return `⚠️ Pings ${labels}, but the bot doesn't have **Mention Everyone** in <#${channel?.id}>, so @everyone, @here and unmentionable roles won't notify anyone`;
+  }
+  return `🔔 Pings ${labels}`;
+}
+
+// The checks under the preview, with Accept / Edit / Cancel. Accept is disabled when the
+// announcements don't fit in two messages, the send time has passed, or there's nothing to send.
+function buildChecklist(draft, post, channel) {
+  const sendAt = new Date(draft.sendAt);
+  const parts = post.announcementParts;
+  const joined = joinAnnouncements(post.announcements);
+  const lines = ['## Preview check'];
+  let blocked = false;
+
+  if (post.announcements.length === 0) {
+    lines.push('ℹ️ No announcements, so only the winners message will be sent');
+  } else if (parts === null) {
+    blocked = true;
+    lines.push(`❌ Announcements: ${formatCount(joined.length)} characters, too long even for 2 messages. Edit or remove one.`);
+  } else if (parts.length === 2) {
+    lines.push(
+      `⚠️ Announcements: ${formatCount(joined.length)} / ${formatCount(MESSAGE_LIMIT)} characters, over one message's limit. ` +
+      `They'll be sent as 2 messages back to back (${formatCount(parts[0].length)} + ${formatCount(parts[1].length)} characters), split between announcements.`
+    );
+  } else {
+    lines.push(`✅ Announcements: ${formatCount(joined.length)} / ${formatCount(MESSAGE_LIMIT)} characters, 1 message`);
+  }
+
+  if (sendAt > new Date()) {
+    lines.push(`✅ Send time is in the future: ${discordTimestamp(sendAt, 'F')} (${discordTimestamp(sendAt, 'R')})`);
+  } else {
+    blocked = true;
+    lines.push(`❌ The send time (${discordTimestamp(sendAt, 'F')}) has passed. Cancel and run \`/weeklyannounce setup\` again.`);
+  }
+
+  lines.push(describePings([post.winnersText, joined].filter(Boolean).join('\n'), channel));
+
+  if (post.winnersError) {
+    lines.push(`⚠️ Couldn't load the winners from Wise Old Man: ${post.winnersError}. They're loaded again when it sends.`);
+  } else if (!post.winnersText) {
+    lines.push('⚠️ No competition has ended by the send time, so there will be no winners message');
+    if (post.announcements.length === 0) {
+      blocked = true;
+      lines.push('❌ Nothing to send: no winners and no announcements');
+    }
+  } else {
+    lines.push(post.charts.length
+      ? `✅ Chart attached: ${post.charts.map(c => `\`${c.name}\``).join(', ')}`
+      : '⚠️ No chart attached');
+    for (const problem of post.chartProblems) lines.push(`-# No chart for ${problem}`);
+    const matched = post.winners.filter(w => w.userId);
+    const unmatched = post.winners.filter(w => !w.userId);
+    if (matched.length) {
+      lines.push(`✅ Winners pinged: ${matched.map(w => `${escapeMarkdown(w.name)} → <@${w.userId}>`).join(', ')}`);
+    }
+    if (unmatched.length) {
+      lines.push(`⚠️ No server member found for ${unmatched.map(w => `**${escapeMarkdown(w.name)}**`).join(', ')}, so they're shown by RSN without a ping`);
+    }
+    for (const problem of post.emojiProblems) lines.push(`-# No pet emoji for ${problem}`);
+    if (post.runningAtSend) {
+      lines.push('⚠️ A competition will still be running at the send time, so the post will show the standings at that point, not the final results.');
+    } else if (post.running) {
+      lines.push('ℹ️ The winners and chart show the standings so far. The final results are loaded when it sends.');
+    }
+  }
+
+  const acceptLabel = parts?.length === 2 ? 'Accept and send announcements as 2 messages' : 'Accept';
+  const container = new ContainerBuilder()
+    .setAccentColor(blocked ? BLOCKED_COLOR : parts?.length === 2 ? OVER_LIMIT_COLOR : DEFAULT_EMBED_COLOR)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
+    .addActionRowComponents(new ActionRowBuilder().addComponents(
+      button('accept', draft.id, acceptLabel, ButtonStyle.Success, { disabled: blocked }),
+      button('back', draft.id, 'Edit', ButtonStyle.Secondary),
+      button('cancel', draft.id, 'Cancel', ButtonStyle.Danger)
+    ));
+  return { components: [container], flags: MessageFlags.IsComponentsV2, allowedMentions: { parse: [] } };
+}
+
+// Removes the panel a Preview press replaced and its preview messages, while Discord still allows it.
+async function removePreview(draftId) {
+  const session = previewSessions.get(draftId);
+  if (!session) return;
+  previewSessions.delete(draftId);
+  for (const messageId of [...session.messageIds, '@original']) {
+    await session.interaction.deleteReply(messageId).catch(() => {});
+  }
+}
+
+async function fetchTargetChannel(client, channelId) {
+  try {
+    return await client.channels.fetch(channelId);
+  } catch (err) {
+    console.error(`[WeeklyAnnounce] Could not fetch channel ${channelId}:`, err.message);
+    return null;
+  }
+}
+
+// Posts the two messages privately, exactly as they'll be sent but without pinging, then the checks.
+async function showPreview(interaction, draft) {
+  await interaction.update(closedMessage('⏳ Building the preview. It loads the standings and chart from Wise Old Man, which can take a minute.'));
+  try {
+    const channel = await fetchTargetChannel(interaction.client, draft.channelId);
+    const post = await buildPost(draft, channel?.guild ?? interaction.guild);
+    const messageIds = [];
+    const sendPreview = async (options) => {
+      const message = await interaction.followUp({ ...options, flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
+      messageIds.push(message.id);
+    };
+
+    if (post.winnersText) {
+      await sendPreview({
+        content: post.winnersText,
+        files: post.charts.map(c => new AttachmentBuilder(c.attachment, { name: c.name })),
+      });
+    }
+    for (const part of post.announcementParts ?? []) await sendPreview({ content: part });
+
+    await interaction.followUp({ ...buildChecklist(draft, post, channel), flags: MessageFlags.Ephemeral | MessageFlags.IsComponentsV2 });
+    previewSessions.set(draft.id, { interaction, messageIds });
+    setTimeout(() => {
+      if (previewSessions.get(draft.id)?.interaction === interaction) previewSessions.delete(draft.id);
+    }, PREVIEW_CLEANUP_WINDOW_MS).unref();
+    await interaction.editReply(closedMessage('👇 Preview below. Accept, Edit or Cancel under it.'));
+    console.log(
+      `[WeeklyAnnounce] Previewed draft ${draft.id} for ${interaction.user.tag}: ${post.winnersText ? `winners with ${post.charts.length} chart(s)` : 'no winners'}` +
+      `, ${post.announcementParts === null ? 'announcements too long' : `${post.announcementParts.length} announcement message(s)`}` +
+      `${post.winnersError ? `, WOM error: ${post.winnersError}` : ''}`
+    );
+  } catch (err) {
+    await interaction.editReply(panelMessage(draft)).catch(() => {});
+    throw err;
+  }
+}
+
+async function acceptPreview(interaction, draft) {
+  if (new Date(draft.sendAt) <= new Date()) {
+    return interaction.reply({ content: 'The send time has passed. Cancel and run `/weeklyannounce setup` again.', flags: MessageFlags.Ephemeral });
+  }
+  const channel = await fetchTargetChannel(interaction.client, draft.channelId);
+  const parts = announcementParts(draft, channel?.guild ?? interaction.guild);
+  if (parts === null) {
+    return interaction.reply({ content: 'The announcements are too long even for 2 messages. Press Edit and shorten or remove one.', flags: MessageFlags.Ephemeral });
+  }
+
+  const job = acceptDraft(draft.id, interaction.user.id);
+  if (!job) {
+    return interaction.update(closedMessage('This draft was already scheduled or discarded.'));
+  }
+  previewSessions.delete(draft.id);
+  console.log(`[WeeklyAnnounce] ${interaction.user.tag} scheduled job ${job.id} for ${job.sendAt} in channel ${job.channelId}`);
+
+  const when = `${discordTimestamp(job.sendAt, 'F')} (${discordTimestamp(job.sendAt, 'R')})`;
+  await interaction.update(closedMessage(`✅ Scheduled for ${when} in <#${job.channelId}>. The admin log has the details.`));
+
+  const winners = job.competitions.length
+    ? `Winners from ${job.competitions.map(c => `**${escapeMarkdown(c.title)}**`).join(', ')}`
+    : 'Winners from the competitions that have ended by then';
+  const announcements = job.announcements.length
+    ? `then ${plural(job.announcements.length, 'announcement')} (${plural(joinAnnouncements(job.announcements).length, 'character')}, ${plural(parts.length, 'message')})`
+    : 'no announcements';
+  await notifyAdminLog(
+    interaction.client,
+    '📣 Weekly announcement scheduled',
+    `${interaction.user} scheduled the weekly post in <#${job.channelId}> for ${when}.\n${winners}, ${announcements}.`,
+    [],
+    DEFAULT_EMBED_COLOR
+  );
+}
+
 function rejectNonTemplar(interaction) {
   console.log(`[WeeklyAnnounce] ${interaction.user.tag} pressed ${interaction.customId} without the Templar role`);
   return interaction.reply({ content: 'You need the Templar role to use this.', flags: MessageFlags.Ephemeral });
@@ -252,7 +446,14 @@ async function handleWeeklyAnnounceButton(interaction) {
 
   if (action === 'cancel') {
     deleteDraft(draftId);
-    return interaction.update(closedMessage('Cancelled. The draft was discarded and nothing was scheduled.'));
+    await interaction.update(closedMessage('Cancelled. The draft was discarded and nothing was scheduled.'));
+    return removePreview(draftId);
+  }
+  if (action === 'preview') return showPreview(interaction, draft);
+  if (action === 'accept') return acceptPreview(interaction, draft);
+  if (action === 'back') {
+    await interaction.update(panelMessage(draft));
+    return removePreview(draftId);
   }
   if (action === 'add') {
     if (count >= MAX_ANNOUNCEMENTS) return interaction.update(panelMessage(draft));

@@ -1,4 +1,4 @@
-const { escapeMarkdown } = require('discord.js');
+const { escapeMarkdown, ChannelType } = require('discord.js');
 const {
   getAllGroupCompetitions,
   getCompetitionDetails,
@@ -9,7 +9,8 @@ const {
 } = require('./wiseOldMan');
 const { metricName, shortMetricName, metricCategory, metricUnit, formatNumber } = require('./womMetrics');
 const { readJson, writeJson, withTimeout, truncate } = require('./db');
-const { findPetEmoji } = require('./bossPets');
+const { renderProgressChart, chartFileName } = require('./weeklyAnnounceChart');
+const { metricPet, findPetEmoji } = require('./bossPets');
 
 // The WOM client sets no timeout of its own.
 const REQUEST_TIMEOUT_MS = 20 * 1000;
@@ -22,12 +23,15 @@ const womCache = new Map(); // key -> { value, loadedAt }
 let womQueue = Promise.resolve();
 let lastWomCallAt = 0;
 const PLACES = ['🥇', '🥈', '🥉'];
+// Discord calls loading the server members and the bot's emojis.
+const DISCORD_TIMEOUT_MS = 20 * 1000;
 const WINNERS_INTRO = 'Hello @everyone , It is time to announce the winners of this weeks event';
 const UNIT_LABELS = { kc: 'KC', xp: 'XP' };
 const DAY_MS = 24 * 60 * 60 * 1000;
 const CHART_PLAYERS = 5;
 
-// { drafts: { <id>: draft } }. Read from disk on every call, so drafts survive restarts.
+// { drafts: { <id>: draft }, jobs: { <id>: accepted draft } }. Read from disk on every call, so
+// both survive restarts.
 const DATA_FILE = 'weeklyannounce.json';
 const MAX_ANNOUNCEMENTS = 5;
 // Discord's limit of options in one select menu.
@@ -235,6 +239,56 @@ function buildWinnersText(lists, context = { emojis: [], mentions: new Map() }) 
   return truncate(`${WINNERS_INTRO}\n${sections.join('\n\n')}`, MESSAGE_LIMIT);
 }
 
+// How names compare: lowercase, with runs of spaces, _ and - as one space, as in RSNs.
+function nameText(name) {
+  return String(name ?? '').toLowerCase().replace(/[\s_-]+/g, ' ').trim();
+}
+
+// The server member each RSN belongs to, by nickname, display name or username: one that matches
+// exactly, or else one that starts with the RSN followed by a space or symbol ("Snow I 🍌x14" for
+// "Snow I"). RSNs matching no member, or several, are left out. Returns RSN -> user ID.
+function matchMembers(rsns, members) {
+  const people = [...members]
+    .filter(m => !m.user.bot)
+    .map(m => ({ id: m.id, names: [m.nickname, m.user.globalName, m.user.username].filter(Boolean).map(nameText) }));
+  const mentions = new Map();
+  for (const rsn of rsns) {
+    const target = nameText(rsn);
+    if (!target) continue;
+    const exact = people.filter(p => p.names.includes(target));
+    const found = exact.length
+      ? exact
+      : people.filter(p => p.names.some(n => n.startsWith(target) && /^[^a-z0-9]/.test(n.slice(target.length))));
+    if (found.length === 1) mentions.set(rsn, found[0].id);
+  }
+  return mentions;
+}
+
+// The RSNs the winners text names: every player placed 1st to 3rd.
+function winnerNames(lists) {
+  return [...new Set(lists.flatMap(list => topPlaces(list.ranked).flatMap(place => place.players.map(p => p.name))))];
+}
+
+// The server's members, loading them all from Discord. Falls back to those already cached.
+async function loadMembers(guild) {
+  try {
+    return [...(await withTimeout(guild.members.fetch(), 'Loading the server members', DISCORD_TIMEOUT_MS)).values()];
+  } catch (err) {
+    console.warn('[WeeklyAnnounce] Failed to load the server members, matching winners against those cached:', err.message);
+    return [...guild.members.cache.values()];
+  }
+}
+
+// The bot's application emojis, or [] if they can't be loaded.
+async function loadBotEmojis(client) {
+  try {
+    return [...(await withTimeout(client.application.emojis.fetch(), 'Loading the bot emojis', DISCORD_TIMEOUT_MS)).values()];
+  } catch (err) {
+    console.warn('[WeeklyAnnounce] Failed to load the bot emojis, posting the winners without them:', err.message);
+    return [];
+  }
+}
+
 // Day marks from the start, every 24 hours, then the end, cut off at `now` for a competition still
 // running. A 7-day competition has 8.
 function chartMarks(startsAt, endsAt, now) {
@@ -311,7 +365,7 @@ async function loadChartData(list, { fresh = false, now = Date.now() } = {}) {
 
 function readStore() {
   const store = readJson(DATA_FILE);
-  return { ...store, drafts: store.drafts ?? {} };
+  return { ...store, drafts: store.drafts ?? {}, jobs: store.jobs ?? {} };
 }
 
 function saveStore(store) {
@@ -372,9 +426,143 @@ function deleteDraft(id) {
   return true;
 }
 
+// Moves the draft to the scheduled jobs under the same ID. Null if it no longer exists, e.g. when
+// Accept is pressed twice.
+function acceptDraft(id, acceptedBy) {
+  const store = readStore();
+  const draft = store.drafts[id];
+  if (!draft) return null;
+  delete store.drafts[id];
+  const job = { ...draft, status: 'scheduled', acceptedBy, acceptedAt: new Date().toISOString(), sent: { winners: null, announcements: [] } };
+  store.jobs[id] = job;
+  saveStore(store);
+  return job;
+}
+
 // The announcements as they're sent in message 2.
 function joinAnnouncements(announcements) {
   return announcements.join(ANNOUNCEMENT_SEPARATOR);
+}
+
+// The announcements as message texts: one message if they fit, otherwise two split between
+// announcements (the first as full as possible). Null if they don't fit in two.
+function splitAnnouncements(announcements) {
+  if (announcements.length === 0) return [];
+  const joined = joinAnnouncements(announcements);
+  if (joined.length <= MESSAGE_LIMIT) return [joined];
+  for (let cut = announcements.length - 1; cut >= 1; cut--) {
+    const parts = [joinAnnouncements(announcements.slice(0, cut)), joinAnnouncements(announcements.slice(cut))];
+    if (parts.every(part => part.length <= MESSAGE_LIMIT)) return parts;
+  }
+  return null;
+}
+
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// "@Role Name" and "#channel-name" typed as plain text become real mentions of the server's roles
+// and channels, ignoring case and matching longer names first. @everyone, @here and mentions
+// already in <@&id> / <#id> form are left as they are.
+function resolveMentions(text, guild) {
+  if (!guild) return text;
+  let resolved = text;
+  const roles = [...guild.roles.cache.values()]
+    .filter(role => role.id !== guild.id && role.name.trim() && !/^(everyone|here)$/i.test(role.name))
+    .sort((a, b) => b.name.length - a.name.length);
+  for (const role of roles) {
+    const pattern = new RegExp(`(^|[^\\w<&@])@${escapeRegExp(role.name)}(?![\\w-])`, 'gi');
+    resolved = resolved.replace(pattern, (_, before) => `${before}<@&${role.id}>`);
+  }
+  const channels = [...guild.channels.cache.values()]
+    .filter(channel => channel.name && !/\s/.test(channel.name) && channel.type !== ChannelType.GuildCategory)
+    .sort((a, b) => b.name.length - a.name.length);
+  for (const channel of channels) {
+    const pattern = new RegExp(`(^|[^\\w<#])#${escapeRegExp(channel.name)}(?![\\w-])`, 'gi');
+    resolved = resolved.replace(pattern, (_, before) => `${before}<#${channel.id}>`);
+  }
+  return resolved;
+}
+
+// Message 2's texts for the draft as it would be sent, or null if too long for two messages.
+function announcementParts(draft, guild) {
+  return splitAnnouncements(draft.announcements.map(text => resolveMentions(text, guild)));
+}
+
+// Names chart files after their metric, numbering repeats.
+function uniqueFileName(metric, used) {
+  let name = chartFileName(metric);
+  for (let n = 2; used.has(name); n++) name = chartFileName(`${metric}-${n}`);
+  used.add(name);
+  return name;
+}
+
+// Everything the post needs, as the preview shows it and the send posts it:
+// - winnersText: message 1's text, or null when no competition has ended by the send time
+// - charts: [{ attachment, name }] for message 1; chartProblems: why a list has no chart
+// - winnersError: why the winners couldn't be loaded from WOM, if they couldn't
+// - running: whether any of the competitions is still running (the winners are standings so far)
+// - runningAtSend: whether any will still be running at the send time, so the post won't have the
+//   final results
+// - winners: [{ name, userId }] for each RSN the winners text names, userId null when no server
+//   member matched it (shown in bold instead of a mention)
+// - emojiProblems: why a list's heading has no pet emoji
+// - announcements: each announcement with plain @Role / #channel text turned into mentions
+// - announcementParts: message 2's texts (two when over the limit), or null if too long for two
+async function buildPost(draft, guild, { fresh = false } = {}) {
+  const announcements = draft.announcements.map(text => resolveMentions(text, guild));
+  const post = {
+    winnersText: null,
+    charts: [],
+    chartProblems: [],
+    winnersError: null,
+    running: false,
+    runningAtSend: false,
+    winners: [],
+    emojiProblems: [],
+    competitions: [],
+    announcements,
+    announcementParts: splitAnnouncements(announcements),
+  };
+
+  let lists;
+  try {
+    post.competitions = await competitionsForDraft(draft, Number(process.env.WOM_GROUP_ID));
+    lists = await loadWinnerLists(post.competitions, { fresh });
+  } catch (err) {
+    post.winnersError = err.message;
+    return post;
+  }
+  if (lists.length === 0) return post;
+
+  const names = winnerNames(lists);
+  const mentions = guild && names.length ? matchMembers(names, await loadMembers(guild)) : new Map();
+  const emojis = guild ? await loadBotEmojis(guild.client) : [];
+  post.winners = names.map(name => ({ name, userId: mentions.get(name) ?? null }));
+  for (const list of lists) {
+    const pet = metricPet(list.metric);
+    if (!pet) post.emojiProblems.push(`${list.title}: no pet is listed for ${metricName(list.metric)}`);
+    else if (!findPetEmoji(list.metric, emojis)) post.emojiProblems.push(`${list.title}: the bot has no emoji named after ${pet}`);
+  }
+  post.winnersText = buildWinnersText(lists, { emojis, mentions });
+  const endsAfter = at => lists.some(list => list.competitions.some(c => new Date(c.endsAt).getTime() > at));
+  post.running = endsAfter(Date.now());
+  post.runningAtSend = endsAfter(new Date(draft.sendAt).getTime());
+  const usedNames = new Set();
+  for (const list of lists) {
+    try {
+      const data = await loadChartData(list, { fresh });
+      if (!data) {
+        post.chartProblems.push(`${list.title}: nobody has gained yet`);
+        continue;
+      }
+      post.charts.push({ attachment: renderProgressChart(data), name: uniqueFileName(list.metric, usedNames) });
+    } catch (err) {
+      console.error(`[WeeklyAnnounce] Failed to draw the chart for ${list.title}:`, err);
+      post.chartProblems.push(`${list.title}: ${err.message}`);
+    }
+  }
+  return post;
 }
 
 module.exports = {
@@ -392,5 +580,8 @@ module.exports = {
   getDraft,
   updateDraft,
   deleteDraft,
+  acceptDraft,
   joinAnnouncements,
+  announcementParts,
+  buildPost,
 };
