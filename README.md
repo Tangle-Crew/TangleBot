@@ -32,10 +32,11 @@ A Discord bot built for the **Tangle Crew** clan in [Old School RuneScape](https
 | [`/channelmap`](#-channelmap--channel-id-for-the-web-panel) | Shows a channel's ID for the web panel | Manage Server |
 | [`/weeklycomp`](#-weeklycomp--discord-event--wise-old-man-competitions) | Creates a Discord event plus WOM competitions | Templar |
 | [`/weeklycompstats`](#-weeklycompstats--competition-leaderboard) | Standings for the running WOM competitions | Everyone |
+| [`/weeklyannounce`](#-weeklyannounce--weekly-winners-and-announcements) | Schedules the weekly winners and announcements post for 5 minutes after the next competition ends | Templar |
 | [`/stalemembers`](#-stalemembers--inactive-clan-members) | Lists WOM group members who were inactive or gained too little XP over a number of months | Templar (posts in the admin log) |
 | [`/honeypot`](#honeypot-channel-trap) | Test mode for the honeypot trap | Owner or Templar |
 
-Role checks for **Templar** and **Owner** on the high score commands and `/refreshboards` fail **open**: if `TEMPLAR_ROLE_ID` / `OWNER_ROLE_ID` is unset, anyone can use them. `/spinwheel`, `/weeklycomp`, `/stalemembers` and `/honeypot` fail **closed**: if their role ID is unset, no one can.
+Role checks for **Templar** and **Owner** on the high score commands and `/refreshboards` fail **open**: if `TEMPLAR_ROLE_ID` / `OWNER_ROLE_ID` is unset, anyone can use them. `/spinwheel`, `/weeklycomp`, `/weeklyannounce`, `/stalemembers` and `/honeypot` fail **closed**: if their role ID is unset, no one can.
 
 ---
 
@@ -415,6 +416,85 @@ Shows the standings for every WOM competition the group is running. Anyone can u
 5. If nothing is running, it names the next competition(s) and when they start.
 
 Standings are fetched at most every 5 minutes and shared between runs; sooner when a competition starts or ends or `/weeklycomp` creates one, and 1 minute after an error. Gains are only as fresh as each player's last WOM update. The command doesn't run update all.
+
+</details>
+
+---
+
+### 📣 `/weeklyannounce` — Weekly Winners and Announcements
+
+Schedules one post for 5 minutes after the next clan competition ends, so WOM's final totals are in: a **winners** message with the top 3 and a progress chart, then an **announcements** message with up to 5 staff-written announcements. Run `/weeklyannounce setup` once a week; nothing is scheduled until you preview the post and press **Accept**. Replies privately. **Requires** `TEMPLAR_ROLE_ID`, `WOM_GROUP_ID` and `ADMIN_LOG_CHANNEL_ID`.
+
+| Option | Required | Description |
+|--------|----------|-------------|
+| `channel` | Yes | Where to post. Only shown when `WEEKLY_ANNOUNCE_CHANNEL_ID` isn't set. The bot needs **View Channel**, **Send Messages** and **Attach Files** there, plus **Mention Everyone** for @here, @everyone or roles that aren't mentionable. |
+| `start` | No | Send time, Eastern Time, in the same formats as `/weeklycomp` (`YYYY-MM-DD`, `YYYY/MM/DD` or `MM/DD/YYYY`, optionally with `18` or `6pm`). Must be in the future. Leave it blank to send 5 minutes after the next competition in the WOM group ends. |
+
+<details>
+<summary><strong>Environment variables</strong></summary>
+
+| Variable | Required | Description |
+|---|---|---|
+| `TEMPLAR_ROLE_ID` | Yes | Who can run the command and press its buttons (fails closed). The command isn't loaded without it. |
+| `WOM_GROUP_ID` | Yes | The group whose competitions are read. The command isn't loaded without it. |
+| `ADMIN_LOG_CHANNEL_ID` | Yes | Receives each scheduled post, each send, late sends and failures. The command isn't loaded without it. |
+| `WEEKLY_ANNOUNCE_CHANNEL_ID` | Recommended | The channel the post goes to. When set, the command has no `channel` option. |
+| `WOM_API_KEY` | No | Raises WOM's rate limit, which makes the preview and the chart load faster. |
+
+</details>
+
+<details>
+<summary><strong>Building the post</strong></summary>
+
+1. A private panel shows the channel, the send time and an `N / 2,000` character count for the announcements. Past 2,000 the panel turns amber.
+2. The first row, **Weekly winners, top 3 with chart**, names the competitions it uses. By default those are all the competitions ending next. Its menu lists the group's competitions still to end, so you can untick some or pick others. The post sends 5 minutes after the last picked one ends, so WOM's final totals are in. With a typed `start`, the send time stays as typed: the competitions ending next are still ticked by default, the menu lists every competition started by then, and **Automatic** picks the ones that last ended by the send time. A competition still running at the send time posts the standings at that point, and the preview warns about it.
+3. **Add announcement (n/5)** opens a box for up to 2,000 characters. Paste the announcement as you want it posted: Discord formatting (`**bold**`, `# headers`, `> quotes`, lists), emojis and pings are kept. Raw mentions (`<@&id>`, `<#id>`, `<:name:id>`) work, and plain `@Role Name` and `#channel-name` are turned into real mentions when the server has that role or channel.
+4. Each announcement has **Edit**, **Up**, **Down** and **Remove**. They're joined in order, with a blank line between them.
+5. Drafts are saved, so the panel keeps working after a restart. Any Templar can use its buttons. Drafts left untouched for 14 days are deleted.
+
+</details>
+
+<details>
+<summary><strong>Preview and approval</strong></summary>
+
+**Preview** privately posts both messages exactly as they'll be sent, without pinging anyone, then a check list:
+
+- The announcements' length, and whether they fit in one message.
+- That the send time is in the future.
+- Who it pings, with a warning if the bot can't ping them.
+- Whether a chart is attached. Before the competition ends, the winners and chart are the standings so far. The final results are loaded when it sends.
+- Which winners matched a server member and will be pinged, and which are shown by RSN instead.
+- Any section without a pet emoji, and why.
+
+Under it, **Accept** schedules the post and logs who scheduled it, the channel, the send time and a summary to the admin log. **Edit** goes back to the panel with everything kept, and **Cancel** discards the draft.
+
+Announcements over 2,000 characters are sent as **2 messages** back to back, split between announcements (never in the middle of one). Accept then reads **Accept and send announcements as 2 messages**. If they wouldn't fit in two, or the send time has passed, Accept is disabled.
+
+</details>
+
+<details>
+<summary><strong>Winners and chart</strong></summary>
+
+- **Competitions:** the ones picked on the panel, by default all those ending next. With **Automatic** picked, the ones that last ended by the send time.
+- **Merging:** competitions that end together are added into one list when they share a unit (kc with kc, xp with xp) and a name prefix, e.g. `BOTW T3 Gauntlet` and `BOTW T3 Corrupted Gauntlet`. Others get their own section and chart in the same message.
+- **Format:** a "Hello @everyone" intro, then per list a heading with the boss's pet emoji and the title linked to WOM, the clan's total, 🥇🥈🥉 with each player's total, and a line asking 1st place to contact @Templar for their BOTW (or SOTW) winnings.
+- **Places:** 1st to 3rd. Tied players share a line, and a tie for 2nd leaves no 3rd. If nobody gained anything, the section says so and has no chart.
+- **Mentions:** each winner's RSN is matched to a server member by nickname, display name or username, ignoring case, spaces, `_` and `-`. A name that starts with the RSN also counts ("Snow I 🍌x14" for `Snow I`) when nobody matches exactly. RSNs matching nobody, or more than one member, are shown in bold without a ping.
+- **Emojis:** the heading uses the bot's own emoji (Developer Portal → Emojis) named after the boss's pet, e.g. `Youngllef` for the Gauntlet. A leading "Pet" can be left out (`Snakeling` for Pet snakeling). The boss-to-pet list is in `src/utils/bossPets.js`.
+- **Chart:** one point per day from start to end. Everything is gained since the start, not lifetime totals. The top 5 players are lines, with their gains in the legend (`+212 kc`), and the clan's total gains are a dashed white line, all on one scale so the total is always highest.
+- **Data:** WOM only records a player when they're updated, so a line can start late and the total can jump near the end.
+
+</details>
+
+<details>
+<summary><strong>Sending</strong></summary>
+
+1. At the send time the bot loads fresh results from WOM, draws the charts, and posts the winners message, then the announcements. Both are plain messages and ping as written: the winners message pings @everyone, the matched winners and @Templar.
+2. If WOM can't be reached, it retries 3 times, 2 minutes apart, then sends the announcements without the winners.
+3. Each send is reported to the admin log with links to the messages, or with the error and what was already posted if it fails.
+4. A post sends **once**. Scheduled posts survive restarts. If the bot was down at the send time, it sends as soon as it's back, with a "sending late" alert. If a send was interrupted, the rest is sent 15 minutes later, without repeating what was already posted.
+
+This feature's WOM calls run one at a time to stay inside WOM's rate limit: one competition takes about 8 calls, roughly 30 seconds without `WOM_API_KEY`. Drafts and scheduled posts are kept in `data/weeklyannounce.json`, which the Docker setup already keeps between restarts.
 
 </details>
 
