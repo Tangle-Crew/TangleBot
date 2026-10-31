@@ -27,24 +27,32 @@ function buildCompTitle(prefix, metric) {
   return `${prefix} ${shortMetricName(metric.value)}`;
 }
 
-// A wall-clock date and hour in timeZone (DST included) as a Date.
-function zonedTimeToUtc(year, month, day, hour, timeZone) {
-  const utcGuess = Date.UTC(year, month - 1, day, hour, 0, 0);
-  if (timeZone === 'UTC') return new Date(utcGuess);
-
+// How far timeZone's wall clock is ahead of UTC at the instant ms, in ms (negative behind UTC).
+function timeZoneOffsetMs(ms, timeZone) {
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat('en-US', {
       timeZone,
       hour12: false,
       year: 'numeric', month: '2-digit', day: '2-digit',
       hour: '2-digit', minute: '2-digit', second: '2-digit',
-    }).formatToParts(new Date(utcGuess)).map(p => [p.type, p.value])
+    }).formatToParts(new Date(ms)).map(p => [p.type, p.value])
   );
   const asIfLocal = Date.UTC(
     Number(parts.year), Number(parts.month) - 1, Number(parts.day),
     Number(parts.hour) % 24, Number(parts.minute), Number(parts.second)
   );
-  return new Date(utcGuess - (asIfLocal - utcGuess));
+  return asIfLocal - ms;
+}
+
+// A wall-clock date and hour in timeZone (DST included) as a Date. The offset is read again at the
+// first result, since a DST change between the two instants (the early hours of a change day) would
+// leave it an hour off. An hour skipped when clocks go forward resolves to the hour before.
+function zonedTimeToUtc(year, month, day, hour, timeZone) {
+  const utcGuess = Date.UTC(year, month - 1, day, hour, 0, 0);
+  if (timeZone === 'UTC') return new Date(utcGuess);
+
+  const firstResult = utcGuess - timeZoneOffsetMs(utcGuess, timeZone);
+  return new Date(utcGuess - timeZoneOffsetMs(firstResult, timeZone));
 }
 
 // YYYY-MM-DD, YYYY/MM/DD or MM/DD/YYYY, optionally with an hour (24-hour, or with am/pm), read in
