@@ -141,6 +141,7 @@ function buildCommandData() {
 
 module.exports = {
   data: buildCommandData(),
+  parseDateInput,
 
   async autocomplete(interaction) {
     const focused = interaction.options.getFocused(true);
