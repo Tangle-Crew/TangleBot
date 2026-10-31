@@ -29,8 +29,11 @@ function findMetric(input) {
   return WOM_METRICS.find(m => m.name.toLowerCase() === lower) ?? null;
 }
 
+// A metric newer than the installed @wise-old-man/utils falls back to its key in words:
+// "the_fractured_archive" -> "The Fractured Archive".
 function metricName(metric) {
-  return MetricProps[metric]?.name ?? metric;
+  return MetricProps[metric]?.name
+    ?? String(metric).split('_').filter(Boolean).map(word => word[0].toUpperCase() + word.slice(1)).join(' ');
 }
 
 // Without a leading "The" ("The Gauntlet" -> "Gauntlet"), as competitions are named.
@@ -48,8 +51,13 @@ function formatNumber(amount, metric) {
   return amount.toLocaleString('en-US', { maximumFractionDigits: decimals });
 }
 
+// "kc", "xp" or "score", or '' for EHP/EHB and other 'value' metrics.
+function metricUnit(metric) {
+  return MEASURE_UNITS[MetricProps[metric]?.measure] ?? '';
+}
+
 function formatAmount(amount, metric) {
-  const unit = MEASURE_UNITS[MetricProps[metric]?.measure] ?? '';
+  const unit = metricUnit(metric);
   return `${formatNumber(amount, metric)}${unit ? ` ${unit}` : ''}`;
 }
 
@@ -60,6 +68,7 @@ module.exports = {
   metricName,
   shortMetricName,
   metricCategory,
+  metricUnit,
   formatNumber,
   formatAmount,
 };
