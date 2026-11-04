@@ -171,6 +171,7 @@ const CATEGORIES = {
       { label: 'ToBHM', emoji: '1535325447045255168', color: '#7A0C0C', sizeOptions: sizeRange(5) },
       { label: 'ToA', emoji: '1535325450300301463', color: '#D2A679', sizeOptions: sizeRange(8) },
       { label: 'ToAExpert', emoji: '1535325449003991141', color: '#D2A679', sizeOptions: sizeRange(8) },
+      { label: 'TFA', emoji: '1567353989891104849', color: '#64af32', sizeOptions: sizeRange(8) },
     ],
   },
   minigames: {
