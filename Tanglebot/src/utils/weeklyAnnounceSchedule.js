@@ -1,4 +1,4 @@
-const { AttachmentBuilder } = require('discord.js');
+const { AttachmentBuilder, escapeMarkdown } = require('discord.js');
 const { getJob, listPendingJobs, updateJob, buildPost } = require('./weeklyAnnounce');
 const { notifyAdminLog } = require('./roleMenu');
 const { discordTimestamp, truncate } = require('./db');
@@ -15,7 +15,7 @@ const WINNERS_RETRY_MS = 2 * 60 * 1000;
 // Sends starting later than this after their send time are reported to the admin log as late.
 const LATE_ALERT_MS = 2 * 60 * 1000;
 // The winners message and announcements ping as written: @everyone/@here, roles and users.
-const ANNOUNCEMENT_MENTIONS = { parse: ['everyone', 'roles', 'users'] };
+const POST_MENTIONS = { parse: ['everyone', 'roles', 'users'] };
 const SENT_COLOR = 0x3ba55d;
 const FAILED_COLOR = 0xc0392b;
 const LATE_COLOR = 0xe67e22;
@@ -96,12 +96,12 @@ async function sendJob(client, id) {
       const message = await channel.send({
         content: post.winnersText,
         files: post.charts.map(c => new AttachmentBuilder(c.attachment, { name: c.name })),
-        allowedMentions: ANNOUNCEMENT_MENTIONS,
+        allowedMentions: POST_MENTIONS,
       });
       job = updateJob(id, j => { j.sent.winners = message.id; });
     }
     for (let i = job.sent.announcements.length; i < post.announcementParts.length; i++) {
-      const message = await channel.send({ content: post.announcementParts[i], allowedMentions: ANNOUNCEMENT_MENTIONS });
+      const message = await channel.send({ content: post.announcementParts[i], allowedMentions: POST_MENTIONS });
       job = updateJob(id, j => { j.sent.announcements.push(message.id); });
     }
     job = updateJob(id, j => {
@@ -114,10 +114,15 @@ async function sendJob(client, id) {
     if (post.winnersError) problems.push(`⚠️ The winners couldn't be loaded from Wise Old Man, so no winners message was sent: ${post.winnersError}`);
     else if (!post.winnersText) problems.push('⚠️ No competition had ended by the send time, so no winners message was sent.');
     for (const problem of post.chartProblems) problems.push(`⚠️ No chart for ${problem}`);
+    // Worth knowing, but the post went out as intended.
+    const notes = [];
+    const unmatched = post.winners.filter(w => !w.userId).map(w => escapeMarkdown(w.name));
+    if (unmatched.length) notes.push(`-# Shown by RSN without a ping (no server member matched): ${unmatched.join(', ')}`);
+    for (const problem of post.emojiProblems) notes.push(`-# No pet emoji for ${problem}`);
     await notifyAdminLog(
       client,
       problems.length ? '⚠️ Weekly announcement sent with problems' : '📣 Weekly announcement sent',
-      truncate(`Posted in <#${job.channelId}> (scheduled by <@${job.acceptedBy}>): ${describeSent(job, channel.guild.id)}.${problems.length ? `\n${problems.join('\n')}` : ''}`, 4096),
+      truncate(`Posted in <#${job.channelId}> (scheduled by <@${job.acceptedBy}>): ${describeSent(job, channel.guild.id)}.${[...problems, ...notes].map(line => `\n${line}`).join('')}`, 4096),
       [],
       problems.length ? LATE_COLOR : SENT_COLOR
     );

@@ -13,7 +13,7 @@ const TOTAL_COLOR = 'rgba(255,255,255,0.85)';
 // One per top-5 player, in rank order.
 const PLAYER_COLORS = ['#f0b232', '#5865f2', '#3ba55d', '#eb459e', '#00b0f4'];
 const TICKS = 5;
-// The value axis's label for each metricUnit.
+// The title's and value axis's label for each metricUnit.
 const AXIS_LABELS = { kc: 'KC gained', xp: 'XP gained', score: 'Score gained' };
 
 // Axis labels: "250k", "1.2m".
@@ -59,9 +59,8 @@ function drawLine(ctx, points, color, { width = 3, dashed = false } = {}) {
 // data from loadChartData in weeklyAnnounce.js. Returns a PNG buffer.
 function renderProgressChart(data) {
   const { title, metric, marks, players, total } = data;
-  // Every value is gained since the start, never a lifetime total, which the labels say.
-  const unit = metricUnit(metric);
-  const gainedLabel = unit ? `${unit} gained` : 'gains';
+  // Values are gains since the start, not lifetime totals, and the labels say so.
+  const label = AXIS_LABELS[metricUnit(metric)] ?? 'Gains';
   const gained = amount => `+${formatAmount(amount, metric)}`;
   const canvas = createCanvas(WIDTH, HEIGHT);
   const ctx = canvas.getContext('2d');
@@ -88,7 +87,7 @@ function renderProgressChart(data) {
   ctx.font = 'bold 24px sans-serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  ctx.fillText(`${title} — ${gainedLabel}`, PADDING.left, 32);
+  ctx.fillText(`${title} — ${label}`, PADDING.left, 32);
 
   ctx.font = '14px sans-serif';
   for (let i = 0; i <= TICKS; i++) {
@@ -109,7 +108,7 @@ function renderProgressChart(data) {
   ctx.textAlign = 'center';
   ctx.translate(22, plot.top + plot.height / 2);
   ctx.rotate(-Math.PI / 2);
-  ctx.fillText(AXIS_LABELS[unit] ?? 'Gains', 0, 0);
+  ctx.fillText(label, 0, 0);
   ctx.restore();
 
   ctx.fillStyle = AXIS_TEXT;

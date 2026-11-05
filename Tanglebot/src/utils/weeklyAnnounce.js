@@ -95,7 +95,7 @@ function competitionChoices(all, { fixedSendAt = null, now = Date.now() } = {}) 
   return shown.slice(0, MAX_CHOICES).map(c => ({ id: c.id, title: c.title, endsAt: new Date(c.endsAt).toISOString() }));
 }
 
-// The group's competitions with the latest end time at or before `at`, for a typed send time.
+// The group's competitions with the latest end time at or before `at`, for Automatic.
 async function findLastEndedBy(groupId, at) {
   const all = await loadGroupCompetitions(groupId);
   const ended = all.filter(c => new Date(c.endsAt).getTime() <= new Date(at).getTime());
@@ -104,8 +104,8 @@ async function findLastEndedBy(groupId, at) {
   return ended.filter(c => new Date(c.endsAt).getTime() === endsAt);
 }
 
-// The competitions a draft's winners come from: those saved at setup, or for a typed send time the
-// ones that last ended by then.
+// The competitions a draft's winners come from: those picked on the panel, or with Automatic (none
+// picked) the ones that last ended by the send time.
 async function competitionsForDraft(draft, groupId) {
   return draft.competitions.length ? draft.competitions : findLastEndedBy(groupId, draft.sendAt);
 }
@@ -182,8 +182,9 @@ function topPlaces(ranked) {
   return places;
 }
 
+// Brackets are left out of the text, since they'd end the link early.
 function competitionLink(text, id) {
-  return `[${escapeMarkdown(text)}](<${competitionUrl(id)}>)`;
+  return `[${escapeMarkdown(text.replace(/[[\]]/g, ''))}](<${competitionUrl(id)}>)`;
 }
 
 // The list's title linking to its competitions on WOM: "BOTW T3: [Gauntlet] + [Corrupted
@@ -236,7 +237,7 @@ function buildWinnersSection(list, { emojis, mentions }) {
 
 // Message 1's text: the intro, then one section per winners list. context: { emojis, mentions },
 // as for buildWinnersSection.
-function buildWinnersText(lists, context = { emojis: [], mentions: new Map() }) {
+function buildWinnersText(lists, context) {
   const sections = lists.map(list => buildWinnersSection(list, context));
   return truncate(`${WINNERS_INTRO}\n${sections.join('\n\n')}`, MESSAGE_LIMIT);
 }
@@ -405,9 +406,9 @@ function makeDraftId() {
   return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 }
 
-// competitions: [{ id, title }] the winners come from, or [] for a typed send time (fixedSendAt)
-// meaning the ones that last ended by then. choices: what the panel offers instead, from
-// competitionChoices.
+// competitions: [{ id, title }] the winners come from, or [] for Automatic. choices: what the
+// panel's menu offers, from competitionChoices. fixedSendAt: the send time was typed, so picking
+// competitions doesn't move it.
 function createDraft({ ownerId, channelId, sendAt, fixedSendAt, competitions, choices = [] }) {
   const now = new Date().toISOString();
   const draft = {
@@ -523,7 +524,7 @@ function uniqueFileName(metric, used) {
 }
 
 // Everything the post needs, as the preview shows it and the send posts it:
-// - winnersText: message 1's text, or null when no competition has ended by the send time
+// - winnersText: message 1's text, or null when there are no competitions to take winners from
 // - charts: [{ attachment, name }] for message 1; chartProblems: why a list has no chart
 // - winnersError: why the winners couldn't be loaded from WOM, if they couldn't
 // - running: whether any of the competitions is still running (the winners are standings so far)
@@ -545,15 +546,14 @@ async function buildPost(draft, guild, { fresh = false } = {}) {
     runningAtSend: false,
     winners: [],
     emojiProblems: [],
-    competitions: [],
     announcements,
     announcementParts: splitAnnouncements(announcements),
   };
 
   let lists;
   try {
-    post.competitions = await competitionsForDraft(draft, Number(process.env.WOM_GROUP_ID));
-    lists = await loadWinnerLists(post.competitions, { fresh });
+    const competitions = await competitionsForDraft(draft, Number(process.env.WOM_GROUP_ID));
+    lists = await loadWinnerLists(competitions, { fresh });
   } catch (err) {
     post.winnersError = err.message;
     return post;
@@ -597,10 +597,7 @@ module.exports = {
   loadGroupCompetitions,
   findNextEnding,
   competitionChoices,
-  competitionsForDraft,
-  loadWinnerLists,
-  buildWinnersText,
-  loadChartData,
+  competitionLink,
   createDraft,
   getDraft,
   updateDraft,

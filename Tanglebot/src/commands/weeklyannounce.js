@@ -23,6 +23,7 @@ const {
   loadGroupCompetitions,
   findNextEnding,
   competitionChoices,
+  competitionLink,
   createDraft,
   getDraft,
   updateDraft,
@@ -32,7 +33,6 @@ const {
   announcementParts,
   buildPost,
 } = require('../utils/weeklyAnnounce');
-const { competitionUrl } = require('../utils/wiseOldMan');
 const { discordTimestamp, truncate } = require('../utils/db');
 const { DEFAULT_EMBED_COLOR } = require('../utils/embedColor');
 const { notifyAdminLog } = require('../utils/roleMenu');
@@ -45,7 +45,7 @@ const SEND_DELAY_MS = 5 * 60 * 1000;
 // When set, every post goes here and the command has no channel option.
 const CHANNEL_ID = process.env.WEEKLY_ANNOUNCE_CHANNEL_ID?.trim() || null;
 
-// "weeklyannounce:<action>:<draftId>[:<index>]" on the panel's buttons and the text modal.
+// "weeklyannounce:<action>:<draftId>[:<index>]" on the panel's buttons, menu and text modal.
 const ID_PREFIX = 'weeklyannounce';
 // The panel's side stripe turns amber once the announcements are over MESSAGE_LIMIT.
 const OVER_LIMIT_COLOR = 0xf0a020;
@@ -95,10 +95,6 @@ function plural(count, word) {
   return `${count.toLocaleString('en-US')} ${word}${count === 1 ? '' : 's'}`;
 }
 
-function competitionLink(competition) {
-  return `[${escapeMarkdown(competition.title.replace(/[[\]]/g, ''))}](<${competitionUrl(competition.id)}>)`;
-}
-
 // The permissions from SEND_PERMISSIONS the bot is missing in channel, by name.
 function missingSendPermissions(channel, botUser) {
   const permissions = channel.permissionsFor(botUser);
@@ -129,8 +125,8 @@ function formatEastern(date) {
 }
 
 // The menu of competitions the winners come from, with the draft's ticked. A typed send time adds
-// Automatic (the ones that last ended by then), ticked while no competition is picked, as when
-// none had started and was still to end at setup. Null when setup found nothing to offer.
+// Automatic (the ones that last ended by then), ticked when no competition is. Null when setup
+// found nothing to offer.
 function buildCompetitionSelect(draft) {
   if (!draft.choices?.length) return null;
   const picked = new Set(draft.competitions.map(c => c.id));
@@ -173,7 +169,7 @@ function buildPanel(draft) {
     ].join('\n')));
 
   const source = draft.competitions.length
-    ? `From ${draft.competitions.map(competitionLink).join(', ')}`
+    ? `From ${draft.competitions.map(c => competitionLink(c.title, c.id)).join(', ')}`
     : 'From the competitions that have ended by the send time';
   const competitionSelect = buildCompetitionSelect(draft);
   const howToChange = !competitionSelect
@@ -481,8 +477,9 @@ async function handleWeeklyAnnounceButton(interaction) {
   }
 }
 
-// The competitions menu. Picking competitions moves the send time to when the last of them ends,
-// unless it was typed. Automatic ticked alongside others means whichever was ticked last.
+// The competitions menu. Picking competitions moves the send time to SEND_DELAY_MS after the last
+// of them ends, unless it was typed. Automatic ticked alongside others means whichever was ticked
+// last.
 async function handleWeeklyAnnounceSelect(interaction) {
   const [, action, draftId] = interaction.customId.split(':');
   if (!isTemplar(interaction.member)) return rejectNonTemplar(interaction);
@@ -603,9 +600,8 @@ module.exports = {
       return reject(`The bot is missing **${missing.join(', ')}** in ${channel}. Give it those permissions and try again.`);
     }
 
-    // The winners default to the competitions ending next, also with a typed send time (among those
-    // started by then). A typed send time works without WOM: the winners are then the ones that last
-    // ended by then, with nothing to pick from.
+    // The winners default to the competitions ending next; with a typed send time, of those started
+    // by then. A typed send time also works without WOM, as Automatic with nothing to pick.
     const fixedSendAt = Boolean(sendAt);
     let all = [];
     try {

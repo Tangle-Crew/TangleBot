@@ -74,9 +74,8 @@ const METRIC_PETS = {
   woodcutting: 'Beaver',
 };
 
-// Emoji names can only have letters, digits and _, and may leave out a leading "Pet" ("Snakeling"
-// for "Pet snakeling") or add a trailing "icon" ("Archive_Guardian_icon"), so only letters and
-// digits count and those are dropped.
+// Names compared by letters and digits only (emoji names can only have those and _), without a
+// leading "Pet" ("Snakeling" for "Pet snakeling") or a trailing "icon" ("Archive_Guardian_icon").
 function petKey(name) {
   return String(name).toLowerCase().replace(/[^a-z0-9]/g, '').replace(/^pet(?=.)/, '').replace(/(?<=.)icon$/, '');
 }
