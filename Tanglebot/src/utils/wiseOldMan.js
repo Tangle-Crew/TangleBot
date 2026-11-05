@@ -87,6 +87,11 @@ function getCompetitionDetails(competitionId) {
   return womClient().competitions.getCompetitionDetails(competitionId);
 }
 
+// Lifetime values over time (newest first) for the competition's top 5 players.
+function getCompetitionTopHistory(competitionId) {
+  return womClient().competitions.getCompetitionTopHistory(competitionId);
+}
+
 function isCompetitionOngoing(competition, now = Date.now()) {
   return new Date(competition.startsAt).getTime() <= now && new Date(competition.endsAt).getTime() > now;
 }
@@ -112,6 +117,7 @@ module.exports = {
   getGroupDetails,
   getGroupGains,
   getCompetitionDetails,
+  getCompetitionTopHistory,
   isCompetitionOngoing,
   rankParticipants,
   competitionUrl,

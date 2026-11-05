@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
+import { fileURLToPath } from 'node:url';
 
-const root = path.resolve(new URL('../src/', import.meta.url).pathname);
+const root = fileURLToPath(new URL('../src/', import.meta.url));
 class Builder {
   setName(name) { this.name = name; return this; }
   setDescription() { return this; }

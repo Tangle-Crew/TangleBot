@@ -22,6 +22,8 @@ const { syncDiscordCatalog, isConfigured: isLfgBackendConfigured } = require('..
 const { startLfgDeliveryWorker } = require('../utils/lfgDeliveryWorker');
 const { startCompEndingReminder } = require('../utils/compEndingReminder');
 const { handleSyncedGroupButtonInteraction } = require('../utils/lfgSyncedPost');
+const { handleWeeklyAnnounceButton, handleWeeklyAnnounceSelect, handleWeeklyAnnounceModal } = require('../commands/weeklyannounce');
+const { restoreWeeklyAnnouncements, stopWeeklyAnnouncements } = require('../utils/weeklyAnnounceSchedule');
 
 // customId prefix -> handler, per interaction kind. The honeypot route has no errorReply, so its
 // failures stay silent.
@@ -31,13 +33,16 @@ const BUTTON_ROUTES = [
   { prefix: 'lfgpostgroup:', handler: handleLfgPostGroupButtonInteraction, errorLabel: '[LFG] Post group button interaction error:', errorReply: 'Something went wrong updating that group.' },
   { prefix: 'lfgsyncgroup:', handler: handleSyncedGroupButtonInteraction, errorLabel: '[LFG] Synced group button interaction error:', errorReply: 'Something went wrong updating that shared LFG group.' },
   { prefix: 'stalemembers:', handler: handleStaleMembersButton, errorLabel: '[StaleMembers] Button interaction error:', errorReply: 'Something went wrong with that stale members list.' },
+  { prefix: 'weeklyannounce:', handler: handleWeeklyAnnounceButton, errorLabel: '[WeeklyAnnounce] Button interaction error:', errorReply: 'Something went wrong updating that weekly announcement.' },
 ];
 const SELECT_ROUTES = [
   { prefix: 'lfgpost:', handler: handleLfgPostSelectInteraction, errorLabel: '[LFG] Post select interaction error:', errorReply: 'Something went wrong updating your LFG post setup.' },
   { prefix: 'stalemembers:', handler: handleStaleMembersSelect, errorLabel: '[StaleMembers] Rank picker interaction error:', errorReply: 'Something went wrong with the rank picker.' },
+  { prefix: 'weeklyannounce:', handler: handleWeeklyAnnounceSelect, errorLabel: '[WeeklyAnnounce] Competition picker interaction error:', errorReply: 'Something went wrong updating that weekly announcement.' },
 ];
 const MODAL_ROUTES = [
   { prefix: 'lfgpost:', handler: handleLfgPostModalSubmit, errorLabel: '[LFG] Post modal submit error:', errorReply: 'Something went wrong creating your LFG post.' },
+  { prefix: 'weeklyannounce:', handler: handleWeeklyAnnounceModal, errorLabel: '[WeeklyAnnounce] Modal submit error:', errorReply: 'Something went wrong saving that announcement.' },
 ];
 
 // Runs the route matching the customId, logging (and optionally replying) on failure.
@@ -91,6 +96,14 @@ function loadEvents(client) {
     }
     stopLfgDeliveryWorker = startLfgDeliveryWorker();
     stopCompEndingReminder = startCompEndingReminder(client);
+    // Before the slower startup steps, so a post due while the bot was down goes out promptly.
+    if (client.commands.has('weeklyannounce')) {
+      try {
+        restoreWeeklyAnnouncements(client);
+      } catch (err) {
+        console.error('[WeeklyAnnounce] Failed to restore scheduled posts:', err);
+      }
+    }
 
     try {
       await sendHoneypotStartupMessage(client, honeypotConfig);
@@ -219,6 +232,7 @@ function loadEvents(client) {
       stopCompEndingReminder();
       stopCompEndingReminder = null;
     }
+    stopWeeklyAnnouncements();
   });
 }
 
