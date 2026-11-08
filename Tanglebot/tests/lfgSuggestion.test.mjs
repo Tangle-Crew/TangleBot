@@ -33,9 +33,9 @@ function withEnv(env, fn) {
   });
 }
 
-test('no button when the admin log or Owner role is missing', async () => {
+test('no button without an admin log; the Owner role is optional', async () => {
   await withEnv({ admin: undefined, owner: '9' }, () => assert.deepEqual(suggestion.buildSuggestRows(), []));
-  await withEnv({ admin: '1', owner: undefined }, () => assert.deepEqual(suggestion.buildSuggestRows(), []));
+  await withEnv({ admin: '1', owner: undefined }, () => assert.equal(suggestion.buildSuggestRows().length, 1));
   await withEnv({ admin: '1', owner: '9' }, () => {
     const rows = suggestion.buildSuggestRows();
     assert.equal(rows.length, 1);
@@ -87,5 +87,25 @@ test('a failed send tells the user and does not start the cooldown', async () =>
     const retry = fakeInteraction({ userId: 'fail-test' });
     await suggestion.handleSuggestModalSubmit(retry);
     assert.equal(retry.sent.length, 1);
+  });
+});
+
+test('without OWNER_ROLE_ID the suggestion is sent with no ping', async () => {
+  await withEnv({ admin: '1', owner: undefined }, async () => {
+    const i = fakeInteraction({ userId: 'noowner-test' });
+    await suggestion.handleSuggestModalSubmit(i);
+    assert.equal(i.sent.length, 1);
+    assert.equal(i.sent[0].content, undefined);
+    assert.deepEqual(i.sent[0].allowedMentions, { roles: [] });
+  });
+});
+
+test('two simultaneous submissions from one person send only one', async () => {
+  await withEnv({ admin: '1', owner: '9' }, async () => {
+    const sent = [];
+    const a = fakeInteraction({ userId: 'race-test', sent });
+    const b = fakeInteraction({ userId: 'race-test', sent });
+    await Promise.all([suggestion.handleSuggestModalSubmit(a), suggestion.handleSuggestModalSubmit(b)]);
+    assert.equal(sent.length, 1);
   });
 });

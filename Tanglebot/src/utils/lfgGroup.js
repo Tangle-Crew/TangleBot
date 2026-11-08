@@ -221,16 +221,19 @@ function planAfterMemberLeft(group, wasFull) {
   return group.members.size > 0 ? 'notice' : 'empty';
 }
 
-// One line of lfg-history.jsonl.
+// One line of lfg-history.jsonl. participantIds is everyone who was ever a member; memberIds is
+// who was still in at the end. closeReason: 'empty' | 'disbanded' | 'inactive'.
 function buildHistoryRecord(group, reason, now = new Date()) {
   return {
     closedAt: now.toISOString(),
+    createdAt: group.createdAt ? new Date(group.createdAt).toISOString() : null,
     id: group.id,
     activity: group.roleLabel,
     size: group.sizeLabel,
     startEpoch: group.timeEpoch,
     creatorId: group.creatorId,
     memberIds: [...group.members],
+    participantIds: [...(group.participants ?? group.members)],
     reason,
   };
 }

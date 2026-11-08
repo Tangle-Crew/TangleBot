@@ -9,6 +9,7 @@ const {
   ButtonBuilder,
   ButtonStyle,
   UserSelectMenuBuilder,
+  EmbedBuilder,
 } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
@@ -89,6 +90,8 @@ const activeGroups = new Map(); // groupId -> group state; saved to GROUPS_DATA_
 
 // One JSON line per finished group, for later stats.
 const HISTORY_FILE = 'lfg-history.jsonl';
+// Tests point this elsewhere; read when used.
+const historyDir = () => process.env.LFG_HISTORY_DIR || DATA_DIR;
 // Embed color for the finished-group log line (not an alert).
 const GROUP_LOG_COLOR = 0x5865f2;
 
@@ -130,6 +133,9 @@ function serializeGroup(group) {
     activityMessageId: group.activityMessageId,
     queue: [...group.queue],
     pendingOfferUserId: group.pendingOfferUserId,
+    participants: [...group.participants],
+    createdAt: group.createdAt,
+    closeReason: group.closeReason,
   };
 }
 
@@ -139,6 +145,10 @@ function newGroupState(fields) {
     ...fields,
     sizeCap: fields.sizeCap ?? Infinity,
     members: new Set(fields.members),
+    // Everyone who was ever in the group, for the history record.
+    participants: new Set(fields.participants ?? fields.members),
+    createdAt: fields.createdAt ?? null,
+    closeReason: fields.closeReason ?? null,
     queue: [...fields.queue],
     cleanupTimeoutId: null,
     countdownTimeoutId: null,
@@ -422,6 +432,9 @@ async function createGroupPost(interaction, session, description) {
     sizeCap,
     description,
     members: new Set([interaction.user.id]),
+    participants: new Set([interaction.user.id]),
+    createdAt: Date.now(),
+    closeReason: null,
     status: 'open',
     threadId: null,
     activityMessageId: null,
@@ -630,6 +643,11 @@ async function requireGroup(interaction, groupId) {
   return group;
 }
 
+function addMember(group, userId) {
+  group.members.add(userId);
+  group.participants.add(userId);
+}
+
 // Clears any pending queue offer without starting a new one.
 function clearPendingOffer(group) {
   if (group.pendingOfferTimeoutId) clearTimeout(group.pendingOfferTimeoutId);
@@ -770,7 +788,7 @@ async function handleJoinButton(interaction, groupId) {
     );
   }
 
-  group.members.add(interaction.user.id);
+  addMember(group, interaction.user.id);
   // No longer empty.
   cancelScheduledCleanup(group);
   const justFilled = isGroupFull(group);
@@ -874,7 +892,7 @@ async function handleQueueAcceptButton(interaction, groupId) {
   // Mutate before awaiting, so the offer timeout can't also shift this person off the queue.
   clearPendingOffer(group);
   group.queue.shift();
-  group.members.add(interaction.user.id);
+  addMember(group, interaction.user.id);
   group.status = isGroupFull(group) ? 'closed' : 'open';
 
   await interaction.deferUpdate();
@@ -937,9 +955,10 @@ async function handleStartNowButton(interaction, groupId) {
 
 // Starts the disband grace period: stops timers, posts the notice with Cancel Disband, and
 // schedules the post's closing. The caller removes the main post's buttons first.
-async function beginDisband(client, channel, group, announcementText) {
+async function beginDisband(client, channel, group, announcementText, reason = 'disbanded') {
   console.log(`[LFG] Beginning disband for group ${group.id}`);
   group.status = 'disbanded';
+  group.closeReason = reason;
   clearPendingOffer(group);
   stopCountdownRefresh(group);
   stopStartPing(group);
@@ -997,6 +1016,7 @@ async function handleCancelDisbandButton(interaction, groupId) {
   }
 
   console.log(`[LFG] ${interaction.user.username} cancelled disband for group ${groupId}`);
+  group.closeReason = null;
   group.status = isGroupFull(group) ? 'closed' : 'open';
 
   if (group.status === 'open') scheduleCountdownRefresh(interaction.client, group);
@@ -1012,28 +1032,40 @@ async function handleCancelDisbandButton(interaction, groupId) {
 // How long to wait on the title change, which Discord rate-limits to 2 per 10 minutes.
 const RENAME_WAIT_MS = 10 * 1000;
 
-// Appends the group to the history file and posts a one-line summary to the admin log.
-async function recordFinishedGroup(client, group) {
-  const reason = group.status === 'disbanded' ? 'disbanded' : 'empty';
+// The finished-group line goes to LFG_LOG_CHANNEL_ID if set, otherwise the admin log.
+async function postGroupLog(client, text) {
+  const logChannelId = process.env.LFG_LOG_CHANNEL_ID;
+  if (!logChannelId) {
+    return notifyAdminLog(client, '📁 LFG Group Closed', text, [], GROUP_LOG_COLOR);
+  }
   try {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.appendFileSync(path.join(DATA_DIR, HISTORY_FILE), `${JSON.stringify(buildHistoryRecord(group, reason))}\n`);
+    const channel = await client.channels.fetch(logChannelId);
+    const embed = new EmbedBuilder().setTitle('📁 LFG Group Closed').setDescription(text).setColor(GROUP_LOG_COLOR).setTimestamp();
+    await channel.send({ embeds: [embed] });
+  } catch (err) {
+    console.error('[LFG] Could not post to LFG_LOG_CHANNEL_ID:', err.message);
+  }
+}
+
+// Appends the group to the history file and posts a one-line summary.
+async function recordFinishedGroup(client, group) {
+  const reason = group.closeReason ?? 'empty';
+  try {
+    fs.mkdirSync(historyDir(), { recursive: true });
+    fs.appendFileSync(path.join(historyDir(), HISTORY_FILE), `${JSON.stringify(buildHistoryRecord(group, reason))}\n`);
   } catch (err) {
     console.error(`[LFG] Could not write history for group ${group.id}:`, err.message);
   }
-  await notifyAdminLog(
+  await postGroupLog(
     client,
-    '📁 LFG Group Closed',
-    `**${group.roleLabel}** (${group.sizeLabel}) in <#${group.threadId}> was ${reason} with ${group.members.size} member(s).`,
-    [],
-    GROUP_LOG_COLOR
+    `**${group.roleLabel}** (${group.sizeLabel}) in <#${group.threadId}> was ${reason} with ${group.members.size} member(s).`
   );
 }
 
 // Closes a finished group's post: removes the buttons, records it, then renames, locks and
 // archives. The rename comes last so a rate limit has had time to clear, and each step is tried
 // on its own so one failure doesn't skip the rest.
-async function finishGroupThread(client, thread, group) {
+async function finishGroupThread(client, thread, group, { renameWaitMs = RENAME_WAIT_MS } = {}) {
   const failures = [];
   const attempt = async (label, step) => {
     try {
@@ -1050,7 +1082,7 @@ async function finishGroupThread(client, thread, group) {
   // archive over, so a rename still waiting on the rate limit is given up on.
   let waitId;
   const giveUp = new Promise((_, reject) => {
-    waitId = setTimeout(() => reject(new Error('rate limited')), RENAME_WAIT_MS);
+    waitId = setTimeout(() => reject(new Error('rate limited')), renameWaitMs);
   });
   await Promise.race([thread.setName(truncate(`[Closed] - ${group.roleLabel}`, 100)), giveUp]).catch((err) => {
     console.log(`[LFG] Left the title of closed post ${group.id} as is: ${err.message}`);
@@ -1179,7 +1211,7 @@ async function handleKeepAliveTimeout(client, group) {
     const channel = await client.channels.fetch(group.threadId);
     // Remove the main post's buttons.
     await updateMainPost(channel, group, []);
-    await beginDisband(client, channel, group, '⌛ No one confirmed this group was still active, so it was automatically disbanded.');
+    await beginDisband(client, channel, group, '⌛ No one confirmed this group was still active, so it was automatically disbanded.', 'inactive');
     console.log(`[LFG] Group ${group.id} auto-disbanded after a missed keep-alive check.`);
   } catch (err) {
     cleanupStaleGroupOrLog(group, err, `[LFG] Could not auto-disband group ${group.id} after a missed keep-alive check:`);
@@ -1209,6 +1241,7 @@ async function handleKeepAliveButton(interaction, groupId) {
 // Restarts a restored group's timers from now, as if its current state had just begun.
 async function resumeGroup(client, channel, group) {
   if (group.status === 'disbanded') {
+    group.closeReason ??= 'disbanded';
     const closesAtEpoch = Math.floor((Date.now() + DISBAND_DELAY_MS) / 1000);
     await sendOrEditActivity(
       channel,
@@ -1651,4 +1684,7 @@ module.exports = {
   handleLfgPostGroupButtonInteraction,
   handleRetiredSyncedGroupButton,
   restoreLfgGroups,
+  // Exported for tests.
+  finishGroupThread,
+  recordFinishedGroup,
 };

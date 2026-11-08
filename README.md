@@ -222,7 +222,8 @@ Creates a forum post where members can join a group for an activity, with a role
 | Variable | Required | Description |
 |---|---|---|
 | `LFG_FORUM_CHANNEL_ID` | Yes | Forum Channel for group posts. The command isn't loaded without it. |
-| `COORDINATOR_ROLE_ID` / `OWNER_ROLE_ID` | No | Staff who can Start Now, Disband, Cancel Disband and confirm Still Here on any group. |
+| `COORDINATOR_ROLE_ID` / `OWNER_ROLE_ID` | No | Staff who can Start Now, Disband, Cancel Disband, Manage and confirm Still Here on any group. Anyone with `COORDINATOR_ROLE_ID` is exempt from the 2-open-groups limit. |
+| `LFG_LOG_CHANNEL_ID` | No | Receives a line when each group closes. Defaults to `ADMIN_LOG_CHANNEL_ID`. |
 | `ADMIN_LOG_CHANNEL_ID` | No | Receives setup errors and a line for each finished group. |
 
 </details>
@@ -240,10 +241,10 @@ Creates a forum post where members can join a group for an activity, with a role
    - **Disband Group** — closes the post after a 1-minute grace period with a **Cancel Disband** button (members or staff; anyone in the group or queue can cancel).
 4. Joins and leaves post a notice without pinging the group. Filling up pings everyone with "Group formed, Good luck!"
 5. When a spot frees up in a full group, the first person in the queue gets **Accept Spot** / **Decline Spot** for 5 minutes. Declining or not answering removes them from the queue, and the spot goes to the next person. With nobody queued, the group reopens.
-6. An empty group closes after 15 minutes unless someone rejoins. A closed group's post is renamed `[Closed]`, locked and archived rather than deleted, a line is posted to `ADMIN_LOG_CHANNEL_ID`, and the group is appended to `Tanglebot/data/lfg-history.jsonl`. The bot needs **Manage Threads**.
+6. An empty group closes after 15 minutes unless someone rejoins. A closed group's post is renamed `[Closed]`, locked and archived rather than deleted, a line is posted to `LFG_LOG_CHANNEL_ID` (or the admin log), and the group is appended to `Tanglebot/data/lfg-history.jsonl` with everyone who joined, when it was created and why it closed (`empty`, `disbanded` or `inactive`). The bot needs **Manage Threads**.
 7. Members are pinged when the start time arrives (not after **Start Now**).
 8. Every 2 hours, starting no earlier than the start time, the group is asked if it's still active. No **Still Here** click within 10 minutes disbands it.
-9. On startup the bot posts or updates a pinned **Start Here** post in the forum explaining all of this. It has a **Make a Suggestion** button (shown when `ADMIN_LOG_CHANNEL_ID` and `OWNER_ROLE_ID` are set): a form with a Boss/Raid/Minigame/Other picker and a name field, posted to the admin log with an `OWNER_ROLE_ID` ping. One suggestion per person per minute.
+9. On startup the bot posts or updates a pinned **Start Here** post in the forum explaining all of this. It has a **Make a Suggestion** button (shown when `ADMIN_LOG_CHANNEL_ID` is set): a form with a Boss/Raid/Minigame/Other picker and a name field, posted to the admin log, with an `OWNER_ROLE_ID` ping if that's set. One suggestion per person per minute.
 
 Members and Coordinators/Owners can use every button. Each person can have 2 open groups (Coordinators are exempt), and starting a group for an activity that already has an open group with space shows a **Join the existing one** / **Create anyway** choice.
 

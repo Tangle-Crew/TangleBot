@@ -3,6 +3,7 @@ const {
   ButtonBuilder,
   ButtonStyle,
   EmbedBuilder,
+  escapeMarkdown,
   LabelBuilder,
   MessageFlags,
   ModalBuilder,
@@ -23,9 +24,9 @@ const MAX_ITEM_CHARS = 100;
 const COOLDOWN_MS = 60 * 1000;
 const lastSuggestionAt = new Map(); // userId -> timestamp; not saved
 
-// Suggestions go to the admin log and ping the Owner role, so both must be set.
+// Suggestions go to the admin log; the Owner role is pinged too when OWNER_ROLE_ID is set.
 function isSuggestionConfigured() {
-  return Boolean(process.env.ADMIN_LOG_CHANNEL_ID && process.env.OWNER_ROLE_ID);
+  return Boolean(process.env.ADMIN_LOG_CHANNEL_ID);
 }
 
 // The button for the Start Here post, or no rows if suggestions aren't set up.
@@ -70,8 +71,11 @@ async function handleSuggestModalSubmit(interaction) {
     return replyEphemeral(interaction, '⚠️ Suggestions aren\'t set up yet.');
   }
 
-  const last = lastSuggestionAt.get(interaction.user.id) ?? 0;
-  if (Date.now() - last < COOLDOWN_MS) {
+  const now = Date.now();
+  for (const [userId, at] of lastSuggestionAt) {
+    if (now - at >= COOLDOWN_MS) lastSuggestionAt.delete(userId);
+  }
+  if (lastSuggestionAt.has(interaction.user.id)) {
     return replyEphemeral(interaction, '⏳ Please wait a minute before sending another suggestion.');
   }
 
@@ -81,13 +85,15 @@ async function handleSuggestModalSubmit(interaction) {
     return replyEphemeral(interaction, '⚠️ Please pick a category and enter a name.');
   }
 
+  // Claimed before the send, so a quick second submission can't also get through.
+  lastSuggestionAt.set(interaction.user.id, now);
   const ownerRoleId = process.env.OWNER_ROLE_ID;
   const embed = new EmbedBuilder()
     .setTitle('💡 LFG Suggestion')
     .addFields(
       { name: 'Category', value: category, inline: true },
       { name: 'Suggestion', value: truncate(item, MAX_ITEM_CHARS), inline: true },
-      { name: 'From', value: `<@${interaction.user.id}> (${interaction.user.username})` }
+      { name: 'From', value: `<@${interaction.user.id}> (${escapeMarkdown(interaction.user.username)})` }
     )
     .setTimestamp();
 
@@ -95,16 +101,16 @@ async function handleSuggestModalSubmit(interaction) {
     const channel = await interaction.client.channels.fetch(process.env.ADMIN_LOG_CHANNEL_ID);
     // Embeds don't ping, so the role mention goes in the message itself.
     await channel.send({
-      content: `<@&${ownerRoleId}>`,
+      content: ownerRoleId ? `<@&${ownerRoleId}>` : undefined,
       embeds: [embed],
-      allowedMentions: { roles: [ownerRoleId] },
+      allowedMentions: { roles: ownerRoleId ? [ownerRoleId] : [] },
     });
   } catch (err) {
+    lastSuggestionAt.delete(interaction.user.id);
     console.error('[LFG] Could not send suggestion to the admin log:', err.message);
     return replyEphemeral(interaction, '⚠️ Something went wrong sending your suggestion. Please try again later.');
   }
 
-  lastSuggestionAt.set(interaction.user.id, Date.now());
   console.log(`[LFG] Suggestion from ${interaction.user.username}: ${category} - ${item}`);
   await interaction.reply({ content: '✅ Thanks! Your suggestion was sent to the team.', flags: MessageFlags.Ephemeral });
 }

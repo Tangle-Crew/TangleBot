@@ -144,12 +144,20 @@ test('planAfterMemberLeft', () => {
 });
 
 test('buildHistoryRecord keeps what stats need and is JSON-safe', () => {
-  const record = lfg.buildHistoryRecord(g({ members: new Set(['u1', 'u2']) }), 'disbanded', new Date('2026-01-02T03:04:05Z'));
+  const group = g({ members: new Set(['u1']), participants: new Set(['u1', 'u2', 'u3']), createdAt: Date.parse('2026-01-02T02:00:00Z') });
+  const record = lfg.buildHistoryRecord(group, 'inactive', new Date('2026-01-02T03:04:05Z'));
   assert.deepEqual(record, {
-    closedAt: '2026-01-02T03:04:05.000Z', id: 'g1', activity: 'Bosses: Yama', size: '5 Players',
-    startEpoch: 1800000000, creatorId: 'u1', memberIds: ['u1', 'u2'], reason: 'disbanded',
+    closedAt: '2026-01-02T03:04:05.000Z', createdAt: '2026-01-02T02:00:00.000Z', id: 'g1', activity: 'Bosses: Yama',
+    size: '5 Players', startEpoch: 1800000000, creatorId: 'u1', memberIds: ['u1'], participantIds: ['u1', 'u2', 'u3'],
+    reason: 'inactive',
   });
-  assert.equal(JSON.parse(JSON.stringify(record)).memberIds.length, 2);
+  assert.equal(JSON.parse(JSON.stringify(record)).participantIds.length, 3);
+});
+
+test('buildHistoryRecord falls back to current members and a null created time', () => {
+  const record = lfg.buildHistoryRecord(g({ members: new Set(['u1', 'u2']) }), 'empty');
+  assert.deepEqual(record.participantIds, ['u1', 'u2']);
+  assert.equal(record.createdAt, null);
 });
 
 test('the group row has Join, Leave, Start Now, Manage and Disband, all tied to the group id', () => {
