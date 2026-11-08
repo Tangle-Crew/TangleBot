@@ -27,11 +27,15 @@ function buildCompTitle(prefix, metrics) {
   return `${prefix} ${metrics.map(m => shortMetricName(m.value)).join(' + ')}`;
 }
 
-// The metrics each WOM competition tracks. WOM needs all metrics of one competition to be of the
-// same type, so they share one competition if they are, else each gets its own.
-function planCompetitions(metrics) {
-  const sameType = new Set(metrics.map(m => metricCategory(m.value))).size <= 1;
-  return sameType ? [metrics] : metrics.map(metric => [metric]);
+// WOM needs all metrics of one competition to be of the same type (skill, boss, ...).
+function hasMixedTypes(metrics) {
+  return new Set(metrics.map(m => metricCategory(m.value))).size > 1;
+}
+
+// The Discord event's description: "<title>: <url>", then each metric on its own line when the
+// competition tracks several.
+function buildEventDescription(title, url, metrics) {
+  return [`${title}: ${url}`, ...(metrics.length > 1 ? metrics.map(m => m.name) : [])].join('\n');
 }
 
 // How far timeZone's wall clock is ahead of UTC at the instant ms, in ms (negative behind UTC).
@@ -124,7 +128,7 @@ function buildCommandData() {
   METRIC_OPTION_NAMES.forEach((optName, i) => {
     data.addStringOption(o =>
       o.setName(optName)
-        .setDescription(i === 0 ? 'Boss or skill to track for the competition' : 'Another boss or skill to track (optional)')
+        .setDescription(i === 0 ? 'Boss or skill to track for the competition' : 'Another boss or skill of the same type, tracked in the same competition (optional)')
         .setRequired(i === 0)
         .setAutocomplete(true)
     );
@@ -158,8 +162,9 @@ function buildCommandData() {
 module.exports = {
   data: buildCommandData(),
   parseDateInput,
-  planCompetitions,
+  hasMixedTypes,
   buildCompTitle,
+  buildEventDescription,
 
   async autocomplete(interaction) {
     const focused = interaction.options.getFocused(true);
@@ -219,6 +224,9 @@ module.exports = {
     if (duplicateNames.length > 0) {
       return reject(`You listed ${duplicateNames.length === 1 ? 'a metric' : 'metrics'} more than once: **${duplicateNames.join(', ')}**. Pick each boss/skill in only one slot.`);
     }
+    if (hasMixedTypes(metrics)) {
+      return reject('A competition can only track metrics of the same type, so all skills or all bosses. Run the command separately for each type.');
+    }
 
     const startsAt = parseDateInput(interaction.options.getString('start', true));
     const durationDays = interaction.options.getInteger('duration') ?? 7;
@@ -248,13 +256,11 @@ module.exports = {
 
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-    const groups = planCompetitions(metrics);
     const metricsLabel = metrics.map(m => m.name).join(', ');
-    // The event is named after the first competition.
-    const eventTitle = buildCompTitle(prefix, groups[0]);
-    const compsLabel = groups.length === 1
-      ? (metrics.length === 1 ? 'a Wise Old Man competition' : 'one Wise Old Man competition tracking all the metrics combined')
-      : `${groups.length} Wise Old Man competitions`;
+    const eventTitle = buildCompTitle(prefix, metrics);
+    const compsLabel = metrics.length === 1
+      ? 'a Wise Old Man competition'
+      : 'one Wise Old Man competition tracking all the metrics combined';
 
     const confirmEmbed = new EmbedBuilder()
       .setColor(DISCORD_GREEN)
@@ -298,43 +304,20 @@ module.exports = {
 
     console.log(`[WeeklyComp] ${interaction.user.tag} creating "${prefix}" (${metrics.map(m => m.value).join(', ')}) ${startsAt.toISOString()} -> ${endsAt.toISOString()} in WOM group ${groupId}`);
 
-    // One WOM competition per group of metrics.
-    const created = [];
-    for (const group of groups) {
-      const title = buildCompTitle(prefix, group);
-      const groupLabel = group.map(m => m.name).join(' + ');
-      try {
-        const result = await createGroupCompetition({ title, metrics: group.map(m => m.value), startsAt, endsAt, groupId, groupVerificationCode });
-        created.push({ metrics: group, title, competition: result.competition, url: `https://wiseoldman.net/competitions/${result.competition.id}` });
-        clearStandingsCache();
-      } catch (err) {
-        console.error(`[WeeklyComp] Failed to create WOM competition for ${groupLabel}:`, err);
-        if (created.length === 0) {
-          return interaction.editReply(`Failed to create the Wise Old Man competition: ${err.message}`);
-        }
-        const createdLines = created.map(c => `${c.title}: ${c.url}`).join('\n');
-        await interaction.editReply(
-          `Created ${created.length} of ${groups.length} Wise Old Man competitions before **${groupLabel}** failed: ${err.message}\n\n` +
-          `Created so far:\n${createdLines}`
-        );
-        notifyAdminLog(
-          interaction.client,
-          '⚠️ /weeklycomp: Partial competition creation',
-          `${interaction.user} ran /weeklycomp for **${prefix}** — created ${created.length}/${groups.length} competitions before **${groupLabel}** failed: ${err.message}\n${createdLines}`,
-          [],
-          0xc0392b
-        );
-        return;
-      }
+    // One WOM competition tracking every chosen metric.
+    let competition;
+    try {
+      const result = await createGroupCompetition({ title: eventTitle, metrics: metrics.map(m => m.value), startsAt, endsAt, groupId, groupVerificationCode });
+      competition = result.competition;
+      clearStandingsCache();
+    } catch (err) {
+      console.error(`[WeeklyComp] Failed to create WOM competition for ${metricsLabel}:`, err);
+      return interaction.editReply(`Failed to create the Wise Old Man competition: ${err.message}`);
     }
+    const url = `https://wiseoldman.net/competitions/${competition.id}`;
 
-    const imageUrl = await resolveMetricImageUrl(metrics[0].value);
-
-    const description = [
-      eventTitle,
-      '',
-      ...created.map(c => `${c.title}: ${c.url}`),
-    ].join('\n');
+    const imageUrl = await resolveMetricImageUrl(metrics.map(m => m.value));
+    const description = buildEventDescription(eventTitle, url, metrics);
 
     let event;
     try {
@@ -351,22 +334,21 @@ module.exports = {
       });
     } catch (err) {
       console.error('[WeeklyComp] Failed to create Discord event:', err);
-      const createdLines = created.map(c => `${c.title}: ${c.url}`).join('\n');
       await interaction.editReply(
-        `Created the Wise Old Man competition${created.length === 1 ? '' : 's'}, but failed to create the Discord event: ${err.message}\n\n` +
-        `${createdLines}`
+        `Created the Wise Old Man competition, but failed to create the Discord event: ${err.message}\n\n` +
+        `${eventTitle}: ${url}`
       );
       notifyAdminLog(
         interaction.client,
         '⚠️ /weeklycomp: Discord event failed',
-        `${interaction.user} created the WOM competition${created.length === 1 ? '' : 's'} for **${prefix}** (${metricsLabel}) but the Discord event failed to create: ${err.message}\n${createdLines}`,
+        `${interaction.user} created the WOM competition for **${prefix}** (${metricsLabel}) but the Discord event failed to create: ${err.message}\n${eventTitle}: ${url}`,
         [],
         0xc0392b
       );
       return;
     }
 
-    console.log(`[WeeklyComp] Created event ${event.id} and WOM competition${created.length === 1 ? '' : 's'} ${created.map(c => c.competition.id).join(', ')}`);
+    console.log(`[WeeklyComp] Created event ${event.id} and WOM competition ${competition.id}`);
 
     const embed = new EmbedBuilder()
       .setColor(DISCORD_GREEN)
@@ -376,7 +358,7 @@ module.exports = {
         `**Starts:** <t:${Math.floor(startsAt.getTime() / 1000)}:F>\n` +
         `**Ends:** <t:${Math.floor(endsAt.getTime() / 1000)}:F>\n\n` +
         `[Discord Event](${event.url})\n` +
-        created.map(c => `[${c.title}](${c.url})`).join('\n')
+        `[${eventTitle}](${url})`
       )
       .setImage(imageUrl)
       .setFooter({ text: `Created by ${interaction.user.username}` });
@@ -386,7 +368,7 @@ module.exports = {
     notifyAdminLog(
       interaction.client,
       '📅 Event Created',
-      `${interaction.user} created **${prefix}** (${metricsLabel}) via /weeklycomp.\n[Discord Event](${event.url})\n${created.map(c => `[${c.title}](${c.url})`).join('\n')}`,
+      `${interaction.user} created **${prefix}** (${metricsLabel}) via /weeklycomp.\n[Discord Event](${event.url})\n[${eventTitle}](${url})`,
       [],
       DISCORD_GREEN
     );

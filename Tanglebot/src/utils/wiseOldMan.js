@@ -15,14 +15,23 @@ function womClient() {
   return client;
 }
 
-// Not every metric has a background image (e.g. Mimic); use WOM's generic icon then.
-async function resolveMetricImageUrl(metric) {
+// The metric's background image URL, or null if it has none (e.g. Mimic) or can't be checked.
+async function probeMetricImage(metric) {
   const url = `${WOM_ASSETS_BASE_URL}/backgrounds/${metric}.png`;
   try {
     const res = await fetch(url, { method: 'HEAD' });
     if (res.ok) return url;
   } catch (err) {
     console.warn(`[WOM] Failed to probe background image for ${metric}:`, err.message);
+  }
+  return null;
+}
+
+// The background of the first of `metrics` that has one, else WOM's generic icon.
+async function resolveMetricImageUrl(...metrics) {
+  for (const metric of metrics.flat()) {
+    const url = await probeMetricImage(metric);
+    if (url) return url;
   }
   return FALLBACK_IMAGE_URL;
 }

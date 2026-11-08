@@ -327,13 +327,13 @@ Replies privately with a channel's ID (the current channel, or the `channel` opt
 
 ### 🏆 `/weeklycomp` — Discord Event + Wise Old Man Competitions
 
-Creates a Discord scheduled event and the Wise Old Man competition(s) for the chosen bosses or skills, in one step. Metrics of the same type (all skills, or all bosses) share **one** multi-metric competition; mixed types get one competition each.
+Creates a Discord scheduled event and **one** Wise Old Man competition for the chosen bosses or skills, in one step. All metrics must be the same type (all skills or all bosses), as WOM requires; mixing them is rejected, so run the command once per type.
 
 | Option | Required | Description |
 |--------|----------|-------------|
 | `prefix` | Yes | Name prefix. A competition is named `<prefix> <metric>`, e.g. `BOTW T3 Vorkath`, or `<prefix> <A> + <B>` when it tracks several metrics, e.g. `SOTW T3 Attack + Strength`, without a leading "The". |
 | `metric` | Yes | Boss or skill. Autocompletes over every boss and skill WOM tracks. |
-| `metric2`–`metric4` | No | More bosses or skills. Same type as `metric`: tracked in the same competition (gains are added together). Mixed types: each gets its own competition. |
+| `metric2`–`metric4` | No | More bosses or skills. Must be the same type as `metric` (skill or boss). All the metrics are tracked in the one competition and their gains are added together. |
 | `start` | Yes | Eastern Time date: `YYYY-MM-DD`, `YYYY/MM/DD` or `MM/DD/YYYY`, optionally with an hour (`18` or `6pm`). ISO 8601 with an offset also works. Must be in the future. |
 | `duration` | No | Days, 1–365 (default 7). |
 | `group_id` | No | WOM group ID. Only shown when `WOM_GROUP_ID` isn't set. |
@@ -358,9 +358,9 @@ Replies privately. **Requires** `TEMPLAR_ROLE_ID`.
 <summary><strong>How it works</strong></summary>
 
 1. Shows a private confirmation with the metrics, start, end and duration. Nothing is created unless **Confirm** is clicked within 60 seconds.
-2. Creates the WOM competition(s) in the group, so its members are tracked automatically: one competition for all the metrics if they are the same type, otherwise one per metric.
-3. Creates a Discord event named after the first competition, with every competition's link in the description and the first metric's WOM image as the cover.
-4. Replies with the links and logs to the admin log. If anything fails, the reply and the log list what was created.
+2. Creates the one WOM competition tracking every chosen metric in the group, so its members are tracked automatically.
+3. Creates a Discord event named after the competition. The description is `<title>: <competition link>`, followed by one line per metric when there are several. The cover is the WOM background of the first chosen metric that has one (Mimic has none), else WOM's generic icon.
+4. Replies with the links and logs to the admin log. If the event fails after the competition was created, the reply and the log give the competition link.
 
 </details>
 

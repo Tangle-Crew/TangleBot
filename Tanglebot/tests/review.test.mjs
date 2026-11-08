@@ -357,19 +357,50 @@ test('titles split before their metrics, whichever order WOM lists them in', () 
   assert.deepEqual(split(withMetrics('SOTW T3 Strength', 'attack', 'strength')), ['SOTW T3 Strength', '']);
 });
 
-test('weeklycomp shares one competition between metrics of the same type only', () => {
-  const { planCompetitions, buildCompTitle } = load('commands/weeklycomp.js', {
-    mocks: { '../utils/roleMenu': { notifyAdminLog() {} }, './weeklycompstats': { clearStandingsCache() {} },
-      '../utils/wiseOldMan': {} },
-  });
+const loadWeeklyComp = (options = {}) => load('commands/weeklycomp.js', {
+  ...options,
+  mocks: { '../utils/roleMenu': { notifyAdminLog() {} }, './weeklycompstats': { clearStandingsCache() {} },
+    '../utils/wiseOldMan': {}, ...options.mocks },
+});
+const metricChoice = (value, name) => ({ value, name });
+
+test('weeklycomp rejects metrics of mixed types and titles one competition for the rest', () => {
+  const { hasMixedTypes, buildCompTitle } = loadWeeklyComp();
   const m = value => ({ value });
-  const skills = planCompetitions([m('attack'), m('strength')]);
-  assert.equal(skills.length, 1);
-  assert.equal(buildCompTitle('SOTW T3', skills[0]), 'SOTW T3 Attack + Strength');
-  assert.equal(planCompetitions([m('the_gauntlet'), m('zulrah')]).length, 1);
-  const mixed = planCompetitions([m('attack'), m('zulrah')]);
-  assert.equal(mixed.length, 2);
-  assert.equal(buildCompTitle('X', mixed[1]), 'X Zulrah');
+  assert.equal(hasMixedTypes([m('attack'), m('strength')]), false);
+  assert.equal(hasMixedTypes([m('the_gauntlet'), m('zulrah')]), false);
+  assert.equal(hasMixedTypes([m('attack'), m('zulrah')]), true);
+  assert.equal(buildCompTitle('SOTW T3', [m('attack'), m('strength')]), 'SOTW T3 Attack + Strength');
+  assert.equal(buildCompTitle('SOTW', [m('sailing')]), 'SOTW Sailing');
+});
+
+test('event description is the title and link, plus a line per metric when there are several', () => {
+  const { buildEventDescription } = loadWeeklyComp();
+  const url = 'https://wiseoldman.net/competitions/162701';
+  assert.equal(buildEventDescription('SOTW Sailing', url, [metricChoice('sailing', 'Sailing')]),
+    `SOTW Sailing: ${url}`);
+  assert.equal(
+    buildEventDescription('BOTW GWD', url, [metricChoice('general_graardor', 'General Graardor'),
+      metricChoice('commander_zilyana', 'Commander Zilyana'), metricChoice('kreearra', "Kree'arra")]),
+    `BOTW GWD: ${url}\nGeneral Graardor\nCommander Zilyana\nKree'arra`);
+});
+
+test('event background is the first chosen metric that has one, else the generic icon', async () => {
+  const probed = [];
+  const withBackgrounds = backgrounds => async (url, options) => {
+    probed.push(url);
+    return { ok: backgrounds.some(name => url.endsWith(`/backgrounds/${name}.png`)) && options.method === 'HEAD' };
+  };
+  const base = 'https://raw.githubusercontent.com/wise-old-man/wise-old-man/master/app/public/img';
+  const resolve = async (metrics, backgrounds) => {
+    const wom = load('utils/wiseOldMan.js', { fetch: withBackgrounds(backgrounds) });
+    return wom.resolveMetricImageUrl(metrics);
+  };
+  assert.equal(await resolve(['sailing'], ['sailing']), `${base}/backgrounds/sailing.png`);
+  assert.equal(await resolve(['general_graardor', 'kreearra'], ['general_graardor', 'kreearra']), `${base}/backgrounds/general_graardor.png`);
+  // The first pick (Mimic) has no background, so the next one is used.
+  assert.equal(await resolve(['mimic', 'zulrah'], ['zulrah']), `${base}/backgrounds/zulrah.png`);
+  assert.equal(await resolve(['mimic'], []), `${base}/fallback-icon.png`);
 });
 
 const participation = (id, name, progress, deltas) => ({
