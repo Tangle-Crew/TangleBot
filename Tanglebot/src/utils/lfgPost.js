@@ -9,7 +9,9 @@ const {
   ButtonBuilder,
   ButtonStyle,
 } = require('discord.js');
-const { readJson, writeJson, truncate, hasAnyRole } = require('./db');
+const fs = require('fs');
+const path = require('path');
+const { DATA_DIR, readJson, writeJson, truncate, hasAnyRole } = require('./db');
 const {
   CATEGORY_OPTIONS,
   findCategoryOption,
@@ -77,6 +79,11 @@ const DUPLICATE_WARNING_LIFETIME_MS = 2 * 60 * 1000;
 const pendingCreations = new Map(); // userId -> { description, expiresAt }; not saved
 const setupSessions = new Map(); // userId -> { category, activity, size, time }; not saved
 const activeGroups = new Map(); // groupId -> group state; saved to GROUPS_DATA_FILE
+
+// One JSON line per finished group, for later stats.
+const HISTORY_FILE = 'lfg-history.jsonl';
+// Embed color for the finished-group log line (not an alert).
+const GROUP_LOG_COLOR = 0x5865f2;
 
 // Groups are saved here and restored on startup (see restoreLfgGroups).
 const GROUPS_DATA_FILE = 'lfg-groups.json';
@@ -1002,6 +1009,45 @@ async function handleCancelDisbandButton(interaction, groupId) {
   ]);
 }
 
+// Removes the buttons, then locks and archives the thread so it stays as a record.
+async function archiveGroupThread(thread, group) {
+  await thread.messages.edit(thread.id, { components: [] }).catch((err) => {
+    if (!isAlreadyGoneError(err)) console.error(`[LFG] Could not remove buttons from post ${group.id}:`, err.message);
+  });
+  // The title's [Open]/[Full] would be misleading on a finished group.
+  await thread.setName(truncate(`[Closed] - ${group.roleLabel}`, 100)).catch(() => {});
+  await thread.setLocked(true);
+  await thread.setArchived(true);
+}
+
+// Appends the group to the history file and posts a one-line summary to the admin log.
+async function recordFinishedGroup(client, group) {
+  const reason = group.status === 'disbanded' ? 'disbanded' : 'empty';
+  const record = {
+    closedAt: new Date().toISOString(),
+    id: group.id,
+    activity: group.roleLabel,
+    size: group.sizeLabel,
+    startEpoch: group.timeEpoch,
+    creatorId: group.creatorId,
+    memberIds: [...group.members],
+    reason,
+  };
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.appendFileSync(path.join(DATA_DIR, HISTORY_FILE), `${JSON.stringify(record)}\n`);
+  } catch (err) {
+    console.error(`[LFG] Could not write history for group ${group.id}:`, err.message);
+  }
+  await notifyAdminLog(
+    client,
+    '📁 LFG Group Closed',
+    `**${group.roleLabel}** (${group.sizeLabel}) in <#${group.threadId}> was ${reason} with ${group.members.size} member(s).`,
+    [],
+    GROUP_LOG_COLOR
+  );
+}
+
 function schedulePostGroupCleanup(client, group, delayMs) {
   if (group.cleanupTimeoutId) {
     clearTimeout(group.cleanupTimeoutId);
@@ -1015,18 +1061,19 @@ function schedulePostGroupCleanup(client, group, delayMs) {
     const startedAt = Date.now();
     try {
       const thread = client.channels.cache.get(group.threadId) ?? await client.channels.fetch(group.threadId);
-      await thread.delete();
+      await archiveGroupThread(thread, group);
       const tookMs = Date.now() - startedAt;
-      // Usually means Discord rate-limited the delete.
-      if (tookMs > 5000) console.log(`[LFG] Deleted expired post ${group.id}, but it took ${tookMs}ms — likely Discord API rate-limiting, not a bug in the timer.`);
+      // Usually means Discord rate-limited the edit.
+      if (tookMs > 5000) console.log(`[LFG] Archived expired post ${group.id}, but it took ${tookMs}ms — likely Discord API rate-limiting, not a bug in the timer.`);
+      await recordFinishedGroup(client, group);
     } catch (err) {
       if (!isAlreadyGoneError(err)) {
-        // Nothing retries this, so the thread would be left behind; tell the admins.
-        console.error(`[LFG] Could not delete expired post ${group.id}:`, err.message);
+        // Nothing retries this, so the thread would be left open; tell the admins.
+        console.error(`[LFG] Could not archive expired post ${group.id}:`, err.message);
         await notifyAdminLog(
           client,
           '⚠️ LFG Post Cleanup Failed',
-          `Could not delete the expired post for group **${group.roleLabel}** (thread <#${group.threadId}>): ${err.message}. It will need to be deleted manually.`
+          `Could not archive the expired post for group **${group.roleLabel}** (thread <#${group.threadId}>): ${err.message}. It will need to be closed manually.`
         );
       }
     }

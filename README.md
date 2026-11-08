@@ -223,7 +223,7 @@ Creates a forum post where members can join a group for an activity, with a role
 |---|---|---|
 | `LFG_FORUM_CHANNEL_ID` | Yes | Forum Channel for group posts. The command isn't loaded without it. |
 | `COORDINATOR_ROLE_ID` / `OWNER_ROLE_ID` | No | Staff who can Start Now, Disband, Cancel Disband and confirm Still Here on any group. |
-| `ADMIN_LOG_CHANNEL_ID` | No | Receives setup errors. |
+| `ADMIN_LOG_CHANNEL_ID` | No | Receives setup errors and a line for each finished group. |
 
 </details>
 
@@ -236,12 +236,16 @@ Creates a forum post where members can join a group for an activity, with a role
    - **Join Group** — joins, or joins the queue if the group is full.
    - **Leave Group** — leaves the group or the queue.
    - **Start Now** — starts the group immediately (members or staff).
+   - **Manage** — remove a member (they're pinged, with who removed them), or edit the description, start time or size. Each change is announced in the thread.
    - **Disband Group** — closes the post after a 1-minute grace period with a **Cancel Disband** button (members or staff; anyone in the group or queue can cancel).
 4. Joins and leaves post a notice without pinging the group. Filling up pings everyone with "Group formed, Good luck!"
 5. When a spot frees up in a full group, the first person in the queue gets **Accept Spot** / **Decline Spot** for 5 minutes. Declining or not answering removes them from the queue, and the spot goes to the next person. With nobody queued, the group reopens.
-6. An empty group closes after 15 minutes unless someone rejoins.
-7. Every 2 hours, starting no earlier than the start time, the group is asked if it's still active. No **Still Here** click within 10 minutes disbands it.
-8. On startup the bot posts or updates a pinned **Start Here** post in the forum explaining all of this.
+6. An empty group closes after 15 minutes unless someone rejoins. A closed group's post is renamed `[Closed]`, locked and archived rather than deleted, a line is posted to `ADMIN_LOG_CHANNEL_ID`, and the group is appended to `Tanglebot/data/lfg-history.jsonl`. The bot needs **Manage Threads**.
+7. Members are pinged when the start time arrives (not after **Start Now**).
+8. Every 2 hours, starting no earlier than the start time, the group is asked if it's still active. No **Still Here** click within 10 minutes disbands it.
+9. On startup the bot posts or updates a pinned **Start Here** post in the forum explaining all of this.
+
+Members and Coordinators/Owners can use every button. Each person can have 2 open groups (Coordinators are exempt), and starting a group for an activity that already has an open group with space shows a **Join the existing one** / **Create anyway** choice.
 
 Groups survive restarts: each change is saved to `Tanglebot/data/lfg-groups.json`, and on startup the bot restores them and restarts their timers from that moment. A group that was closing gets a fresh 1-minute countdown with **Cancel Disband**, an empty one a fresh 15 minutes, and a spot held for the queue is offered again. If the save file doesn't have a group, the bot rebuilds it from its post in the forum; posts it can't read get their buttons removed, and the admin log lists both.
 
