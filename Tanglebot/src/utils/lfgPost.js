@@ -6,6 +6,8 @@ const {
   TextInputStyle,
   MessageFlags,
   ChannelType,
+  ButtonBuilder,
+  ButtonStyle,
 } = require('discord.js');
 const { readJson, writeJson, truncate, hasAnyRole } = require('./db');
 const {
@@ -66,6 +68,12 @@ const KEEP_ALIVE_REPLY_WINDOW_MS = 10 * 60 * 1000;
 // Retry delay when a keep-alive check was skipped for a pending queue offer.
 const KEEP_ALIVE_RETRY_DELAY_MS = 15 * 60 * 1000;
 
+// Open groups one person can have at once; Coordinator+ are exempt.
+const MAX_OPEN_GROUPS_PER_USER = 2;
+// How long "Create anyway" stays valid after the duplicate warning.
+const DUPLICATE_WARNING_LIFETIME_MS = 2 * 60 * 1000;
+
+const pendingCreations = new Map(); // userId -> { description, expiresAt }; not saved
 const setupSessions = new Map(); // userId -> { category, activity, size, time }; not saved
 const activeGroups = new Map(); // groupId -> group state; saved to GROUPS_DATA_FILE
 
@@ -300,11 +308,60 @@ async function handleDescriptionModalSubmit(interaction) {
     });
   }
 
+  const description = interaction.fields.getTextInputValue('description')?.trim() || null;
+
+  // Only a group with space is worth warning about; a full one can't be joined.
+  const activityOption = findActivityOption(session.category, session.activity);
+  const roleLabel = `${findCategoryOption(session.category).label}: ${activityOption.label}`;
+  const existing = [...activeGroups.values()].find(
+    (g) => g.roleLabel === roleLabel && g.status === 'open' && !isGroupFull(g) && g.threadId
+  );
+  if (existing) {
+    pendingCreations.set(interaction.user.id, { description, expiresAt: Date.now() + DUPLICATE_WARNING_LIFETIME_MS });
+    const link = new ButtonBuilder()
+      .setLabel('Join the existing one')
+      .setStyle(ButtonStyle.Link)
+      .setURL(`https://discord.com/channels/${interaction.guildId}/${existing.threadId}`);
+    const anyway = new ButtonBuilder()
+      .setCustomId('lfgpost:createanyway')
+      .setLabel('Create anyway')
+      .setStyle(ButtonStyle.Secondary);
+    return interaction.editReply({
+      content: `⚠️ There's already an open **${activityOption.label}** group with space. Join it, or create yours anyway?`,
+      components: [new ActionRowBuilder().addComponents(link, anyway)],
+    });
+  }
+
+  return createGroupPost(interaction, session, description);
+}
+
+// "Create anyway" on the duplicate warning.
+async function handleCreateAnywayButton(interaction) {
+  await interaction.deferUpdate();
+  const pending = pendingCreations.get(interaction.user.id);
+  pendingCreations.delete(interaction.user.id);
+  const session = getSession(interaction.user.id);
+  if (!pending || pending.expiresAt < Date.now() || !session.category || !session.activity || !session.size || !session.time) {
+    return interaction.editReply({ content: '⚠️ That expired. Please run /lfg-post again.', components: [] });
+  }
+  return createGroupPost(interaction, session, pending.description);
+}
+
+// Creates the forum post. interaction is the modal submit or the Create anyway button, already deferred.
+async function createGroupPost(interaction, session, description) {
+  const openOwned = [...activeGroups.values()].filter((g) => g.creatorId === interaction.user.id && g.status !== 'disbanded');
+  if (openOwned.length >= MAX_OPEN_GROUPS_PER_USER && !isCoordinator(interaction)) {
+    const links = openOwned.map((g) => `<#${g.threadId}>`).join(', ');
+    return interaction.editReply({
+      content: `⚠️ You already have ${openOwned.length} open groups (${links}). Disband one before starting another.`,
+      components: [],
+    });
+  }
+
   const categoryOption = findCategoryOption(session.category);
   const activityOption = findActivityOption(session.category, session.activity);
   const sizeOption = findSizeOption(activityOption, session.size);
   const timeOption = findTimeOption(session.time);
-  const description = interaction.fields.getTextInputValue('description')?.trim() || null;
 
   if (!isValidColor(activityOption.color) || !isValidEmoji(activityOption.emoji)) {
     return abortWithAdminAlert(
@@ -654,6 +711,10 @@ async function updateGroupMessage(interaction, group, components = [buildGroupRo
     await replyEphemeral(interaction, '⚠️ This group\'s post no longer exists.').catch(() => {});
     return false;
   }
+}
+
+function isCoordinator(interaction) {
+  return hasAnyRole(interaction.member, [process.env.COORDINATOR_ROLE_ID]);
 }
 
 function isStaff(interaction) {
@@ -1275,6 +1336,12 @@ async function handleLfgPostSelectInteraction(interaction) {
   return handleSetupSelect(interaction, field);
 }
 
+async function handleLfgPostButtonInteraction(interaction) {
+  if (interaction.customId === 'lfgpost:createanyway') {
+    return handleCreateAnywayButton(interaction);
+  }
+}
+
 async function handleLfgPostModalSubmit(interaction) {
   if (interaction.customId === 'lfgpost:desc') {
     return handleDescriptionModalSubmit(interaction);
@@ -1310,6 +1377,7 @@ async function handleLfgPostGroupButtonInteraction(interaction) {
 module.exports = {
   sendSetupMenu,
   handleLfgPostSelectInteraction,
+  handleLfgPostButtonInteraction,
   handleLfgPostModalSubmit,
   handleLfgPostGroupButtonInteraction,
   handleRetiredSyncedGroupButton,

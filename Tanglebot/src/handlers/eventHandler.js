@@ -10,6 +10,7 @@ const {
 const { handleRoleMenuButtonInteraction, syncRoleAppearance } = require('../utils/roleMenu');
 const {
   handleLfgPostSelectInteraction,
+  handleLfgPostButtonInteraction,
   handleLfgPostModalSubmit,
   handleLfgPostGroupButtonInteraction,
   handleRetiredSyncedGroupButton,
@@ -28,6 +29,7 @@ const { restoreWeeklyAnnouncements, stopWeeklyAnnouncements } = require('../util
 const BUTTON_ROUTES = [
   { prefix: 'hp:', handler: handleHoneypotButtonInteraction, errorLabel: '[Honeypot] Button interaction error:' },
   { prefix: 'roles:', handler: handleRoleMenuButtonInteraction, errorLabel: '[LFG] Role menu button interaction error:', errorReply: 'Something went wrong updating your roles.' },
+  { prefix: 'lfgpost:', handler: handleLfgPostButtonInteraction, errorLabel: '[LFG] Post button interaction error:', errorReply: 'Something went wrong creating your LFG post.' },
   { prefix: 'lfgpostgroup:', handler: handleLfgPostGroupButtonInteraction, errorLabel: '[LFG] Post group button interaction error:', errorReply: 'Something went wrong updating that group.' },
   { prefix: 'lfgsyncgroup:', handler: handleRetiredSyncedGroupButton, errorLabel: '[LFG] Retired group button interaction error:', errorReply: 'Something went wrong with that LFG group.' },
   { prefix: 'stalemembers:', handler: handleStaleMembersButton, errorLabel: '[StaleMembers] Button interaction error:', errorReply: 'Something went wrong with that stale members list.' },
