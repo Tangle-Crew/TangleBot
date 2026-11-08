@@ -370,7 +370,7 @@ test('weeklycomp rejects metrics of mixed types and titles one competition for t
   assert.equal(hasMixedTypes([m('attack'), m('strength')]), false);
   assert.equal(hasMixedTypes([m('the_gauntlet'), m('zulrah')]), false);
   assert.equal(hasMixedTypes([m('attack'), m('zulrah')]), true);
-  assert.equal(buildCompTitle('SOTW T3', [m('attack'), m('strength')]), 'SOTW T3 Attack + Strength');
+  assert.equal(buildCompTitle('BOTW T2: God Wars Dungeon', [m('general_graardor'), m('kreearra')]), 'BOTW T2: God Wars Dungeon');
   assert.equal(buildCompTitle('SOTW', [m('sailing')]), 'SOTW Sailing');
 });
 

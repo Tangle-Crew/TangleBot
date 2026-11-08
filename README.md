@@ -331,7 +331,7 @@ Creates a Discord scheduled event and **one** Wise Old Man competition for the c
 
 | Option | Required | Description |
 |--------|----------|-------------|
-| `prefix` | Yes | Name prefix. A competition is named `<prefix> <metric>`, e.g. `BOTW T3 Vorkath`, or `<prefix> <A> + <B>` when it tracks several metrics, e.g. `SOTW T3 Attack + Strength`, without a leading "The". |
+| `prefix` | Yes | Name prefix. A competition is named `<prefix> <metric>`, e.g. `BOTW T3 Vorkath`, without a leading "The". With several metrics it is named just `<prefix>` (e.g. `BOTW T2: God Wars Dungeon`) and the metrics are listed in the Discord event description. |
 | `metric` | Yes | Boss or skill. Autocompletes over every boss and skill WOM tracks. |
 | `metric2`–`metric4` | No | More bosses or skills. Must be the same type as `metric` (skill or boss). All the metrics are tracked in the one competition and their gains are added together. |
 | `start` | Yes | Eastern Time date: `YYYY-MM-DD`, `YYYY/MM/DD` or `MM/DD/YYYY`, optionally with an hour (`18` or `6pm`). ISO 8601 with an offset also works. Must be in the future. |

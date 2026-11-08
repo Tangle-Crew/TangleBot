@@ -22,9 +22,10 @@ const METRIC_OPTION_NAMES = ['metric', 'metric2', 'metric3', 'metric4'];
 // Bots can't see a user's timezone, so dates are read as Eastern Time.
 const DEFAULT_TIME_ZONE = 'America/New_York';
 
-// "<prefix> <metric>", e.g. "BOTW T3 Gauntlet", or "<prefix> <A> + <B>" for several metrics.
+// "<prefix> <metric>", e.g. "BOTW T3 Gauntlet". A competition with several metrics is named just
+// "<prefix>"; its metrics are listed in the event description.
 function buildCompTitle(prefix, metrics) {
-  return `${prefix} ${metrics.map(m => shortMetricName(m.value)).join(' + ')}`;
+  return metrics.length > 1 ? prefix : `${prefix} ${shortMetricName(metrics[0].value)}`;
 }
 
 // WOM needs all metrics of one competition to be of the same type (skill, boss, ...).
