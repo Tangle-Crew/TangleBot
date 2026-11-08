@@ -10,6 +10,8 @@ const {
 const { handleRoleMenuButtonInteraction, syncRoleAppearance } = require('../utils/roleMenu');
 const {
   handleLfgPostSelectInteraction,
+  handleLfgManageSelect,
+  handleLfgManageModalSubmit,
   handleLfgPostButtonInteraction,
   handleLfgPostModalSubmit,
   handleLfgPostGroupButtonInteraction,
@@ -36,11 +38,13 @@ const BUTTON_ROUTES = [
   { prefix: 'weeklyannounce:', handler: handleWeeklyAnnounceButton, errorLabel: '[WeeklyAnnounce] Button interaction error:', errorReply: 'Something went wrong updating that weekly announcement.' },
 ];
 const SELECT_ROUTES = [
+  { prefix: 'lfgmanage:', handler: handleLfgManageSelect, errorLabel: '[LFG] Manage select interaction error:', errorReply: 'Something went wrong updating that group.' },
   { prefix: 'lfgpost:', handler: handleLfgPostSelectInteraction, errorLabel: '[LFG] Post select interaction error:', errorReply: 'Something went wrong updating your LFG post setup.' },
   { prefix: 'stalemembers:', handler: handleStaleMembersSelect, errorLabel: '[StaleMembers] Rank picker interaction error:', errorReply: 'Something went wrong with the rank picker.' },
   { prefix: 'weeklyannounce:', handler: handleWeeklyAnnounceSelect, errorLabel: '[WeeklyAnnounce] Competition picker interaction error:', errorReply: 'Something went wrong updating that weekly announcement.' },
 ];
 const MODAL_ROUTES = [
+  { prefix: 'lfgmanage:', handler: handleLfgManageModalSubmit, errorLabel: '[LFG] Manage modal submit error:', errorReply: 'Something went wrong updating that group.' },
   { prefix: 'lfgpost:', handler: handleLfgPostModalSubmit, errorLabel: '[LFG] Post modal submit error:', errorReply: 'Something went wrong creating your LFG post.' },
   { prefix: 'weeklyannounce:', handler: handleWeeklyAnnounceModal, errorLabel: '[WeeklyAnnounce] Modal submit error:', errorReply: 'Something went wrong saving that announcement.' },
 ];

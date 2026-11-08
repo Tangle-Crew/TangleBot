@@ -29,6 +29,7 @@ const {
   buildQueueOfferRow,
   buildCancelDisbandRow,
   buildKeepAliveRow,
+  GROUP_BUTTON_PREFIX,
   makeGroupId,
   isGroupFull,
   describeStartCountdown,
@@ -546,12 +547,7 @@ function scheduleStartPing(client, group) {
     try {
       const channel = await client.channels.fetch(group.threadId);
       const text = memberNotice(group, "⏰ **It's time!** This group's start time has arrived.");
-      // Don't replace an open queue offer or still-active prompt (they carry buttons).
-      if (group.pendingOfferUserId !== null || group.keepAliveReplyTimeoutId) {
-        await channel.send({ content: truncate(text, 2000) });
-      } else {
-        await sendOrEditActivity(channel, group, text);
-      }
+      await postNotice(channel, group, text);
     } catch (err) {
       cleanupStaleGroupOrLog(group, err, `[LFG] Could not send start ping for group ${group.id}:`);
     }
@@ -583,6 +579,15 @@ function memberNotice(group, text) {
   // The text always fits; only the mention list shrinks.
   const mentions = mentionAll(group, Math.max(0, 1900 - text.length - 1));
   return `${mentions}\n${text}`;
+}
+
+// Like sendOrEditActivity, but keeps an open queue offer or still-active prompt (they carry buttons).
+async function postNotice(channel, group, text) {
+  if (group.pendingOfferUserId !== null || group.keepAliveReplyTimeoutId) {
+    await channel.send({ content: truncate(text, 2000) });
+  } else {
+    await sendOrEditActivity(channel, group, text);
+  }
 }
 
 // Sends each notice as a new message (edits don't ping) and deletes the previous one, so only the
@@ -813,23 +818,28 @@ async function handleLeaveButton(interaction, groupId) {
   // No group-wide ping for a routine leave.
   const leftText = `⚠️ <@${interaction.user.id}> left the group.`;
 
+  await afterMemberLeft(interaction.client, interaction.channel, group, wasFull, leftText);
+}
+
+// What follows a member leaving or being removed: offer the freed spot, note it, or start the
+// empty-group countdown. No other timers are touched.
+async function afterMemberLeft(client, channel, group, wasFull, text) {
   if (wasFull) {
     // The queue gets first refusal on the freed spot.
-    await advanceQueueOrReopen(interaction.client, interaction.channel, group, leftText);
+    await advanceQueueOrReopen(client, channel, group, text);
     return;
   }
 
   if (group.members.size > 0) {
-    await sendOrEditActivity(interaction.channel, group, leftText);
+    await postNotice(channel, group, text);
   } else {
-    // Empty: start the auto-close countdown and announce it.
     const closesAtEpoch = Math.floor((Date.now() + EMPTY_GROUP_CLEANUP_DELAY_MS) / 1000);
-    await sendOrEditActivity(
-      interaction.channel,
+    await postNotice(
+      channel,
       group,
-      `${leftText}\n\n💤 **This group is now empty.** It will automatically close <t:${closesAtEpoch}:R> unless someone rejoins.`
+      `${text}\n\n💤 **This group is now empty.** It will automatically close <t:${closesAtEpoch}:R> unless someone rejoins.`
     );
-    schedulePostGroupCleanup(interaction.client, group, EMPTY_GROUP_CLEANUP_DELAY_MS);
+    schedulePostGroupCleanup(client, group, EMPTY_GROUP_CLEANUP_DELAY_MS);
   }
 }
 
@@ -1329,6 +1339,201 @@ async function handleRetiredSyncedGroupButton(interaction) {
   }
 }
 
+// ---- Manage: remove a member, edit the description, start time or size ----
+// Anyone in the group, or a Coordinator or higher, can use these.
+
+const MANAGE_DENIED = '⚠️ Only members of this group, or a Coordinator or higher, can manage it.';
+
+function buildManageRows(groupId) {
+  const button = (action, label) =>
+    new ButtonBuilder().setCustomId(`${GROUP_BUTTON_PREFIX}:${action}:${groupId}`).setLabel(label).setStyle(ButtonStyle.Secondary);
+  return [
+    new ActionRowBuilder().addComponents(
+      button('mgremove', 'Remove Member'),
+      button('mgdesc', 'Edit Description'),
+      button('mgtime', 'Edit Start Time'),
+      button('mgsize', 'Edit Size')
+    ),
+  ];
+}
+
+async function requireManageableGroup(interaction, groupId) {
+  const group = await requireGroup(interaction, groupId);
+  if (!group) return null;
+  if (!canManageGroup(interaction, group)) {
+    await replyEphemeral(interaction, MANAGE_DENIED);
+    return null;
+  }
+  return group;
+}
+
+async function handleManageButton(interaction, groupId) {
+  const group = await requireManageableGroup(interaction, groupId);
+  if (!group) return;
+  await interaction.reply({
+    content: 'What would you like to change?',
+    components: buildManageRows(groupId),
+    flags: MessageFlags.Ephemeral,
+  });
+}
+
+async function handleManageRemoveButton(interaction, groupId) {
+  const group = await requireManageableGroup(interaction, groupId);
+  if (!group) return;
+  const others = [...group.members].filter((id) => id !== interaction.user.id).slice(0, 25);
+  if (others.length === 0) {
+    return interaction.update({ content: "There's nobody else in the group to remove. Use **Leave Group** for yourself.", components: [] });
+  }
+  const options = await Promise.all(
+    others.map(async (id) => {
+      const member = await interaction.guild.members.fetch(id).catch(() => null);
+      return { value: id, label: truncate(member?.displayName ?? id, 100) };
+    })
+  );
+  const select = new StringSelectMenuBuilder()
+    .setCustomId(`lfgmanage:remove:${groupId}`)
+    .setPlaceholder('Choose a member to remove')
+    .addOptions(options);
+  await interaction.update({ content: 'Who should be removed?', components: [new ActionRowBuilder().addComponents(select)] });
+}
+
+async function handleManageDescButton(interaction, groupId) {
+  const group = await requireManageableGroup(interaction, groupId);
+  if (!group) return;
+  const input = new TextInputBuilder()
+    .setCustomId('description')
+    .setLabel('Description (optional)')
+    .setStyle(TextInputStyle.Paragraph)
+    .setRequired(false)
+    .setMaxLength(1000);
+  if (group.description) input.setValue(group.description);
+  const modal = new ModalBuilder()
+    .setCustomId(`lfgmanage:desc:${groupId}`)
+    .setTitle('Edit description')
+    .addComponents(new ActionRowBuilder().addComponents(input));
+  await interaction.showModal(modal);
+}
+
+async function handleManageTimeButton(interaction, groupId) {
+  const group = await requireManageableGroup(interaction, groupId);
+  if (!group) return;
+  const select = new StringSelectMenuBuilder()
+    .setCustomId(`lfgmanage:time:${groupId}`)
+    .setPlaceholder('Start in...')
+    .addOptions(TIME_OFFSET_OPTIONS.map((o) => ({ value: o.value, label: o.label })));
+  await interaction.update({ content: 'New start time (counted from now):', components: [new ActionRowBuilder().addComponents(select)] });
+}
+
+async function handleManageSizeButton(interaction, groupId) {
+  const group = await requireManageableGroup(interaction, groupId);
+  if (!group) return;
+  const activity = findActivityByRoleLabel(group.roleLabel);
+  if (!activity || activity.sizeOptions.length < 2) {
+    return interaction.update({ content: 'This activity has only one size.', components: [] });
+  }
+  const select = new StringSelectMenuBuilder()
+    .setCustomId(`lfgmanage:size:${groupId}`)
+    .setPlaceholder('New group size')
+    .addOptions(activity.sizeOptions.map((o) => ({ value: o.value, label: o.label, default: o.label === group.sizeLabel })));
+  await interaction.update({ content: 'New group size:', components: [new ActionRowBuilder().addComponents(select)] });
+}
+
+async function applyMemberRemoval(interaction, group, removedId) {
+  if (!group.members.has(removedId)) {
+    return interaction.update({ content: "They're no longer in the group.", components: [] });
+  }
+  group.members.delete(removedId);
+  const wasFull = group.status === 'closed';
+  console.log(`[LFG] ${interaction.user.username} removed ${removedId} from group ${group.id}`);
+  await interaction.update({ content: 'Removed.', components: [] });
+
+  await updateMainPost(interaction.channel, group);
+  const text = `🚪 <@${removedId}> was removed from the group by <@${interaction.user.id}>.`;
+  await afterMemberLeft(interaction.client, interaction.channel, group, wasFull, text);
+}
+
+async function applyTimeChange(interaction, group, offsetValue) {
+  if (!findTimeOption(offsetValue)) return;
+  group.timeEpoch = resolveTimeEpoch(offsetValue);
+  console.log(`[LFG] ${interaction.user.username} changed start time of group ${group.id} to ${offsetValue} min from now`);
+  await interaction.update({ content: 'Start time updated.', components: [] });
+
+  scheduleCountdownRefresh(interaction.client, group);
+  scheduleStartPing(interaction.client, group);
+  // Keep-alive waits for the start time, so move it too.
+  stopKeepAliveCheck(group);
+  scheduleKeepAliveCheck(interaction.client, group);
+
+  await Promise.all([
+    updateMainPost(interaction.channel, group),
+    renameThreadChannel(interaction.channel, group),
+    postNotice(
+      interaction.channel,
+      group,
+      memberNotice(group, `✏️ <@${interaction.user.id}> changed the start time to <t:${group.timeEpoch}:t> (<t:${group.timeEpoch}:R>).`)
+    ),
+  ]);
+}
+
+async function applySizeChange(interaction, group, sizeValue) {
+  const option = findActivityByRoleLabel(group.roleLabel)?.sizeOptions.find((o) => o.value === sizeValue);
+  if (!option) return;
+  const newCap = parseSizeCap(option.value);
+  if (newCap < group.members.size) {
+    return interaction.update({
+      content: `⚠️ There are ${group.members.size} members, more than ${option.label}. Remove some first.`,
+      components: [],
+    });
+  }
+
+  const wasClosed = group.status === 'closed';
+  group.sizeLabel = option.label;
+  group.sizeCap = newCap;
+  console.log(`[LFG] ${interaction.user.username} changed size of group ${group.id} to ${option.label}`);
+  await interaction.update({ content: 'Group size updated.', components: [] });
+
+  const notice = `✏️ <@${interaction.user.id}> changed the group size to **${option.label}**.`;
+  if (isGroupFull(group)) {
+    // A held spot is gone; the queue keeps its places.
+    clearPendingOffer(group);
+    group.status = 'closed';
+    await Promise.all([
+      updateMainPost(interaction.channel, group),
+      renameThreadChannel(interaction.channel, group),
+      postNotice(interaction.channel, group, notice),
+    ]);
+  } else if (wasClosed && group.pendingOfferUserId === null) {
+    // Room opened up: offer it to the queue, or reopen.
+    await advanceQueueOrReopen(interaction.client, interaction.channel, group, notice);
+  } else {
+    await Promise.all([updateMainPost(interaction.channel, group), postNotice(interaction.channel, group, notice)]);
+  }
+}
+
+async function handleLfgManageSelect(interaction) {
+  const [, field, groupId] = interaction.customId.split(':'); // "lfgmanage:<field>:<groupId>"
+  const group = await requireManageableGroup(interaction, groupId);
+  if (!group) return;
+  const value = interaction.values[0];
+  if (field === 'remove') return applyMemberRemoval(interaction, group, value);
+  if (field === 'time') return applyTimeChange(interaction, group, value);
+  if (field === 'size') return applySizeChange(interaction, group, value);
+}
+
+async function handleLfgManageModalSubmit(interaction) {
+  const [, field, groupId] = interaction.customId.split(':');
+  if (field !== 'desc') return;
+  const group = await requireManageableGroup(interaction, groupId);
+  if (!group) return;
+  group.description = interaction.fields.getTextInputValue('description')?.trim() || null;
+  console.log(`[LFG] ${interaction.user.username} edited the description of group ${group.id}`);
+  await replyEphemeral(interaction, '✅ Description updated.');
+  await Promise.all([
+    updateMainPost(interaction.channel, group),
+    postNotice(interaction.channel, group, `✏️ <@${interaction.user.id}> changed the description.`),
+  ]);
+}
+
 // ---- Entry points called from eventHandler.js ----
 async function handleLfgPostSelectInteraction(interaction) {
   const field = interaction.customId.split(':')[2]; // "lfgpost:select:<field>"
@@ -1372,6 +1577,11 @@ async function handleLfgPostGroupButtonInteraction(interaction) {
   if (action === 'disband') return handleDisbandButton(interaction, groupId);
   if (action === 'canceldisband') return handleCancelDisbandButton(interaction, groupId);
   if (action === 'keepalive') return handleKeepAliveButton(interaction, groupId);
+  if (action === 'manage') return handleManageButton(interaction, groupId);
+  if (action === 'mgremove') return handleManageRemoveButton(interaction, groupId);
+  if (action === 'mgdesc') return handleManageDescButton(interaction, groupId);
+  if (action === 'mgtime') return handleManageTimeButton(interaction, groupId);
+  if (action === 'mgsize') return handleManageSizeButton(interaction, groupId);
 }
 
 module.exports = {
@@ -1379,6 +1589,8 @@ module.exports = {
   handleLfgPostSelectInteraction,
   handleLfgPostButtonInteraction,
   handleLfgPostModalSubmit,
+  handleLfgManageSelect,
+  handleLfgManageModalSubmit,
   handleLfgPostGroupButtonInteraction,
   handleRetiredSyncedGroupButton,
   restoreLfgGroups,

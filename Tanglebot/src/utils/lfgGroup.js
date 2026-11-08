@@ -156,7 +156,12 @@ function buildGroupRow(groupId) {
     .setLabel('Disband Group')
     .setStyle(ButtonStyle.Danger);
 
-  return new ActionRowBuilder().addComponents(join, leave, startNow, disband);
+  const manage = new ButtonBuilder()
+    .setCustomId(`${GROUP_BUTTON_PREFIX}:manage:${groupId}`)
+    .setLabel('Manage')
+    .setStyle(ButtonStyle.Secondary);
+
+  return new ActionRowBuilder().addComponents(join, leave, startNow, manage, disband);
 }
 
 // Offer to the front of the queue. Decline, or not answering in time, removes them from the queue.
@@ -362,6 +367,7 @@ module.exports = {
   buildQueueOfferRow,
   buildCancelDisbandRow,
   buildKeepAliveRow,
+  GROUP_BUTTON_PREFIX,
   makeGroupId,
   isGroupFull,
 };
