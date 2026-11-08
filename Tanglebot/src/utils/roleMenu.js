@@ -105,17 +105,6 @@ function sizeFixed(n) {
   return [{ value: String(n), label: `${n} Players (Fixed)` }];
 }
 
-function summarizeSizeOptions(sizeOptions = []) {
-  const numericValues = sizeOptions
-    .map((option) => Number.parseInt(option.value, 10))
-    .filter((value) => Number.isFinite(value));
-
-  return {
-    maximumPlayers: numericValues.length ? Math.max(...numericValues) : null,
-    supportsMass: sizeOptions.some((option) => option.value === 'mass'),
-  };
-}
-
 // Stable id for customIds and select values, e.g. "Royal Titans" -> "royal_titans".
 function slugify(label) {
   return label
@@ -196,31 +185,6 @@ for (const category of Object.values(CATEGORIES)) {
   for (const role of category.roles) {
     role.value = slugify(role.label);
   }
-}
-
-function buildDiscordLfgCatalog() {
-  return Object.entries(CATEGORIES).map(([key, category], categoryIndex) => ({
-    key,
-    displayName: category.label,
-    description: `${category.label} groups`,
-    enabled: true,
-    displayOrder: (categoryIndex + 1) * 10,
-    activities: category.roles.map((role, roleIndex) => {
-      const sizeSummary = summarizeSizeOptions(role.sizeOptions);
-      return {
-        key: role.value,
-        displayName: role.label,
-        discordRoleName: role.label,
-        description: null,
-        enabled: true,
-        displayOrder: (roleIndex + 1) * 10,
-        maximumPlayers: sizeSummary.maximumPlayers,
-        supportsMass: sizeSummary.supportsMass,
-        emoji: role.emoji ?? null,
-        colorHex: role.color ?? null,
-      };
-    }),
-  }));
 }
 
 // Button customIds:
@@ -535,7 +499,6 @@ function chunkIntoRows(items, size) {
 
 module.exports = {
   CATEGORIES,
-  buildDiscordLfgCatalog,
   MENU_MESSAGE_LIFETIME_MS,
   buildMenuEmbed,
   buildCategoryButtonsRow,

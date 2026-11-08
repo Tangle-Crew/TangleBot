@@ -43,12 +43,6 @@ const {
   isValidColor,
   isValidEmoji,
 } = require('./roleMenu');
-const {
-  createGroup: createBackendGroup,
-  actOnGroup: actOnBackendGroup,
-  syncGroupMetadata,
-  isConfigured: isLfgBackendConfigured,
-} = require('./lfgBackend');
 
 // Forum Channel that /lfg-post creates its threads in.
 const FORUM_CHANNEL_ID = process.env.LFG_FORUM_CHANNEL_ID;
@@ -114,7 +108,6 @@ function serializeGroup(group) {
     activityMessageId: group.activityMessageId,
     queue: [...group.queue],
     pendingOfferUserId: group.pendingOfferUserId,
-    backendGroupId: group.backendGroupId,
   };
 }
 
@@ -131,31 +124,6 @@ function newGroupState(fields) {
     keepAliveTimeoutId: null,
     keepAliveReplyTimeoutId: null,
   };
-}
-
-async function syncBackendQueueCount(group) {
-  if (!group?.backendGroupId || !isLfgBackendConfigured()) {
-    return;
-  }
-
-  try {
-    await syncGroupMetadata({
-      groupId: group.backendGroupId,
-      queueCount: group.queue.length,
-    });
-  } catch (err) {
-    console.error(`[LFG] Could not sync queue count for group ${group.id}:`, err.message);
-  }
-}
-
-// The Discord action already went through, so a mirror failure is only reported to admins.
-async function notifyBackendMirrorFailure(interaction, group, actionLabel, err) {
-  console.error(`[LFG] Could not mirror ${actionLabel} for group ${group.id}:`, err.message);
-  await notifyAdminLog(
-    interaction.client,
-    '⚠️ LFG Backend Mirror Failed',
-    `Couldn't mirror **${actionLabel}** for <@${interaction.user.id}> on group **${group.roleLabel}** (thread <#${group.threadId}>) to the shared LFG backend: ${err.message}`
-  );
 }
 
 // ---- Setup UI: Category -> Activity -> Size -> Start Time, then the description modal ----
@@ -392,7 +360,6 @@ async function handleDescriptionModalSubmit(interaction) {
     pendingOfferTimeoutId: null,
     keepAliveTimeoutId: null, // next "still active?" check
     keepAliveReplyTimeoutId: null, // reply window after a check
-    backendGroupId: null,
   };
   activeGroups.set(groupId, group);
 
@@ -426,31 +393,6 @@ async function handleDescriptionModalSubmit(interaction) {
 
   group.threadId = thread.id;
   console.log(`[LFG] Post created: group ${groupId} (${roleLabel}, ${sizeOption.label}, ${timeOption.label}), thread ${thread.id}, by ${interaction.user.username}`);
-
-  if (isLfgBackendConfigured()) {
-    try {
-      const backendGroup = await createBackendGroup({
-        member: interaction.member,
-        categoryKey: session.category,
-        activityLabel: activityOption.label,
-        description,
-        startTimeIso: new Date(timeEpoch * 1000).toISOString(),
-        maximumPlayers: Number.isFinite(sizeCap) ? sizeCap : null,
-        discordChannelId: thread.id,
-        discordMessageId: thread.id,
-        idempotencyKey: interaction.id,
-      });
-      group.backendGroupId = backendGroup?.id ?? null;
-      await syncBackendQueueCount(group);
-    } catch (err) {
-      console.error(`[LFG] Could not mirror created group ${groupId} to backend:`, err.message);
-      await notifyAdminLog(
-        interaction.client,
-        '⚠️ LFG Backend Mirror Failed',
-        `Discord group **${roleLabel}** was created in thread <#${thread.id}> but could not be mirrored to the shared LFG backend: ${err.message}`
-      );
-    }
-  }
 
   // Best-effort; a failed reaction shouldn't block the post.
   try {
@@ -656,7 +598,6 @@ async function handleQueueOfferTimeout(client, group) {
 
   try {
     const channel = await client.channels.fetch(group.threadId);
-    await syncBackendQueueCount(group);
     await advanceQueueOrReopen(client, channel, group, `⌛ <@${skippedUserId}> didn't respond in time and was removed from the queue.`);
   } catch (err) {
     cleanupStaleGroupOrLog(group, err, `[LFG] Could not advance queue for group ${group.id}:`);
@@ -707,7 +648,6 @@ async function handleJoinButton(interaction, groupId) {
   if (group.status === 'closed') {
     group.queue.push(interaction.user.id);
     if (!(await updateGroupMessage(interaction, group))) return;
-    await syncBackendQueueCount(group);
     return followUpEphemeral(
       interaction,
       `⏳ This group is full — you're in the queue (position ${group.queue.length}). You'll be pinged here if a spot opens up.`
@@ -724,18 +664,6 @@ async function handleJoinButton(interaction, groupId) {
 
   if (!(await updateGroupMessage(interaction, group))) return;
 
-  if (group.backendGroupId && isLfgBackendConfigured()) {
-    try {
-      await actOnBackendGroup({
-        member: interaction.member,
-        groupId: group.backendGroupId,
-        action: 'join',
-        idempotencyKey: interaction.id,
-      });
-    } catch (err) {
-      await notifyBackendMirrorFailure(interaction, group, 'join', err);
-    }
-  }
 
   // A join shows the group is still active.
   resetKeepAliveCheck(interaction.client, group);
@@ -767,9 +695,15 @@ async function handleLeaveButton(interaction, groupId) {
       return replyEphemeral(interaction, 'You\'re not in this group.');
     }
     group.queue.splice(queueIndex, 1);
+    const heldOffer = group.pendingOfferUserId === interaction.user.id;
+    // Drop their offer before awaiting, so its timeout or Accept can't act on someone else.
+    if (heldOffer) clearPendingOffer(group);
     if (!(await updateGroupMessage(interaction, group))) return;
-    await syncBackendQueueCount(group);
-    return followUpEphemeral(interaction, 'You left the queue.');
+    await followUpEphemeral(interaction, 'You left the queue.');
+    if (heldOffer) {
+      await advanceQueueOrReopen(interaction.client, interaction.channel, group, `↪️ <@${interaction.user.id}> left the queue.`);
+    }
+    return;
   }
 
   group.members.delete(interaction.user.id);
@@ -780,18 +714,6 @@ async function handleLeaveButton(interaction, groupId) {
 
   // No group-wide ping for a routine leave.
   const leftText = `⚠️ <@${interaction.user.id}> left the group.`;
-  if (group.backendGroupId && isLfgBackendConfigured()) {
-    try {
-      await actOnBackendGroup({
-        member: interaction.member,
-        groupId: group.backendGroupId,
-        action: 'leave',
-        idempotencyKey: interaction.id,
-      });
-    } catch (err) {
-      await notifyBackendMirrorFailure(interaction, group, 'leave', err);
-    }
-  }
 
   if (wasFull) {
     // The queue gets first refusal on the freed spot.
@@ -838,22 +760,9 @@ async function handleQueueAcceptButton(interaction, groupId) {
   group.status = isGroupFull(group) ? 'closed' : 'open';
 
   await interaction.deferUpdate();
-  await syncBackendQueueCount(group);
 
   // No group-wide ping for a routine join.
   const acceptedText = `✅ <@${interaction.user.id}> accepted the open spot and joined!`;
-  if (group.backendGroupId && isLfgBackendConfigured()) {
-    try {
-      await actOnBackendGroup({
-        member: interaction.member,
-        groupId: group.backendGroupId,
-        action: 'join',
-        idempotencyKey: interaction.id,
-      });
-    } catch (err) {
-      await notifyBackendMirrorFailure(interaction, group, 'queue accept', err);
-    }
-  }
   resetKeepAliveCheck(interaction.client, group);
 
   if (group.status === 'open') {
@@ -880,7 +789,6 @@ async function handleQueueDeclineButton(interaction, groupId) {
   const declinedUserId = group.queue.shift();
 
   await interaction.deferUpdate();
-  await syncBackendQueueCount(group);
 
   await advanceQueueOrReopen(interaction.client, interaction.channel, group, `↪️ <@${declinedUserId}> declined the spot.`);
 }
@@ -948,18 +856,6 @@ async function handleDisbandButton(interaction, groupId) {
   // Remove the main post's buttons.
   if (!(await updateGroupMessage(interaction, group, []))) return;
 
-  if (group.backendGroupId && isLfgBackendConfigured()) {
-    try {
-      await actOnBackendGroup({
-        member: interaction.member,
-        groupId: group.backendGroupId,
-        action: 'close',
-        idempotencyKey: interaction.id,
-      });
-    } catch (err) {
-      await notifyBackendMirrorFailure(interaction, group, 'close', err);
-    }
-  }
   await beginDisband(interaction.client, interaction.channel, group, `🛑 <@${interaction.user.id}> has selected to disband this group.`);
 }
 
@@ -1158,6 +1054,10 @@ async function resumeGroup(client, channel, group) {
 
   scheduleCountdownRefresh(client, group);
 
+  // Re-render the starter post as text-only.
+  await updateMainPost(channel, group);
+  if (!activeGroups.has(group.id)) return;
+
   if (group.members.size === 0) {
     const closesAtEpoch = Math.floor((Date.now() + EMPTY_GROUP_CLEANUP_DELAY_MS) / 1000);
     await sendOrEditActivity(
@@ -1251,16 +1151,13 @@ async function recoverFromForum(client) {
   const sections = [];
   if (rebuilt.length) {
     sections.push(`Rebuilt from their posts, since the save file didn't have them:\n${rebuilt.join('\n')}`);
-    if (isLfgBackendConfigured()) {
-      sections.push('These groups no longer sync to the RuneLite plugin (the backend link was only in the save file).');
-    }
   }
   if (unreadable.length) sections.push(`Couldn't be restored, so their buttons were removed:\n${unreadable.join('\n')}`);
   await notifyAdminLog(client, 'ℹ️ LFG Groups Rebuilt From Posts', truncate(sections.join('\n\n'), 4096));
 }
 
 // Rebuilds one group from its post. Returns null for posts that aren't /lfg-post groups with
-// buttons (the start page, plugin posts, or a group already closing), { unreadable: true } if the
+// buttons (the start page, or a group already closing), { unreadable: true } if the
 // post can't be read (its buttons are removed), or { group, hidden }.
 async function recoverFromPost(client, thread) {
   const starter = await thread.messages.fetch(thread.id);
@@ -1302,7 +1199,6 @@ async function recoverFromPost(client, thread) {
     activityMessageId: latestNotice?.id ?? null,
     queue: parsed.queue,
     pendingOfferUserId: parsed.pendingOfferUserId,
-    backendGroupId: null,
   });
   // Full, or holding a spot for the queue.
   group.status = isGroupFull(group) || group.queue.length > 0 ? 'closed' : 'open';
@@ -1317,6 +1213,19 @@ async function recoverFromPost(client, thread) {
   }
   console.log(`[LFG] Rebuilt group ${group.id} from post ${thread.id}`);
   return { group, hidden: parsed.hiddenMembers + parsed.hiddenQueued };
+}
+
+// Buttons on posts from the retired shared LFG system: explain, then remove the buttons.
+async function handleRetiredSyncedGroupButton(interaction) {
+  await replyEphemeral(
+    interaction,
+    'This group came from the old shared LFG system and is no longer active. Start a new one with `/lfg-post`.'
+  );
+  try {
+    await interaction.message.edit({ components: [] });
+  } catch (err) {
+    if (!isAlreadyGoneError(err)) throw err;
+  }
 }
 
 // ---- Entry points called from eventHandler.js ----
@@ -1363,5 +1272,6 @@ module.exports = {
   handleLfgPostSelectInteraction,
   handleLfgPostModalSubmit,
   handleLfgPostGroupButtonInteraction,
+  handleRetiredSyncedGroupButton,
   restoreLfgGroups,
 };

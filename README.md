@@ -223,9 +223,7 @@ Creates a forum post where members can join a group for an activity, with a role
 |---|---|---|
 | `LFG_FORUM_CHANNEL_ID` | Yes | Forum Channel for group posts. The command isn't loaded without it. |
 | `COORDINATOR_ROLE_ID` / `OWNER_ROLE_ID` | No | Staff who can Start Now, Disband, Cancel Disband and confirm Still Here on any group. |
-| `SUPABASE_URL` + `LFG_PLUGIN_TOKEN` | No | Mirrors groups to the shared LFG backend used by the RuneLite plugin. |
-| `LFG_DELIVERY_SECRET` | No | Also needed to push the activity catalog on startup and to deliver plugin-created groups into Discord. |
-| `ADMIN_LOG_CHANNEL_ID` | No | Receives setup errors and backend sync failures. |
+| `ADMIN_LOG_CHANNEL_ID` | No | Receives setup errors. |
 
 </details>
 
@@ -246,15 +244,6 @@ Creates a forum post where members can join a group for an activity, with a role
 8. On startup the bot posts or updates a pinned **Start Here** post in the forum explaining all of this.
 
 Groups survive restarts: each change is saved to `Tanglebot/data/lfg-groups.json`, and on startup the bot restores them and restarts their timers from that moment. A group that was closing gets a fresh 1-minute countdown with **Cancel Disband**, an empty one a fresh 15 minutes, and a spot held for the queue is offered again. If the save file doesn't have a group, the bot rebuilds it from its post in the forum; posts it can't read get their buttons removed, and the admin log lists both.
-
-</details>
-
-<details>
-<summary><strong>Shared LFG backend (RuneLite plugin)</strong></summary>
-
-With `SUPABASE_URL` and `LFG_PLUGIN_TOKEN` set, `/lfg-post` groups are mirrored to the shared Supabase backend so the RuneLite plugin can see them. With `LFG_DELIVERY_SECRET` too, the bot pushes its activity catalog (from `roleMenu.js`) on startup and polls for plugin-created groups, posting each as its own thread.
-
-Plugin-created posts have **Join Group**, **Leave Group** and **Close Group** buttons, enabled per the group's status (`OPEN`, `FULL`, `STARTED`, `CLOSED`, `CANCELLED`, `EXPIRED`). Join stays enabled when the group is full, because the backend queues the player.
 
 </details>
 
@@ -567,7 +556,7 @@ Watches submission channels for KC and drop proof posts and forwards valid ones 
 
 | Variable | Description |
 |---|---|
-| `SUPABASE_URL` | Supabase project URL (shared with the LFG backend). |
+| `SUPABASE_URL` | Supabase project URL. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Used to look up `event_discord_channels`. |
 | `SUPABASE_DISCORD_KC_INTAKE_URL` | Where submissions are sent. Can be overridden with `/submission setintakeurl`. |
 | `DISCORD_KC_INTAKE_SECRET` | Shared secret sent with each submission. |
@@ -715,7 +704,7 @@ To run with Docker instead, use `docker compose up -d --build` from the repo roo
 - [discord.js](https://discord.js.org/) v14
 - [@napi-rs/canvas](https://github.com/Brooooooklyn/canvas) and [gif-encoder-2](https://github.com/benjaminadk/gif-encoder-2) — the `/spinwheel` GIF
 - [googleapis](https://github.com/googleapis/google-api-nodejs-client) — Google Sheets for the high score commands
-- [axios](https://axios-http.com/) — Supabase and the LFG backend
+- [axios](https://axios-http.com/) — Supabase
 - [@wise-old-man/utils](https://github.com/wise-old-man/wise-old-man) — Wise Old Man API client
 - [Claude by Anthropic](https://claude.ai/) — AI-assisted development
 
