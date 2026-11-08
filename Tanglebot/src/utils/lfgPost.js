@@ -218,6 +218,8 @@ async function sendSetupMenu(interaction) {
     return replyEphemeral(interaction, '⚠️ LFG_FORUM_CHANNEL_ID is not set. Ask an admin to set it in the bot\'s environment variables.');
   }
 
+  // Each run starts fresh, so an abandoned setup doesn't pre-fill this one.
+  setupSessions.delete(interaction.user.id);
   const session = getSession(interaction.user.id);
   await interaction.reply({
     content: buildSetupContent(session),
