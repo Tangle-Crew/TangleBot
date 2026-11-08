@@ -8,7 +8,7 @@ const {
   ButtonBuilder,
   ButtonStyle,
 } = require('discord.js');
-const { WOM_METRICS, findMetric, shortMetricName } = require('../utils/womMetrics');
+const { WOM_METRICS, findMetric, shortMetricName, metricCategory } = require('../utils/womMetrics');
 const { resolveMetricImageUrl, createGroupCompetition } = require('../utils/wiseOldMan');
 const { notifyAdminLog } = require('../utils/roleMenu');
 const { clearStandingsCache } = require('./weeklycompstats');
@@ -22,9 +22,16 @@ const METRIC_OPTION_NAMES = ['metric', 'metric2', 'metric3', 'metric4'];
 // Bots can't see a user's timezone, so dates are read as Eastern Time.
 const DEFAULT_TIME_ZONE = 'America/New_York';
 
-// "<prefix> <metric>", e.g. "BOTW T3 Gauntlet".
-function buildCompTitle(prefix, metric) {
-  return `${prefix} ${shortMetricName(metric.value)}`;
+// "<prefix> <metric>", e.g. "BOTW T3 Gauntlet", or "<prefix> <A> + <B>" for several metrics.
+function buildCompTitle(prefix, metrics) {
+  return `${prefix} ${metrics.map(m => shortMetricName(m.value)).join(' + ')}`;
+}
+
+// The metrics each WOM competition tracks. WOM needs all metrics of one competition to be of the
+// same type, so they share one competition if they are, else each gets its own.
+function planCompetitions(metrics) {
+  const sameType = new Set(metrics.map(m => metricCategory(m.value))).size <= 1;
+  return sameType ? [metrics] : metrics.map(metric => [metric]);
 }
 
 // How far timeZone's wall clock is ahead of UTC at the instant ms, in ms (negative behind UTC).
@@ -151,6 +158,8 @@ function buildCommandData() {
 module.exports = {
   data: buildCommandData(),
   parseDateInput,
+  planCompetitions,
+  buildCompTitle,
 
   async autocomplete(interaction) {
     const focused = interaction.options.getFocused(true);
@@ -239,9 +248,13 @@ module.exports = {
 
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
+    const groups = planCompetitions(metrics);
     const metricsLabel = metrics.map(m => m.name).join(', ');
-    // The event is named after the first metric; each competition after its own.
-    const eventTitle = buildCompTitle(prefix, metrics[0]);
+    // The event is named after the first competition.
+    const eventTitle = buildCompTitle(prefix, groups[0]);
+    const compsLabel = groups.length === 1
+      ? (metrics.length === 1 ? 'a Wise Old Man competition' : 'one Wise Old Man competition tracking all the metrics combined')
+      : `${groups.length} Wise Old Man competitions`;
 
     const confirmEmbed = new EmbedBuilder()
       .setColor(DISCORD_GREEN)
@@ -251,7 +264,7 @@ module.exports = {
         `**Starts:** <t:${Math.floor(startsAt.getTime() / 1000)}:F>\n` +
         `**Ends:** <t:${Math.floor(endsAt.getTime() / 1000)}:F>\n` +
         `**Duration:** ${durationDays} day${durationDays === 1 ? '' : 's'}\n\n` +
-        `This creates a public Discord event and ${metrics.length === 1 ? 'a Wise Old Man competition' : `${metrics.length} Wise Old Man competitions`}. Confirm?`
+        `This creates a public Discord event and ${compsLabel}. Confirm?`
       );
 
     const confirmRow = new ActionRowBuilder().addComponents(
@@ -285,28 +298,29 @@ module.exports = {
 
     console.log(`[WeeklyComp] ${interaction.user.tag} creating "${prefix}" (${metrics.map(m => m.value).join(', ')}) ${startsAt.toISOString()} -> ${endsAt.toISOString()} in WOM group ${groupId}`);
 
-    // One WOM competition per metric.
+    // One WOM competition per group of metrics.
     const created = [];
-    for (const metric of metrics) {
-      const title = buildCompTitle(prefix, metric);
+    for (const group of groups) {
+      const title = buildCompTitle(prefix, group);
+      const groupLabel = group.map(m => m.name).join(' + ');
       try {
-        const result = await createGroupCompetition({ title, metric: metric.value, startsAt, endsAt, groupId, groupVerificationCode });
-        created.push({ metric, title, competition: result.competition, url: `https://wiseoldman.net/competitions/${result.competition.id}` });
+        const result = await createGroupCompetition({ title, metrics: group.map(m => m.value), startsAt, endsAt, groupId, groupVerificationCode });
+        created.push({ metrics: group, title, competition: result.competition, url: `https://wiseoldman.net/competitions/${result.competition.id}` });
         clearStandingsCache();
       } catch (err) {
-        console.error(`[WeeklyComp] Failed to create WOM competition for ${metric.name}:`, err);
+        console.error(`[WeeklyComp] Failed to create WOM competition for ${groupLabel}:`, err);
         if (created.length === 0) {
           return interaction.editReply(`Failed to create the Wise Old Man competition: ${err.message}`);
         }
         const createdLines = created.map(c => `${c.title}: ${c.url}`).join('\n');
         await interaction.editReply(
-          `Created ${created.length} of ${metrics.length} Wise Old Man competitions before **${metric.name}** failed: ${err.message}\n\n` +
+          `Created ${created.length} of ${groups.length} Wise Old Man competitions before **${groupLabel}** failed: ${err.message}\n\n` +
           `Created so far:\n${createdLines}`
         );
         notifyAdminLog(
           interaction.client,
           '⚠️ /weeklycomp: Partial competition creation',
-          `${interaction.user} ran /weeklycomp for **${prefix}** — created ${created.length}/${metrics.length} competitions before **${metric.name}** failed: ${err.message}\n${createdLines}`,
+          `${interaction.user} ran /weeklycomp for **${prefix}** — created ${created.length}/${groups.length} competitions before **${groupLabel}** failed: ${err.message}\n${createdLines}`,
           [],
           0xc0392b
         );
