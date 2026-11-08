@@ -7,7 +7,7 @@ const {
   rankParticipants,
   competitionUrl,
 } = require('./wiseOldMan');
-const { metricName, shortMetricName, metricCategory, metricUnit, formatNumber } = require('./womMetrics');
+const { metricName, shortMetricName, metricCategory, metricUnit, formatNumber, competitionMetrics } = require('./womMetrics');
 const { readJson, writeJson, withTimeout, truncate } = require('./db');
 const { renderProgressChart, chartFileName } = require('./weeklyAnnounceChart');
 const { metricPet, findPetEmoji } = require('./bossPets');
@@ -115,16 +115,37 @@ function loadCompetitionDetails(id, options) {
 }
 
 // A title split before its metric's name: "BOTW T1: Amoxliatl" -> { prefix: 'BOTW T1: ', name:
-// 'Amoxliatl' }. A title that doesn't end in the name is all prefix.
+// 'Amoxliatl' }. A multi-metric title ending "A + B" splits before A, with the metrics matched in
+// any order (WOM's order isn't reliable). A title that doesn't end in the names is all prefix.
 function splitTitle(competition) {
   const title = competition.title.trim();
-  for (const name of [metricName(competition.metric), shortMetricName(competition.metric)]) {
-    if (title.toLowerCase().endsWith(name.toLowerCase())) {
-      const cut = title.length - name.length;
-      return { prefix: title.slice(0, cut), name: title.slice(cut) };
+  const lower = title.toLowerCase();
+  // Longest name first, so "Corrupted Gauntlet" is tried before "Gauntlet".
+  const namesOf = metric => [metricName(metric), shortMetricName(metric)]
+    .filter((name, i, all) => all.indexOf(name) === i)
+    .sort((a, b) => b.length - a.length)
+    .map(name => name.toLowerCase());
+
+  // Where the names start when `remaining` metrics (in any order) end the title at `end`, else -1.
+  const findStart = (end, remaining) => {
+    for (const metric of remaining) {
+      for (const name of namesOf(metric)) {
+        if (!lower.slice(0, end).endsWith(name)) continue;
+        const start = end - name.length;
+        if (remaining.length === 1) return start;
+        const separator = lower.slice(0, start).match(/\s*\+\s*$/);
+        if (!separator) continue;
+        const found = findStart(start - separator[0].length, remaining.filter(m => m !== metric));
+        if (found !== -1) return found;
+      }
     }
-  }
-  return { prefix: title, name: '' };
+    return -1;
+  };
+
+  const metrics = [...new Set(competitionMetrics(competition))];
+  const start = metrics.length ? findStart(title.length, metrics) : -1;
+  if (start === -1) return { prefix: title, name: '' };
+  return { prefix: title.slice(0, start), name: title.slice(start) };
 }
 
 // "BOTW T1: " and "botw t1" match.
@@ -134,17 +155,20 @@ function prefixKey(prefix) {
 
 // One list per title prefix and unit, so "BOTW T3 Gauntlet" and "BOTW T3 Corrupted Gauntlet" (both
 // kc) share a list, ranked by each player's gains added up across its competitions.
-// competitions: [{ id }]. Returns [{ title, prefix, names, metric, competitions, ranked: [{ id, name,
-// gained }] }], with names[i] the metric part of competitions[i]'s title ('' if none).
+// competitions: [{ id }]. Returns [{ title, prefix, names, metric, metrics, competitions, ranked: [{
+// id, name, gained }] }], with names[i] the metric part of competitions[i]'s title ('' if none),
+// metrics every metric of the list and metric the first (which sets the unit and category).
 async function loadWinnerLists(competitions, { fresh = false } = {}) {
   const lists = new Map();
   for (const { id } of [...competitions].sort((a, b) => a.id - b.id)) {
     const details = await loadCompetitionDetails(id, { fresh });
     const { prefix, name } = splitTitle(details);
-    const key = `${prefixKey(prefix)}|${metricUnit(details.metric)}`;
-    if (!lists.has(key)) lists.set(key, { prefix, names: [], competitions: [], totals: new Map() });
+    const metrics = competitionMetrics(details);
+    const key = `${prefixKey(prefix)}|${metricUnit(metrics[0])}`;
+    if (!lists.has(key)) lists.set(key, { prefix, names: [], metrics: [], competitions: [], totals: new Map() });
     const list = lists.get(key);
     list.names.push(name);
+    for (const metric of metrics) if (!list.metrics.includes(metric)) list.metrics.push(metric);
     list.competitions.push(details);
     for (const row of rankParticipants(details)) {
       const total = list.totals.get(row.id) ?? { id: row.id, name: row.name, gained: 0 };
@@ -158,7 +182,8 @@ async function loadWinnerLists(competitions, { fresh = false } = {}) {
       : `${list.prefix}${list.names.filter(Boolean).join(' + ')}`.trim(),
     prefix: list.prefix,
     names: list.names,
-    metric: list.competitions[0].metric,
+    metric: list.metrics[0],
+    metrics: list.metrics,
     competitions: list.competitions,
     ranked: [...list.totals.values()].sort((a, b) => b.gained - a.gained || a.name.localeCompare(b.name)),
   }));
@@ -210,10 +235,16 @@ function winnerLabel(player, mentions) {
   return userId ? `<@${userId}>` : `**${escapeMarkdown(player.name)}**`;
 }
 
+// The pet emoji of each of the list's metrics, without repeats (two metrics can share a pet).
+function listPetEmojis(list, emojis) {
+  const found = list.metrics.map(metric => findPetEmoji(metric, emojis)).filter(Boolean);
+  return [...new Set(found)];
+}
+
 // emojis: the bot's application emojis; mentions: RSN -> Discord user ID.
 function buildWinnersSection(list, { emojis, mentions }) {
-  const emoji = findPetEmoji(list.metric, emojis);
-  const lead = emoji ? `${emoji} ` : '';
+  const petEmojis = listPetEmojis(list, emojis);
+  const lead = petEmojis.length ? `${petEmojis.join(' ')} ` : '';
   const heading = `# ${lead}${linkedTitle(list)}`;
   const unit = metricUnit(list.metric);
   if (list.ranked.length === 0) {
@@ -222,7 +253,11 @@ function buildWinnersSection(list, { emojis, mentions }) {
   const unitLabel = UNIT_LABELS[unit] ?? unit;
   const amount = gained => `${formatNumber(gained, list.metric)}${unitLabel ? ` ${unitLabel}` : ''}`;
   const total = list.ranked.reduce((sum, row) => sum + row.gained, 0);
-  const metricLabel = list.names.filter(Boolean).join(' + ') || shortMetricName(list.metric);
+  // A single multi-metric competition without its metrics in the title is labelled by its title.
+  const fallbackLabel = list.competitions.length === 1 && list.metrics.length > 1
+    ? list.title
+    : list.metrics.map(shortMetricName).join(' + ');
+  const metricLabel = list.names.filter(Boolean).join(' + ') || fallbackLabel;
   const totalLine = `**Total** ${lead}**${escapeMarkdown(metricLabel)}${unitLabel ? ` ${unitLabel}` : ''}: ${formatNumber(total, list.metric)}**`;
 
   const places = topPlaces(list.ranked);
@@ -351,13 +386,20 @@ async function loadChartData(list, { fresh = false, now = Date.now() } = {}) {
       if (m === marks.length - 1) {
         gains = competition.participations.map(p => p.progress.gained);
       } else {
-        const rows = await cachedWomCall(
-          `gains:${competition.id}:${marks[m]}`,
-          `Loading the group's gains for competition #${competition.id}`,
-          () => getGroupGains(competition.groupId, competition.metric, new Date(competition.startsAt), new Date(marks[m])),
-          { fresh }
-        );
-        gains = rows.filter(r => participantIds.has(r.player.id)).map(r => r.data.gained);
+        // One request per metric, added up per player.
+        const perPlayer = new Map();
+        for (const metric of competitionMetrics(competition)) {
+          const rows = await cachedWomCall(
+            `gains:${competition.id}:${metric}:${marks[m]}`,
+            `Loading the group's ${metricName(metric)} gains for competition #${competition.id}`,
+            () => getGroupGains(competition.groupId, metric, new Date(competition.startsAt), new Date(marks[m])),
+            { fresh }
+          );
+          for (const r of rows) {
+            if (participantIds.has(r.player.id)) perPlayer.set(r.player.id, (perPlayer.get(r.player.id) ?? 0) + r.data.gained);
+          }
+        }
+        gains = [...perPlayer.values()];
       }
       total[m] += gains.reduce((sum, gained) => sum + Math.max(gained, 0), 0);
     }
@@ -565,9 +607,15 @@ async function buildPost(draft, guild, { fresh = false } = {}) {
   const emojis = guild ? await loadBotEmojis(guild.client) : [];
   post.winners = names.map(name => ({ name, userId: mentions.get(name) ?? null }));
   for (const list of lists) {
-    const pet = metricPet(list.metric);
-    if (!pet) post.emojiProblems.push(`${list.title}: no pet is listed for ${metricName(list.metric)}`);
-    else if (!findPetEmoji(list.metric, emojis)) post.emojiProblems.push(`${list.title}: the bot has no emoji named after ${pet}`);
+    const missing = new Set();
+    for (const metric of list.metrics) {
+      const pet = metricPet(metric);
+      if (!pet) post.emojiProblems.push(`${list.title}: no pet is listed for ${metricName(metric)}`);
+      else if (!findPetEmoji(metric, emojis) && !missing.has(pet)) {
+        missing.add(pet);
+        post.emojiProblems.push(`${list.title}: the bot has no emoji named after ${pet}`);
+      }
+    }
   }
   post.winnersText = buildWinnersText(lists, { emojis, mentions });
   const endsAfter = at => lists.some(list => list.competitions.some(c => new Date(c.endsAt).getTime() > at));
@@ -609,4 +657,8 @@ module.exports = {
   joinAnnouncements,
   announcementParts,
   buildPost,
+  splitTitle,
+  loadWinnerLists,
+  loadChartData,
+  buildWinnersSection,
 };

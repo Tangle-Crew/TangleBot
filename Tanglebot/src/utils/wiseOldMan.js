@@ -15,8 +15,8 @@ function womClient() {
   return client;
 }
 
-// Not every metric has a background image (e.g. Mimic); use WOM's generic icon then.
-async function resolveMetricImageUrl(metric) {
+// The metric's background image URL, or null if it has none (e.g. Mimic) or can't be checked.
+async function probeMetricImage(metric) {
   const url = `${WOM_ASSETS_BASE_URL}/backgrounds/${metric}.png`;
   try {
     const res = await fetch(url, { method: 'HEAD' });
@@ -24,17 +24,27 @@ async function resolveMetricImageUrl(metric) {
   } catch (err) {
     console.warn(`[WOM] Failed to probe background image for ${metric}:`, err.message);
   }
+  return null;
+}
+
+// The background of the first of `metrics` that has one, else WOM's generic icon.
+async function resolveMetricImageUrl(...metrics) {
+  for (const metric of metrics.flat()) {
+    const url = await probeMetricImage(metric);
+    if (url) return url;
+  }
   return FALLBACK_IMAGE_URL;
 }
 
 // Participants aren't passed — WOM auto-populates them from the group's member list.
 // groupId/groupVerificationCode fall back to their env vars if omitted.
-async function createGroupCompetition({ title, metric, startsAt, endsAt, groupId, groupVerificationCode }) {
+// `metrics` is an array; WOM needs them all to be of the same type (skill, boss, ...).
+async function createGroupCompetition({ title, metrics, startsAt, endsAt, groupId, groupVerificationCode }) {
   groupId = groupId ?? Number(process.env.WOM_GROUP_ID);
   groupVerificationCode = groupVerificationCode ?? process.env.WOM_GROUP_VERIFICATION_CODE;
   return womClient().competitions.createCompetition({
     title,
-    metric,
+    metrics,
     startsAt,
     endsAt,
     groupId,
@@ -104,6 +114,20 @@ function rankParticipants(details) {
     .sort((a, b) => b.gained - a.gained);
 }
 
+// Each metric's gains per player from a competition's details, 'total' left out:
+// Map(playerId -> Map(metric -> gained)). Players without deltas are left out.
+function metricBreakdown(details) {
+  const byPlayer = new Map();
+  for (const p of details.participations ?? []) {
+    const perMetric = new Map();
+    for (const d of p.deltas ?? []) {
+      if (d.metric !== 'total') perMetric.set(d.metric, d.values?.gained ?? 0);
+    }
+    if (perMetric.size > 0) byPlayer.set(p.player.id, perMetric);
+  }
+  return byPlayer;
+}
+
 function competitionUrl(id) {
   return `https://wiseoldman.net/competitions/${id}`;
 }
@@ -120,5 +144,6 @@ module.exports = {
   getCompetitionTopHistory,
   isCompetitionOngoing,
   rankParticipants,
+  metricBreakdown,
   competitionUrl,
 };

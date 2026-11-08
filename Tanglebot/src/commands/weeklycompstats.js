@@ -14,9 +14,17 @@ const {
   getCompetitionDetails,
   isCompetitionOngoing,
   rankParticipants,
+  metricBreakdown,
   competitionUrl,
 } = require('../utils/wiseOldMan');
-const { CATEGORY_LABELS, shortMetricName, metricCategory, formatNumber, formatAmount } = require('../utils/womMetrics');
+const {
+  CATEGORY_LABELS,
+  shortMetricName,
+  metricCategory,
+  competitionMetrics,
+  formatNumber,
+  formatAmount,
+} = require('../utils/womMetrics');
 const { DEFAULT_EMBED_COLOR } = require('../utils/embedColor');
 const { truncate, discordTimestamp, withTimeout } = require('../utils/db');
 const { notifyAdminLog } = require('../utils/roleMenu');
@@ -48,7 +56,12 @@ let cacheGeneration = 0;
 const lastRunByUser = new Map();
 
 function describeCompetition(competition) {
-  return `"${competition.title}" (#${competition.id}, ${competition.metric})`;
+  return `"${competition.title}" (#${competition.id}, ${competitionMetrics(competition).join(' + ')})`;
+}
+
+// The metric that sets a competition's unit and category; WOM keeps all its metrics of one type.
+function leadMetric(competition) {
+  return competitionMetrics(competition)[0];
 }
 
 // Brackets are dropped so a title can't break its own link. `<url>` stops Discord adding a link
@@ -108,12 +121,14 @@ async function loadStandings(groupId) {
     }
     const ranked = rankParticipants(result.value);
     const total = ranked.reduce((sum, row) => sum + row.gained, 0);
-    const leader = ranked[0] ? `${ranked[0].name} (${formatAmount(ranked[0].gained, competition.metric)})` : 'nobody yet';
+    const leader = ranked[0] ? `${ranked[0].name} (${formatAmount(ranked[0].gained, leadMetric(competition))})` : 'nobody yet';
     console.log(
       `[WeeklyCompStats] Loaded ${describeCompetition(competition)}: ${ranked.length} player(s) with gains, ` +
-      `total ${formatAmount(total, competition.metric)}, leader ${leader}.`
+      `total ${formatAmount(total, leadMetric(competition))}, leader ${leader}.`
     );
-    return { competition, ranked, total };
+    // Per-metric gains per player, for a competition tracking 2+ metrics.
+    const breakdown = competitionMetrics(competition).length > 1 ? metricBreakdown(result.value) : null;
+    return { competition, ranked, total, breakdown };
   });
   return { results, upcoming };
 }
@@ -185,22 +200,32 @@ function noneRunningMessage(upcoming) {
 }
 
 // One leaderboard per category. Competitions in a category are summed per player; categories are
-// never mixed, so KC and XP stay separate.
+// never mixed, so KC and XP stay separate. board.parts is what the breakdown splits a total into:
+// one per competition, or one per metric for a competition tracking 2+ metrics.
 function buildBoards(results) {
   const byCategory = new Map();
   for (const r of results) {
-    const category = metricCategory(r.competition.metric);
+    const category = metricCategory(leadMetric(r.competition));
     if (!byCategory.has(category)) byCategory.set(category, []);
     byCategory.get(category).push(r);
   }
 
   return [...byCategory].map(([category, comps]) => {
     const players = new Map();
+    const parts = comps.flatMap(r => r.breakdown
+      ? competitionMetrics(r.competition).map(metric => ({ key: `${r.competition.id}:${metric}`, metric }))
+      : [{ key: `${r.competition.id}`, metric: leadMetric(r.competition) }]);
     for (const r of comps) {
       for (const row of r.ranked) {
-        const entry = players.get(row.id) ?? { id: row.id, name: row.name, total: 0, byComp: new Map() };
+        const entry = players.get(row.id) ?? { id: row.id, name: row.name, total: 0, byPart: new Map() };
         entry.total += row.gained;
-        entry.byComp.set(r.competition.id, row.gained);
+        if (r.breakdown) {
+          for (const [metric, gained] of r.breakdown.get(row.id) ?? []) {
+            entry.byPart.set(`${r.competition.id}:${metric}`, gained);
+          }
+        } else {
+          entry.byPart.set(`${r.competition.id}`, row.gained);
+        }
         players.set(row.id, entry);
       }
     }
@@ -212,7 +237,7 @@ function buildBoards(results) {
     });
 
     // Competitions in a category share a unit, so the first one's metric formats the totals.
-    return { category, comps, rows, metric: comps[0].competition.metric };
+    return { category, comps, parts, rows, metric: leadMetric(comps[0].competition) };
   });
 }
 
@@ -241,9 +266,9 @@ function formatRow(row, board, { showBreakdown, highlightId }) {
   const label = RANK_MEDALS[row.rank - 1] ?? `**${row.rank}.**`;
   const name = row.id === highlightId ? `__**${escapeMarkdown(row.name)}**__ ◀` : `**${escapeMarkdown(row.name)}**`;
   let line = `${label} ${name} — ${formatAmount(row.total, board.metric)}`;
-  if (showBreakdown && board.comps.length > 1) {
-    line += '\n└ ' + board.comps
-      .map(r => `${shortMetricName(r.competition.metric)} ${formatNumber(row.byComp.get(r.competition.id) ?? 0, r.competition.metric)}`)
+  if (showBreakdown && board.parts.length > 1) {
+    line += '\n└ ' + board.parts
+      .map(part => `${shortMetricName(part.metric)} ${formatNumber(row.byPart.get(part.key) ?? 0, part.metric)}`)
       .join(' · ');
   }
   return line;
@@ -259,8 +284,8 @@ function emptyBoardText(board) {
 // A board's rows for one page, split into as many 1024-character fields as needed.
 function boardPageFields(board, page, rowOptions) {
   const name = truncate(
-    `${board.comps.length > 1 ? '🧮 Combined ' : ''}${categoryLabel(board.category)} — ` +
-    board.comps.map(r => shortMetricName(r.competition.metric)).join(' + '),
+    `${board.parts.length > 1 ? '🧮 Combined ' : ''}${categoryLabel(board.category)} — ` +
+    board.parts.map(part => shortMetricName(part.metric)).join(' + '),
     256
   );
 
@@ -301,8 +326,8 @@ function buildSummary(results, boards, playerLine) {
     else if (r.total === 0) line = `${endingSoon}${competitionLink(competition)} — no gains yet`;
     else {
       const participants = competition.participantCount ? `/${competition.participantCount}` : '';
-      line = `${endingSoon}${competitionLink(competition)} — ${totalLabel(competition.metric)}: ` +
-        `**${formatAmount(r.total, competition.metric)}** · ` +
+      line = `${endingSoon}${competitionLink(competition)} — ${totalLabel(leadMetric(competition))}: ` +
+        `**${formatAmount(r.total, leadMetric(competition))}** · ` +
         `${r.ranked.length}${participants} active`;
     }
     if (!sharedDates) {
@@ -397,6 +422,8 @@ module.exports = {
   requiredEnv: ['WOM_GROUP_ID'],
 
   clearStandingsCache,
+  buildBoards,
+  formatRow,
 
   // Suggests names from the last load only, so typing never calls WOM.
   async autocomplete(interaction) {

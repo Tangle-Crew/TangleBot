@@ -45,6 +45,18 @@ function metricCategory(metric) {
   return MetricProps[metric]?.type ?? 'other';
 }
 
+// Every metric a competition tracks. Falls back to the deprecated single `metric`.
+function competitionMetrics(competition) {
+  const metrics = competition.metrics?.map(m => m.metric).filter(Boolean);
+  if (metrics?.length) return metrics;
+  return competition.metric ? [competition.metric] : [];
+}
+
+// "A + B" of the competition's metrics, in the order WOM lists them.
+function competitionMetricLabel(competition) {
+  return competitionMetrics(competition).map(shortMetricName).join(' + ');
+}
+
 // EHP/EHB and other 'value' metrics are fractional, so they keep up to two decimals.
 function formatNumber(amount, metric) {
   const decimals = MetricProps[metric]?.measure === 'value' ? 2 : 0;
@@ -68,6 +80,8 @@ module.exports = {
   metricName,
   shortMetricName,
   metricCategory,
+  competitionMetrics,
+  competitionMetricLabel,
   metricUnit,
   formatNumber,
   formatAmount,

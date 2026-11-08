@@ -3,24 +3,33 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../src/', import.meta.url));
+const nodeRequire = createRequire(import.meta.url);
 class Builder {
   setName(name) { this.name = name; return this; }
   setDescription() { return this; }
   setRequired() { return this; }
   setMaxLength() { return this; }
+  setAutocomplete() { return this; }
+  setImage() { return this; }
   setDefaultMemberPermissions() { return this; }
   addStringOption(fn) { fn(new Builder()); return this; }
   addBooleanOption(fn) { fn(new Builder()); return this; }
+  addIntegerOption(fn) { fn(new Builder()); return this; }
+  setMinValue() { return this; }
+  setMaxValue() { return this; }
   setColor() { return this; }
   setTitle() { return this; }
   addFields() { return this; }
   setTimestamp() { return this; }
   setFooter() { return this; }
 }
-function load(relative, { axios = {}, env = {}, logs = [], fetch = async () => { throw new Error('Unexpected network request'); } } = {}) {
+// mocks: replacements by require() name; fastTimers: setTimeout waits 0 ms.
+function load(relative, { axios = {}, env = {}, logs = [], mocks = {}, fastTimers = false,
+  fetch = async () => { throw new Error('Unexpected network request'); } } = {}) {
   const cache = new Map();
   function requireFile(file) {
     if (cache.has(file)) return cache.get(file).exports;
@@ -28,11 +37,16 @@ function load(relative, { axios = {}, env = {}, logs = [], fetch = async () => {
     cache.set(file, module);
     vm.runInNewContext(fs.readFileSync(file, 'utf8'), {
       module, fetch, process: { env }, console: { error: (...args) => logs.push(args), log() {} },
+      ...(fastTimers ? { setTimeout: fn => setTimeout(fn, 0) } : {}),
       require: name => {
+        if (name in mocks) return mocks[name];
         if (name === 'axios') return axios;
-        if (name === './db') return { readJson: () => ({}), writeJson() {} };
+        if (name === '@wise-old-man/utils' || name === 'events') return nodeRequire(name);
+        if (name === './db' || name === '../utils/db') return { readJson: () => ({}), writeJson() {}, withTimeout: promise => promise,
+          truncate: (text, max) => (text.length > max ? `${text.slice(0, max - 1)}…` : text) };
         if (name === 'discord.js') return { SlashCommandBuilder: Builder, EmbedBuilder: Builder,
-          MessageFlags: { Ephemeral: 64 }, PermissionFlagsBits: { ManageRoles: 1, ManageGuild: 2 } };
+          MessageFlags: { Ephemeral: 64 }, PermissionFlagsBits: { ManageRoles: 1, ManageGuild: 2 },
+          escapeMarkdown: text => text, ChannelType: { GuildCategory: 4 }, embedLength: () => 0 };
         if (name.startsWith('.')) return requireFile(path.resolve(path.dirname(file), name + '.js'));
         throw new Error(`Unexpected dependency: ${name}`);
       },
@@ -310,4 +324,179 @@ test('concurrent GIM command reports already running and releases lock afterward
   await first;
   await command.execute(interaction);
   assert.ok(replies.at(-1).embeds);
+});
+
+test('competitionMetrics lists every metric and falls back to the single metric', () => {
+  const { competitionMetrics, competitionMetricLabel } = load('utils/womMetrics.js');
+  const multi = { metric: 'attack', metrics: [{ metric: 'attack', weight: 1 }, { metric: 'strength', weight: 1 }] };
+  assert.deepEqual([...competitionMetrics(multi)], ['attack', 'strength']);
+  assert.equal(competitionMetricLabel(multi), 'Attack + Strength');
+  assert.deepEqual([...competitionMetrics({ metric: 'the_gauntlet' })], ['the_gauntlet']);
+  assert.deepEqual([...competitionMetrics({ metric: 'the_gauntlet', metrics: [] })], ['the_gauntlet']);
+  assert.equal(competitionMetricLabel({ metric: 'the_gauntlet' }), 'Gauntlet');
+});
+
+const womMocks = () => ({ './wiseOldMan': { ...load('utils/wiseOldMan.js') }, '@napi-rs/canvas': {} });
+const withMetrics = (title, ...metrics) => ({ title, metric: metrics[0], metrics: metrics.map(metric => ({ metric, weight: 1 })) });
+
+test('titles split before their metrics, whichever order WOM lists them in', () => {
+  const { splitTitle } = load('utils/weeklyAnnounce.js', { mocks: womMocks() });
+  const split = competition => { const { prefix, name } = splitTitle(competition); return [prefix, name]; };
+  for (const order of [['attack', 'strength'], ['strength', 'attack']]) {
+    assert.deepEqual(split(withMetrics('SOTW T3 Attack + Strength', ...order)), ['SOTW T3 ', 'Attack + Strength']);
+    assert.deepEqual(split(withMetrics('SOTW T3 Strength + Attack', ...order)), ['SOTW T3 ', 'Strength + Attack']);
+  }
+  for (const order of [['the_gauntlet', 'the_corrupted_gauntlet'], ['the_corrupted_gauntlet', 'the_gauntlet']]) {
+    assert.deepEqual(split(withMetrics('BOTW T3 Gauntlet + Corrupted Gauntlet', ...order)), ['BOTW T3 ', 'Gauntlet + Corrupted Gauntlet']);
+    assert.deepEqual(split(withMetrics('BOTW T3 Corrupted Gauntlet+Gauntlet', ...order)), ['BOTW T3 ', 'Corrupted Gauntlet+Gauntlet']);
+  }
+  assert.deepEqual(split({ title: 'BOTW T1: Amoxliatl', metric: 'amoxliatl' }), ['BOTW T1: ', 'Amoxliatl']);
+  assert.deepEqual(split({ title: 'BOTW T3 The Gauntlet', metric: 'the_gauntlet' }), ['BOTW T3 ', 'The Gauntlet']);
+  assert.deepEqual(split(withMetrics('Weekly event', 'attack', 'strength')), ['Weekly event', '']);
+  // Only one of the two metrics named: not a match.
+  assert.deepEqual(split(withMetrics('SOTW T3 Strength', 'attack', 'strength')), ['SOTW T3 Strength', '']);
+});
+
+const loadWeeklyComp = (options = {}) => load('commands/weeklycomp.js', {
+  ...options,
+  mocks: { '../utils/roleMenu': { notifyAdminLog() {} }, './weeklycompstats': { clearStandingsCache() {} },
+    '../utils/wiseOldMan': {}, ...options.mocks },
+});
+const metricChoice = (value, name) => ({ value, name });
+
+test('weeklycomp rejects metrics of mixed types and titles one competition for the rest', () => {
+  const { hasMixedTypes, buildCompTitle } = loadWeeklyComp();
+  const m = value => ({ value });
+  assert.equal(hasMixedTypes([m('attack'), m('strength')]), false);
+  assert.equal(hasMixedTypes([m('the_gauntlet'), m('zulrah')]), false);
+  assert.equal(hasMixedTypes([m('attack'), m('zulrah')]), true);
+  assert.equal(buildCompTitle('BOTW T2: God Wars Dungeon', [m('general_graardor'), m('kreearra')]), 'BOTW T2: God Wars Dungeon');
+  assert.equal(buildCompTitle('SOTW', [m('sailing')]), 'SOTW Sailing');
+});
+
+test('event description is the title and link, plus a line per metric when there are several', () => {
+  const { buildEventDescription } = loadWeeklyComp();
+  const url = 'https://wiseoldman.net/competitions/162701';
+  assert.equal(buildEventDescription('SOTW Sailing', url, [metricChoice('sailing', 'Sailing')]),
+    `SOTW Sailing: ${url}`);
+  assert.equal(
+    buildEventDescription('BOTW GWD', url, [metricChoice('general_graardor', 'General Graardor'),
+      metricChoice('commander_zilyana', 'Commander Zilyana'), metricChoice('kreearra', "Kree'arra")]),
+    `BOTW GWD: ${url}\nGeneral Graardor\nCommander Zilyana\nKree'arra`);
+});
+
+test('event background is the first chosen metric that has one, else the generic icon', async () => {
+  const probed = [];
+  const withBackgrounds = backgrounds => async (url, options) => {
+    probed.push(url);
+    return { ok: backgrounds.some(name => url.endsWith(`/backgrounds/${name}.png`)) && options.method === 'HEAD' };
+  };
+  const base = 'https://raw.githubusercontent.com/wise-old-man/wise-old-man/master/app/public/img';
+  const resolve = async (metrics, backgrounds) => {
+    const wom = load('utils/wiseOldMan.js', { fetch: withBackgrounds(backgrounds) });
+    return wom.resolveMetricImageUrl(metrics);
+  };
+  assert.equal(await resolve(['sailing'], ['sailing']), `${base}/backgrounds/sailing.png`);
+  assert.equal(await resolve(['general_graardor', 'kreearra'], ['general_graardor', 'kreearra']), `${base}/backgrounds/general_graardor.png`);
+  // The first pick (Mimic) has no background, so the next one is used.
+  assert.equal(await resolve(['mimic', 'zulrah'], ['zulrah']), `${base}/backgrounds/zulrah.png`);
+  assert.equal(await resolve(['mimic'], []), `${base}/fallback-icon.png`);
+});
+
+const participation = (id, name, progress, deltas) => ({
+  player: { id, displayName: name }, progress: { start: 0, end: progress, gained: progress }, deltas,
+});
+const delta = (metric, gained) => ({ metric, values: { start: 0, end: gained, gained }, levels: { start: 1, end: 1, gained: 0 } });
+const attackStrength = () => ({
+  id: 7, groupId: 1, ...withMetrics('SOTW T3 Strength + Attack', 'attack', 'strength'),
+  startsAt: '2026-01-01T00:00:00.000Z', endsAt: '2026-01-03T00:00:00.000Z',
+  participations: [
+    participation(1, 'Alice', 1000, [delta('total', 1000), delta('attack', 600), delta('strength', 400)]),
+    participation(2, 'Bob', 500, [delta('total', 500), delta('attack', 0), delta('strength', 500)]),
+  ],
+});
+
+test('a multi-metric competition shows its per-metric breakdown without the total entry', () => {
+  const wom = load('utils/wiseOldMan.js');
+  const breakdown = wom.metricBreakdown(attackStrength());
+  assert.equal(JSON.stringify([...breakdown.get(1)]), JSON.stringify([['attack', 600], ['strength', 400]]));
+  assert.equal(JSON.stringify([...breakdown.get(2)]), JSON.stringify([['attack', 0], ['strength', 500]]));
+
+  const stats = load('commands/weeklycompstats.js', { mocks: { '../utils/roleMenu': { notifyAdminLog() {} }, '../utils/embedColor': { DEFAULT_EMBED_COLOR: 0 } } });
+  const competition = attackStrength();
+  const ranked = wom.rankParticipants(competition);
+  const [board] = stats.buildBoards([{ competition, ranked, total: 1500, breakdown }]);
+  assert.deepEqual([...board.parts.map(part => part.metric)], ['attack', 'strength']);
+  assert.equal(board.rows[0].name, 'Alice');
+  const line = stats.formatRow(board.rows[0], board, { showBreakdown: true, highlightId: null });
+  assert.match(line, /1,000 xp/);
+  assert.match(line, /Attack 600 · Strength 400/);
+  // A single-metric competition has no breakdown.
+  const single = { id: 8, metric: 'zulrah', startsAt: competition.startsAt, endsAt: competition.endsAt };
+  const [plain] = stats.buildBoards([{ competition: single, ranked: [{ id: 1, name: 'Alice', gained: 5 }], total: 5, breakdown: null }]);
+  assert.equal(plain.parts.length, 1);
+  assert.doesNotMatch(stats.formatRow(plain.rows[0], plain, { showBreakdown: true, highlightId: null }), /└/);
+});
+
+test('chart totals add up every metric of a multi-metric competition', async () => {
+  const competition = attackStrength();
+  const gainsCalls = [];
+  const gains = {
+    attack: [{ player: { id: 1 }, data: { gained: 200 } }, { player: { id: 2 }, data: { gained: 100 } }, { player: { id: 99 }, data: { gained: 50 } }],
+    strength: [{ player: { id: 1 }, data: { gained: 300 } }],
+  };
+  const mocks = womMocks();
+  Object.assign(mocks['./wiseOldMan'], {
+    getCompetitionDetails: async () => competition,
+    getCompetitionTopHistory: async () => [],
+    getGroupGains: async (groupId, metric) => { gainsCalls.push(metric); return gains[metric]; },
+  });
+  const announce = load('utils/weeklyAnnounce.js', { mocks, fastTimers: true, env: { WOM_API_KEY: 'key' } });
+  const [list] = await announce.loadWinnerLists([{ id: 7 }], { fresh: true });
+  assert.deepEqual([...list.metrics].sort(), ['attack', 'strength']);
+  assert.equal(list.names[0], 'Strength + Attack');
+
+  const now = new Date(competition.endsAt).getTime();
+  const data = await announce.loadChartData(list, { fresh: true, now });
+  // Marks: start, one day in, the end. Players outside the competition are ignored.
+  assert.deepEqual([...data.total], [0, 600, 1500]);
+  assert.deepEqual([...gainsCalls].sort(), ['attack', 'strength']);
+  assert.equal(data.players[0].values.at(-1), 1000);
+});
+
+test('the winners total line names every metric of a multi-metric competition', async () => {
+  const mocks = womMocks();
+  Object.assign(mocks['./wiseOldMan'], { getCompetitionDetails: async () => attackStrength() });
+  const announce = load('utils/weeklyAnnounce.js', { mocks, fastTimers: true, env: { WOM_API_KEY: 'key' } });
+  const [list] = await announce.loadWinnerLists([{ id: 7 }], { fresh: true });
+  const text = announce.buildWinnersSection(list, { emojis: [], mentions: new Map() });
+  assert.match(text, /\*\*Total\*\* \*\*Strength \+ Attack XP: 1,500\*\*/);
+});
+
+test('a multi-metric competition without metrics in its title is labelled by its title', async () => {
+  const mocks = womMocks();
+  const competition = { ...attackStrength(), title: 'BOTW T2: God Wars Dungeon' };
+  Object.assign(mocks['./wiseOldMan'], { getCompetitionDetails: async () => competition });
+  const announce = load('utils/weeklyAnnounce.js', { mocks, fastTimers: true, env: { WOM_API_KEY: 'key' } });
+  const [list] = await announce.loadWinnerLists([{ id: 7 }], { fresh: true });
+  assert.match(announce.buildWinnersSection(list, { emojis: [], mentions: new Map() }),
+    /\*\*Total\*\* \*\*BOTW T2: God Wars Dungeon XP: 1,500\*\*/);
+});
+
+test('weeklycomp autocomplete only offers the type of the metrics already picked', async () => {
+  const command = loadWeeklyComp();
+  const suggest = async (picked, query = '') => {
+    let choices;
+    await command.autocomplete({
+      options: { getFocused: () => ({ name: 'metric2', value: query }), getString: name => picked[name] ?? null },
+      respond: async value => { choices = value; },
+    });
+    return choices.map(choice => choice.value);
+  };
+  const skills = await suggest({ metric: 'attack' });
+  assert.ok(skills.length > 0 && !skills.includes('attack') && !skills.includes('zulrah'));
+  assert.ok(skills.includes('strength'));
+  const bosses = await suggest({ metric: 'zulrah' }, 'ara');
+  assert.ok(bosses.includes('araxxor') && !bosses.includes('zulrah'));
+  assert.ok((await suggest({}, 'zulrah')).includes('zulrah'));
 });

@@ -5,9 +5,18 @@ const {
   getCompetitionDetails,
   isCompetitionOngoing,
   rankParticipants,
+  metricBreakdown,
   competitionUrl,
 } = require('./wiseOldMan');
-const { CATEGORY_LABELS, metricName, metricCategory, formatAmount } = require('./womMetrics');
+const {
+  CATEGORY_LABELS,
+  metricName,
+  shortMetricName,
+  metricCategory,
+  competitionMetrics,
+  formatNumber,
+  formatAmount,
+} = require('./womMetrics');
 const { truncate, discordTimestamp } = require('./db');
 
 // Checks run on the clock at :00, :15, :30 and :45, like a `*/15 * * * *` cron job.
@@ -40,10 +49,18 @@ function compConfig() {
   };
 }
 
-function formatStandings(rows, metric) {
+// breakdown: Map(playerId -> Map(metric -> gained)), to list each metric's share under a row.
+function formatStandings(rows, metric, breakdown = null) {
   if (rows.length === 0) return 'No progress yet.';
   return rows
-    .map((row, i) => `${RANK_LABELS[i]} **${row.name}** — ${formatAmount(row.gained, metric)}`)
+    .map((row, i) => {
+      let line = `${RANK_LABELS[i]} **${row.name}** — ${formatAmount(row.gained, metric)}`;
+      const perMetric = breakdown?.get(row.id);
+      if (perMetric) {
+        line += '\n└ ' + [...perMetric].map(([m, gained]) => `${shortMetricName(m)} ${formatNumber(gained, m)}`).join(' · ');
+      }
+      return line;
+    })
     .join('\n');
 }
 
@@ -65,7 +82,7 @@ function buildReminderEmbed(results, updateStatus) {
   for (const r of results) {
     const value = r.error
       ? `⚠️ Couldn't load standings: ${r.error}`
-      : formatStandings(r.ranked.slice(0, PER_COMP_TOP), r.competition.metric);
+      : formatStandings(r.ranked.slice(0, PER_COMP_TOP), competitionMetrics(r.competition)[0], r.breakdown);
     fields.push({
       name: truncate(`🏆 ${r.competition.title} — Top ${PER_COMP_TOP}`, 256),
       value: truncate(value, 1024),
@@ -76,7 +93,7 @@ function buildReminderEmbed(results, updateStatus) {
   const byCategory = new Map();
   for (const r of results) {
     if (r.error) continue;
-    const category = metricCategory(r.competition.metric);
+    const category = metricCategory(competitionMetrics(r.competition)[0]);
     if (!byCategory.has(category)) byCategory.set(category, []);
     byCategory.get(category).push(r);
   }
@@ -97,8 +114,8 @@ function buildReminderEmbed(results, updateStatus) {
     fields.push({
       name: truncate(`🧮 Combined ${label} — Top ${COMBINED_TOP}`, 256),
       value: truncate(
-        `*${group.map(r => metricName(r.competition.metric)).join(' + ')}*\n` +
-        formatStandings(top, group[0].competition.metric),
+        `*${group.flatMap(r => competitionMetrics(r.competition)).map(metricName).join(' + ')}*\n` +
+        formatStandings(top, competitionMetrics(group[0].competition)[0]),
         1024
       ),
     });
@@ -217,11 +234,12 @@ async function checkEndingCompetitions(client, config) {
     try {
       const details = await getCompetitionDetails(competition.id);
       const ranked = rankParticipants(details);
-      const leader = ranked[0] ? `${ranked[0].name} (${formatAmount(ranked[0].gained, competition.metric)})` : 'nobody yet';
+      const metrics = competitionMetrics(competition);
+      const leader = ranked[0] ? `${ranked[0].name} (${formatAmount(ranked[0].gained, metrics[0])})` : 'nobody yet';
       console.log(
         `[CompReminder] Loaded ${describeCompetition(competition)}: ${ranked.length} participant(s) with progress, leader ${leader}.`
       );
-      results.push({ competition, ranked });
+      results.push({ competition, ranked, breakdown: metrics.length > 1 ? metricBreakdown(details) : null });
     } catch (err) {
       console.error(`[CompReminder] Failed to load competition ${competition.id}:`, err.message);
       results.push({ competition, ranked: [], error: err.message });
@@ -256,7 +274,7 @@ async function checkEndingCompetitions(client, config) {
 }
 
 function describeCompetition(competition) {
-  return `"${competition.title}" (#${competition.id}, ends ${new Date(competition.endsAt).toISOString()})`;
+  return `"${competition.title}" (#${competition.id}, ${competitionMetrics(competition).join(' + ')}, ends ${new Date(competition.endsAt).toISOString()})`;
 }
 
 function startCompEndingReminder(client) {
