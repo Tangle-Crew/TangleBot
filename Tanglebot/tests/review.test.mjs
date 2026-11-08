@@ -482,3 +482,21 @@ test('a multi-metric competition without metrics in its title is labelled by its
   assert.match(announce.buildWinnersSection(list, { emojis: [], mentions: new Map() }),
     /\*\*Total\*\* \*\*BOTW T2: God Wars Dungeon XP: 1,500\*\*/);
 });
+
+test('weeklycomp autocomplete only offers the type of the metrics already picked', async () => {
+  const command = loadWeeklyComp();
+  const suggest = async (picked, query = '') => {
+    let choices;
+    await command.autocomplete({
+      options: { getFocused: () => ({ name: 'metric2', value: query }), getString: name => picked[name] ?? null },
+      respond: async value => { choices = value; },
+    });
+    return choices.map(choice => choice.value);
+  };
+  const skills = await suggest({ metric: 'attack' });
+  assert.ok(skills.length > 0 && !skills.includes('attack') && !skills.includes('zulrah'));
+  assert.ok(skills.includes('strength'));
+  const bosses = await suggest({ metric: 'zulrah' }, 'ara');
+  assert.ok(bosses.includes('araxxor') && !bosses.includes('zulrah'));
+  assert.ok((await suggest({}, 'zulrah')).includes('zulrah'));
+});

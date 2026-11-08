@@ -179,8 +179,12 @@ module.exports = {
         .filter(Boolean)
     );
 
+    // Only offer the type (skill or boss) already picked, as one competition can't mix them.
+    const pickedTypes = new Set([...pickedValues].map(metricCategory));
+
     const choices = WOM_METRICS
       .filter(m => !pickedValues.has(m.value))
+      .filter(m => pickedTypes.size === 0 || pickedTypes.has(metricCategory(m.value)))
       .filter(m => m.name.toLowerCase().includes(query))
       .slice(0, 25);
     await interaction.respond(choices.map(m => ({ name: m.name, value: m.value })));
