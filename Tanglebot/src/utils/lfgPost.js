@@ -120,6 +120,7 @@ function newGroupState(fields) {
     queue: [...fields.queue],
     cleanupTimeoutId: null,
     countdownTimeoutId: null,
+    startPingTimeoutId: null,
     pendingOfferTimeoutId: null,
     keepAliveTimeoutId: null,
     keepAliveReplyTimeoutId: null,
@@ -357,6 +358,7 @@ async function handleDescriptionModalSubmit(interaction) {
     activityMessageId: null,
     cleanupTimeoutId: null,
     countdownTimeoutId: null,
+    startPingTimeoutId: null,
     queue: [], // FIFO of userIds waiting for a spot
     pendingOfferUserId: null,
     pendingOfferTimeoutId: null,
@@ -406,6 +408,7 @@ async function handleDescriptionModalSubmit(interaction) {
 
   // No empty-group cleanup: the creator is already a member.
   scheduleCountdownRefresh(interaction.client, group);
+  scheduleStartPing(interaction.client, group);
   scheduleKeepAliveCheck(interaction.client, group);
   setupSessions.delete(interaction.user.id);
   scheduleSave();
@@ -474,6 +477,37 @@ function scheduleCountdownRefresh(client, group) {
   }, delay);
 }
 
+// Pings the members when the start time arrives. Start Now and edits reschedule or stop it.
+function scheduleStartPing(client, group) {
+  stopStartPing(group);
+  const delay = group.timeEpoch * 1000 - Date.now();
+  if (delay <= 0) return;
+
+  group.startPingTimeoutId = setTimeout(async () => {
+    group.startPingTimeoutId = null;
+    if (!activeGroups.has(group.id) || group.status === 'disbanded' || group.members.size === 0) return;
+    try {
+      const channel = await client.channels.fetch(group.threadId);
+      const text = memberNotice(group, "⏰ **It's time!** This group's start time has arrived.");
+      // Don't replace an open queue offer or still-active prompt (they carry buttons).
+      if (group.pendingOfferUserId !== null || group.keepAliveReplyTimeoutId) {
+        await channel.send({ content: truncate(text, 2000) });
+      } else {
+        await sendOrEditActivity(channel, group, text);
+      }
+    } catch (err) {
+      cleanupStaleGroupOrLog(group, err, `[LFG] Could not send start ping for group ${group.id}:`);
+    }
+  }, delay);
+}
+
+function stopStartPing(group) {
+  if (group.startPingTimeoutId) {
+    clearTimeout(group.startPingTimeoutId);
+    group.startPingTimeoutId = null;
+  }
+}
+
 function stopCountdownRefresh(group) {
   if (group.countdownTimeoutId) {
     clearTimeout(group.countdownTimeoutId);
@@ -532,6 +566,7 @@ function clearPendingOffer(group) {
 function tearDownGroup(group) {
   clearPendingOffer(group);
   stopCountdownRefresh(group);
+  stopStartPing(group);
   stopKeepAliveCheck(group);
   activeGroups.delete(group.id);
   scheduleSave();
@@ -808,6 +843,7 @@ async function handleStartNowButton(interaction, groupId) {
   console.log(`[LFG] ${interaction.user.username} started group ${groupId} early`);
   group.timeEpoch = Math.floor(Date.now() / 1000);
   stopCountdownRefresh(group);
+  stopStartPing(group);
   // Keep-alive waits for the start time, so reschedule it from now (and drop any open reply window).
   stopKeepAliveCheck(group);
   scheduleKeepAliveCheck(interaction.client, group);
@@ -828,6 +864,7 @@ async function beginDisband(client, channel, group, announcementText) {
   group.status = 'disbanded';
   clearPendingOffer(group);
   stopCountdownRefresh(group);
+  stopStartPing(group);
   stopKeepAliveCheck(group);
 
   const closesAtEpoch = Math.floor((Date.now() + DISBAND_DELAY_MS) / 1000);
@@ -1055,6 +1092,7 @@ async function resumeGroup(client, channel, group) {
   if (channel.name !== buildThreadName(group, statusWordFor(group))) renameThreadChannel(channel, group);
 
   scheduleCountdownRefresh(client, group);
+  scheduleStartPing(client, group);
 
   // Re-render the starter post as text-only.
   await updateMainPost(channel, group);
