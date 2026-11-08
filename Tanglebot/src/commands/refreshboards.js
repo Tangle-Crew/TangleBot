@@ -14,6 +14,7 @@ module.exports = {
 
   data: new SlashCommandBuilder()
     .setName('refreshboards')
+    .setDefaultMemberPermissions(0)
     .setDescription('Repost every leaderboard (pet and donation high scores) from their sheets'),
 
   async execute(interaction) {

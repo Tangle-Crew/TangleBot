@@ -252,6 +252,7 @@ function createSpinGif(entries, winnerIdx) {
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('spinwheel')
+    .setDefaultMemberPermissions(0)
     .setDescription('Spin a prize wheel and pick a random winner')
     .addStringOption(o =>
       o.setName('entries')

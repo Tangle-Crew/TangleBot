@@ -4,6 +4,7 @@ const { hasHoneypotAdminAccess, isTestModeEnabled, setTestModeEnabled } = requir
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('honeypot')
+    .setDefaultMemberPermissions(0)
     .setDescription('Manage the honeypot channel trap')
     .addSubcommand(subcommand =>
       subcommand

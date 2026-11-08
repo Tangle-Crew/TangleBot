@@ -12,6 +12,7 @@ const DISCORD_PURPLE = 0x4a235a;
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('submission')
+    .setDefaultMemberPermissions(0)
     .setDescription('Post proof submission help or show the latest accepted proof')
     .addSubcommand(subcommand =>
       subcommand

@@ -1288,6 +1288,7 @@ module.exports = {
 
   data: new SlashCommandBuilder()
     .setName('stalemembers')
+    .setDefaultMemberPermissions(0)
     .setDescription('List WOM group members who gained too little XP over a number of months')
     .addIntegerOption(o =>
       o.setName('time')

@@ -264,6 +264,7 @@ module.exports = {
 
   data: new SlashCommandBuilder()
     .setName('donationhighscore')
+    .setDefaultMemberPermissions(0)
     .setDescription('Manage the donation high scores leaderboard')
     .addSubcommand(sub =>
       sub

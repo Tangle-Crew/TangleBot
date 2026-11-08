@@ -658,6 +658,19 @@ npm install
 cp .env.example .env
 ```
 
+### Command visibility
+
+Discord only lets a bot hide a slash command by permission. Staff-only commands are registered with `default_member_permissions` set to `0`, so only server admins see them until a role is allowed in. The bot still checks the real role (Templar, Coordinator, etc.) when a command runs, so this only controls what shows up in the command picker.
+
+Role-based visibility is set by a server admin in **Server Settings > Integrations > TangleBot**. Those overrides survive the bot's re-register on startup as long as a command's name doesn't change. Visibility is per top-level command, not per subcommand, so `/submission` is shown or hidden as a whole.
+
+Add these overrides once:
+
+- **Templar:** `/donationhighscore`, `/pethighscore`, `/refreshboards`, `/stalemembers`, `/weeklyannounce`, `/weeklycomp`, `/honeypot`, `/submission`
+- **Coordinator:** `/spinwheel`
+
+Owner also holds Templar, so it needs no separate override. A renamed or new staff command needs its override added once. Admins always see every command.
+
 ### Environment variables
 
 Each feature's variables are listed in its section above. These are the base ones:

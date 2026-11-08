@@ -67,6 +67,7 @@ const SEND_PERMISSIONS = [
 function buildCommandData() {
   return new SlashCommandBuilder()
     .setName('weeklyannounce')
+    .setDefaultMemberPermissions(0)
     .setDescription('Schedule the weekly winners and announcements post')
     .addSubcommand(sub => {
       sub.setName('setup').setDescription('Build and schedule the post for 5 minutes after the next competition ends');

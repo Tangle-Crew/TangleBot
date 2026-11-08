@@ -364,6 +364,7 @@ module.exports = {
 
   data: new SlashCommandBuilder()
     .setName('pethighscore')
+    .setDefaultMemberPermissions(0)
     .setDescription('Manage the OSRS pet high scores leaderboard')
     .addSubcommand(sub => {
       sub

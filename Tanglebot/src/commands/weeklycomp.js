@@ -101,6 +101,7 @@ function parseDateInput(raw) {
 function buildCommandData() {
   const data = new SlashCommandBuilder()
     .setName('weeklycomp')
+    .setDefaultMemberPermissions(0)
     .setDescription('Create a Discord event with a linked Wise Old Man competition')
     .addStringOption(o =>
       o.setName('prefix')
