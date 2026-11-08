@@ -441,3 +441,13 @@ test('the winners total line names every metric of a multi-metric competition', 
   const text = announce.buildWinnersSection(list, { emojis: [], mentions: new Map() });
   assert.match(text, /\*\*Total\*\* \*\*Strength \+ Attack XP: 1,500\*\*/);
 });
+
+test('a multi-metric competition without metrics in its title is labelled by its title', async () => {
+  const mocks = womMocks();
+  const competition = { ...attackStrength(), title: 'BOTW T2: God Wars Dungeon' };
+  Object.assign(mocks['./wiseOldMan'], { getCompetitionDetails: async () => competition });
+  const announce = load('utils/weeklyAnnounce.js', { mocks, fastTimers: true, env: { WOM_API_KEY: 'key' } });
+  const [list] = await announce.loadWinnerLists([{ id: 7 }], { fresh: true });
+  assert.match(announce.buildWinnersSection(list, { emojis: [], mentions: new Map() }),
+    /\*\*Total\*\* \*\*BOTW T2: God Wars Dungeon XP: 1,500\*\*/);
+});

@@ -253,7 +253,11 @@ function buildWinnersSection(list, { emojis, mentions }) {
   const unitLabel = UNIT_LABELS[unit] ?? unit;
   const amount = gained => `${formatNumber(gained, list.metric)}${unitLabel ? ` ${unitLabel}` : ''}`;
   const total = list.ranked.reduce((sum, row) => sum + row.gained, 0);
-  const metricLabel = list.names.filter(Boolean).join(' + ') || list.metrics.map(shortMetricName).join(' + ');
+  // A single multi-metric competition without its metrics in the title is labelled by its title.
+  const fallbackLabel = list.competitions.length === 1 && list.metrics.length > 1
+    ? list.title
+    : list.metrics.map(shortMetricName).join(' + ');
+  const metricLabel = list.names.filter(Boolean).join(' + ') || fallbackLabel;
   const totalLine = `**Total** ${lead}**${escapeMarkdown(metricLabel)}${unitLabel ? ` ${unitLabel}` : ''}: ${formatNumber(total, list.metric)}**`;
 
   const places = topPlaces(list.ranked);
