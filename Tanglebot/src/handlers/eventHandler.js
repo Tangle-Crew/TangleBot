@@ -22,6 +22,7 @@ const { ensureLfgStartPost } = require('../utils/lfgStartPage');
 const { refreshLeaderboard: refreshPetLeaderboard } = require('../commands/pethighscore');
 const { refreshLeaderboard: refreshDonationLeaderboard } = require('../commands/donationhighscore');
 const { handleStaleMembersButton, handleStaleMembersSelect, start: startStaleMembers } = require('../commands/stalemembers');
+const { handleSuggestButton, handleSuggestModalSubmit } = require('../utils/lfgSuggestion');
 const { startCompEndingReminder } = require('../utils/compEndingReminder');
 const { handleWeeklyAnnounceButton, handleWeeklyAnnounceSelect, handleWeeklyAnnounceModal } = require('../commands/weeklyannounce');
 const { restoreWeeklyAnnouncements, stopWeeklyAnnouncements } = require('../utils/weeklyAnnounceSchedule');
@@ -32,6 +33,7 @@ const BUTTON_ROUTES = [
   { prefix: 'hp:', handler: handleHoneypotButtonInteraction, errorLabel: '[Honeypot] Button interaction error:' },
   { prefix: 'roles:', handler: handleRoleMenuButtonInteraction, errorLabel: '[LFG] Role menu button interaction error:', errorReply: 'Something went wrong updating your roles.' },
   { prefix: 'lfgpost:', handler: handleLfgPostButtonInteraction, errorLabel: '[LFG] Post button interaction error:', errorReply: 'Something went wrong creating your LFG post.' },
+  { prefix: 'lfgsuggest:', handler: handleSuggestButton, errorLabel: '[LFG] Suggestion button error:', errorReply: 'Something went wrong opening the suggestion form.' },
   { prefix: 'lfgpostgroup:', handler: handleLfgPostGroupButtonInteraction, errorLabel: '[LFG] Post group button interaction error:', errorReply: 'Something went wrong updating that group.' },
   { prefix: 'lfgsyncgroup:', handler: handleRetiredSyncedGroupButton, errorLabel: '[LFG] Retired group button interaction error:', errorReply: 'Something went wrong with that LFG group.' },
   { prefix: 'stalemembers:', handler: handleStaleMembersButton, errorLabel: '[StaleMembers] Button interaction error:', errorReply: 'Something went wrong with that stale members list.' },
@@ -44,6 +46,7 @@ const SELECT_ROUTES = [
   { prefix: 'weeklyannounce:', handler: handleWeeklyAnnounceSelect, errorLabel: '[WeeklyAnnounce] Competition picker interaction error:', errorReply: 'Something went wrong updating that weekly announcement.' },
 ];
 const MODAL_ROUTES = [
+  { prefix: 'lfgsuggest:', handler: handleSuggestModalSubmit, errorLabel: '[LFG] Suggestion submit error:', errorReply: 'Something went wrong sending your suggestion.' },
   { prefix: 'lfgmanage:', handler: handleLfgManageModalSubmit, errorLabel: '[LFG] Manage modal submit error:', errorReply: 'Something went wrong updating that group.' },
   { prefix: 'lfgpost:', handler: handleLfgPostModalSubmit, errorLabel: '[LFG] Post modal submit error:', errorReply: 'Something went wrong creating your LFG post.' },
   { prefix: 'weeklyannounce:', handler: handleWeeklyAnnounceModal, errorLabel: '[WeeklyAnnounce] Modal submit error:', errorReply: 'Something went wrong saving that announcement.' },

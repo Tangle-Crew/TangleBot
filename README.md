@@ -243,7 +243,7 @@ Creates a forum post where members can join a group for an activity, with a role
 6. An empty group closes after 15 minutes unless someone rejoins. A closed group's post is renamed `[Closed]`, locked and archived rather than deleted, a line is posted to `ADMIN_LOG_CHANNEL_ID`, and the group is appended to `Tanglebot/data/lfg-history.jsonl`. The bot needs **Manage Threads**.
 7. Members are pinged when the start time arrives (not after **Start Now**).
 8. Every 2 hours, starting no earlier than the start time, the group is asked if it's still active. No **Still Here** click within 10 minutes disbands it.
-9. On startup the bot posts or updates a pinned **Start Here** post in the forum explaining all of this.
+9. On startup the bot posts or updates a pinned **Start Here** post in the forum explaining all of this. It has a **Make a Suggestion** button (shown when `ADMIN_LOG_CHANNEL_ID` and `OWNER_ROLE_ID` are set): a form with a Boss/Raid/Minigame/Other picker and a name field, posted to the admin log with an `OWNER_ROLE_ID` ping. One suggestion per person per minute.
 
 Members and Coordinators/Owners can use every button. Each person can have 2 open groups (Coordinators are exempt), and starting a group for an activity that already has an open group with space shows a **Join the existing one** / **Create anyway** choice.
 
