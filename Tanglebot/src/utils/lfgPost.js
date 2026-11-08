@@ -6,8 +6,14 @@ const {
   TextInputStyle,
   MessageFlags,
   ChannelType,
+  ButtonBuilder,
+  ButtonStyle,
+  UserSelectMenuBuilder,
+  EmbedBuilder,
 } = require('discord.js');
-const { readJson, writeJson, truncate, hasAnyRole } = require('./db');
+const fs = require('fs');
+const path = require('path');
+const { DATA_DIR, readJson, writeJson, truncate, hasAnyRole } = require('./db');
 const {
   CATEGORY_OPTIONS,
   findCategoryOption,
@@ -27,10 +33,17 @@ const {
   buildQueueOfferRow,
   buildCancelDisbandRow,
   buildKeepAliveRow,
+  GROUP_BUTTON_PREFIX,
   makeGroupId,
   isGroupFull,
   describeStartCountdown,
   computeCountdownRefreshDelay,
+  MAX_DESCRIPTION_CHARS,
+  findOpenGroupsOwnedBy,
+  findJoinableDuplicate,
+  planSizeChange,
+  planAfterMemberLeft,
+  buildHistoryRecord,
 } = require('./lfgGroup');
 const {
   ensureRoleExists,
@@ -43,12 +56,6 @@ const {
   isValidColor,
   isValidEmoji,
 } = require('./roleMenu');
-const {
-  createGroup: createBackendGroup,
-  actOnGroup: actOnBackendGroup,
-  syncGroupMetadata,
-  isConfigured: isLfgBackendConfigured,
-} = require('./lfgBackend');
 
 // Forum Channel that /lfg-post creates its threads in.
 const FORUM_CHANNEL_ID = process.env.LFG_FORUM_CHANNEL_ID;
@@ -72,8 +79,21 @@ const KEEP_ALIVE_REPLY_WINDOW_MS = 10 * 60 * 1000;
 // Retry delay when a keep-alive check was skipped for a pending queue offer.
 const KEEP_ALIVE_RETRY_DELAY_MS = 15 * 60 * 1000;
 
+// Open groups one person can have at once; Coordinator+ are exempt.
+const MAX_OPEN_GROUPS_PER_USER = 2;
+// How long "Create anyway" stays valid after the duplicate warning.
+const DUPLICATE_WARNING_LIFETIME_MS = 2 * 60 * 1000;
+
+const pendingCreations = new Map(); // userId -> { description, expiresAt }; not saved
 const setupSessions = new Map(); // userId -> { category, activity, size, time }; not saved
 const activeGroups = new Map(); // groupId -> group state; saved to GROUPS_DATA_FILE
+
+// One JSON line per finished group, for later stats.
+const HISTORY_FILE = 'lfg-history.jsonl';
+// Tests point this elsewhere; read when used.
+const historyDir = () => process.env.LFG_HISTORY_DIR || DATA_DIR;
+// Embed color for the finished-group log line (not an alert).
+const GROUP_LOG_COLOR = 0x5865f2;
 
 // Groups are saved here and restored on startup (see restoreLfgGroups).
 const GROUPS_DATA_FILE = 'lfg-groups.json';
@@ -102,7 +122,6 @@ function serializeGroup(group) {
     creatorTag: group.creatorTag,
     roleLabel: group.roleLabel,
     roleId: group.roleId,
-    color: group.color,
     emoji: group.emoji,
     timeEpoch: group.timeEpoch,
     sizeLabel: group.sizeLabel,
@@ -114,7 +133,9 @@ function serializeGroup(group) {
     activityMessageId: group.activityMessageId,
     queue: [...group.queue],
     pendingOfferUserId: group.pendingOfferUserId,
-    backendGroupId: group.backendGroupId,
+    participants: [...group.participants],
+    createdAt: group.createdAt,
+    closeReason: group.closeReason,
   };
 }
 
@@ -124,38 +145,18 @@ function newGroupState(fields) {
     ...fields,
     sizeCap: fields.sizeCap ?? Infinity,
     members: new Set(fields.members),
+    // Everyone who was ever in the group, for the history record.
+    participants: new Set(fields.participants ?? fields.members),
+    createdAt: fields.createdAt ?? null,
+    closeReason: fields.closeReason ?? null,
     queue: [...fields.queue],
     cleanupTimeoutId: null,
     countdownTimeoutId: null,
+    startPingTimeoutId: null,
     pendingOfferTimeoutId: null,
     keepAliveTimeoutId: null,
     keepAliveReplyTimeoutId: null,
   };
-}
-
-async function syncBackendQueueCount(group) {
-  if (!group?.backendGroupId || !isLfgBackendConfigured()) {
-    return;
-  }
-
-  try {
-    await syncGroupMetadata({
-      groupId: group.backendGroupId,
-      queueCount: group.queue.length,
-    });
-  } catch (err) {
-    console.error(`[LFG] Could not sync queue count for group ${group.id}:`, err.message);
-  }
-}
-
-// The Discord action already went through, so a mirror failure is only reported to admins.
-async function notifyBackendMirrorFailure(interaction, group, actionLabel, err) {
-  console.error(`[LFG] Could not mirror ${actionLabel} for group ${group.id}:`, err.message);
-  await notifyAdminLog(
-    interaction.client,
-    '⚠️ LFG Backend Mirror Failed',
-    `Couldn't mirror **${actionLabel}** for <@${interaction.user.id}> on group **${group.roleLabel}** (thread <#${group.threadId}>) to the shared LFG backend: ${err.message}`
-  );
 }
 
 // ---- Setup UI: Category -> Activity -> Size -> Start Time, then the description modal ----
@@ -250,6 +251,8 @@ async function sendSetupMenu(interaction) {
     return replyEphemeral(interaction, '⚠️ LFG_FORUM_CHANNEL_ID is not set. Ask an admin to set it in the bot\'s environment variables.');
   }
 
+  // Each run starts fresh, so an abandoned setup doesn't pre-fill this one.
+  setupSessions.delete(interaction.user.id);
   const session = getSession(interaction.user.id);
   await interaction.reply({
     content: buildSetupContent(session),
@@ -299,10 +302,10 @@ async function openDescriptionModal(interaction) {
 
   const descInput = new TextInputBuilder()
     .setCustomId('description')
-    .setLabel('Description (optional)')
+    .setLabel(`Description (up to ${MAX_DESCRIPTION_CHARS} characters)`)
     .setStyle(TextInputStyle.Paragraph)
     .setRequired(false)
-    .setMaxLength(1000)
+    .setMaxLength(MAX_DESCRIPTION_CHARS)
     .setPlaceholder('Add any extra details about this group...');
 
   modal.addComponents(new ActionRowBuilder().addComponents(descInput));
@@ -329,11 +332,49 @@ async function handleDescriptionModalSubmit(interaction) {
     });
   }
 
+  const description = interaction.fields.getTextInputValue('description')?.trim() || null;
+
+  // Only a group with space is worth warning about; a full one can't be joined.
+  const activityOption = findActivityOption(session.category, session.activity);
+  const roleLabel = `${findCategoryOption(session.category).label}: ${activityOption.label}`;
+  const existing = findJoinableDuplicate(activeGroups.values(), roleLabel);
+  if (existing) {
+    pendingCreations.set(interaction.user.id, { description, expiresAt: Date.now() + DUPLICATE_WARNING_LIFETIME_MS });
+    const link = new ButtonBuilder()
+      .setLabel('Join the existing one')
+      .setStyle(ButtonStyle.Link)
+      .setURL(`https://discord.com/channels/${interaction.guildId}/${existing.threadId}`);
+    const anyway = new ButtonBuilder()
+      .setCustomId('lfgpost:createanyway')
+      .setLabel('Create anyway')
+      .setStyle(ButtonStyle.Secondary);
+    return interaction.editReply({
+      content: `⚠️ There's already an open **${activityOption.label}** group with space. Join it, or create yours anyway?`,
+      components: [new ActionRowBuilder().addComponents(link, anyway)],
+    });
+  }
+
+  return createGroupPost(interaction, session, description);
+}
+
+// "Create anyway" on the duplicate warning.
+async function handleCreateAnywayButton(interaction) {
+  await interaction.deferUpdate();
+  const pending = pendingCreations.get(interaction.user.id);
+  pendingCreations.delete(interaction.user.id);
+  const session = getSession(interaction.user.id);
+  if (!pending || pending.expiresAt < Date.now() || !session.category || !session.activity || !session.size || !session.time) {
+    return interaction.editReply({ content: '⚠️ That expired. Please run /lfg-post again.', components: [] });
+  }
+  return createGroupPost(interaction, session, pending.description);
+}
+
+// Creates the forum post. interaction is the modal submit or the Create anyway button, already deferred.
+async function createGroupPost(interaction, session, description) {
   const categoryOption = findCategoryOption(session.category);
   const activityOption = findActivityOption(session.category, session.activity);
   const sizeOption = findSizeOption(activityOption, session.size);
   const timeOption = findTimeOption(session.time);
-  const description = interaction.fields.getTextInputValue('description')?.trim() || null;
 
   if (!isValidColor(activityOption.color) || !isValidEmoji(activityOption.emoji)) {
     return abortWithAdminAlert(
@@ -364,6 +405,16 @@ async function handleDescriptionModalSubmit(interaction) {
     );
   }
 
+  // Checked after the awaits above, right before the group is registered.
+  const openOwned = findOpenGroupsOwnedBy(activeGroups.values(), interaction.user.id);
+  if (openOwned.length >= MAX_OPEN_GROUPS_PER_USER && !isCoordinator(interaction)) {
+    const links = openOwned.map((g) => `<#${g.threadId}>`).join(', ');
+    return interaction.editReply({
+      content: `⚠️ You already have ${openOwned.length} open groups (${links}). Disband one before starting another.`,
+      components: [],
+    });
+  }
+
   const groupId = makeGroupId();
   const timeEpoch = resolveTimeEpoch(timeOption.value);
   const sizeCap = parseSizeCap(sizeOption.value);
@@ -375,24 +426,26 @@ async function handleDescriptionModalSubmit(interaction) {
     creatorTag: interaction.user.username,
     roleLabel,
     roleId: guildRole.id,
-    color: activityOption.color,
     emoji: activityOption.emoji,
     timeEpoch,
     sizeLabel: sizeOption.label,
     sizeCap,
     description,
     members: new Set([interaction.user.id]),
+    participants: new Set([interaction.user.id]),
+    createdAt: Date.now(),
+    closeReason: null,
     status: 'open',
     threadId: null,
     activityMessageId: null,
     cleanupTimeoutId: null,
     countdownTimeoutId: null,
+    startPingTimeoutId: null,
     queue: [], // FIFO of userIds waiting for a spot
     pendingOfferUserId: null,
     pendingOfferTimeoutId: null,
     keepAliveTimeoutId: null, // next "still active?" check
     keepAliveReplyTimeoutId: null, // reply window after a check
-    backendGroupId: null,
   };
   activeGroups.set(groupId, group);
 
@@ -411,6 +464,8 @@ async function handleDescriptionModalSubmit(interaction) {
       message: {
         content: buildGroupText(group),
         components: [row],
+        // The description is user text; only the activity role may ping.
+        allowedMentions: { roles: [group.roleId] },
       },
     });
   } catch (err) {
@@ -427,31 +482,6 @@ async function handleDescriptionModalSubmit(interaction) {
   group.threadId = thread.id;
   console.log(`[LFG] Post created: group ${groupId} (${roleLabel}, ${sizeOption.label}, ${timeOption.label}), thread ${thread.id}, by ${interaction.user.username}`);
 
-  if (isLfgBackendConfigured()) {
-    try {
-      const backendGroup = await createBackendGroup({
-        member: interaction.member,
-        categoryKey: session.category,
-        activityLabel: activityOption.label,
-        description,
-        startTimeIso: new Date(timeEpoch * 1000).toISOString(),
-        maximumPlayers: Number.isFinite(sizeCap) ? sizeCap : null,
-        discordChannelId: thread.id,
-        discordMessageId: thread.id,
-        idempotencyKey: interaction.id,
-      });
-      group.backendGroupId = backendGroup?.id ?? null;
-      await syncBackendQueueCount(group);
-    } catch (err) {
-      console.error(`[LFG] Could not mirror created group ${groupId} to backend:`, err.message);
-      await notifyAdminLog(
-        interaction.client,
-        '⚠️ LFG Backend Mirror Failed',
-        `Discord group **${roleLabel}** was created in thread <#${thread.id}> but could not be mirrored to the shared LFG backend: ${err.message}`
-      );
-    }
-  }
-
   // Best-effort; a failed reaction shouldn't block the post.
   try {
     const starterMessage = await thread.fetchStarterMessage();
@@ -462,6 +492,7 @@ async function handleDescriptionModalSubmit(interaction) {
 
   // No empty-group cleanup: the creator is already a member.
   scheduleCountdownRefresh(interaction.client, group);
+  scheduleStartPing(interaction.client, group);
   scheduleKeepAliveCheck(interaction.client, group);
   setupSessions.delete(interaction.user.id);
   scheduleSave();
@@ -530,6 +561,32 @@ function scheduleCountdownRefresh(client, group) {
   }, delay);
 }
 
+// Pings the members when the start time arrives. Start Now and edits reschedule or stop it.
+function scheduleStartPing(client, group) {
+  stopStartPing(group);
+  const delay = group.timeEpoch * 1000 - Date.now();
+  if (delay <= 0) return;
+
+  group.startPingTimeoutId = setTimeout(async () => {
+    group.startPingTimeoutId = null;
+    if (!activeGroups.has(group.id) || group.status === 'disbanded' || group.members.size === 0) return;
+    try {
+      const channel = await client.channels.fetch(group.threadId);
+      const text = memberNotice(group, "⏰ **It's time!** This group's start time has arrived.");
+      await postNotice(channel, group, text);
+    } catch (err) {
+      cleanupStaleGroupOrLog(group, err, `[LFG] Could not send start ping for group ${group.id}:`);
+    }
+  }, delay);
+}
+
+function stopStartPing(group) {
+  if (group.startPingTimeoutId) {
+    clearTimeout(group.startPingTimeoutId);
+    group.startPingTimeoutId = null;
+  }
+}
+
 function stopCountdownRefresh(group) {
   if (group.countdownTimeoutId) {
     clearTimeout(group.countdownTimeoutId);
@@ -548,6 +605,15 @@ function memberNotice(group, text) {
   // The text always fits; only the mention list shrinks.
   const mentions = mentionAll(group, Math.max(0, 1900 - text.length - 1));
   return `${mentions}\n${text}`;
+}
+
+// Like sendOrEditActivity, but keeps an open queue offer or still-active prompt (they carry buttons).
+async function postNotice(channel, group, text) {
+  if (group.pendingOfferUserId !== null || group.keepAliveReplyTimeoutId) {
+    await channel.send({ content: truncate(text, 2000) });
+  } else {
+    await sendOrEditActivity(channel, group, text);
+  }
 }
 
 // Sends each notice as a new message (edits don't ping) and deletes the previous one, so only the
@@ -577,6 +643,11 @@ async function requireGroup(interaction, groupId) {
   return group;
 }
 
+function addMember(group, userId) {
+  group.members.add(userId);
+  group.participants.add(userId);
+}
+
 // Clears any pending queue offer without starting a new one.
 function clearPendingOffer(group) {
   if (group.pendingOfferTimeoutId) clearTimeout(group.pendingOfferTimeoutId);
@@ -588,6 +659,7 @@ function clearPendingOffer(group) {
 function tearDownGroup(group) {
   clearPendingOffer(group);
   stopCountdownRefresh(group);
+  stopStartPing(group);
   stopKeepAliveCheck(group);
   activeGroups.delete(group.id);
   scheduleSave();
@@ -656,7 +728,6 @@ async function handleQueueOfferTimeout(client, group) {
 
   try {
     const channel = await client.channels.fetch(group.threadId);
-    await syncBackendQueueCount(group);
     await advanceQueueOrReopen(client, channel, group, `⌛ <@${skippedUserId}> didn't respond in time and was removed from the queue.`);
   } catch (err) {
     cleanupStaleGroupOrLog(group, err, `[LFG] Could not advance queue for group ${group.id}:`);
@@ -676,6 +747,10 @@ async function updateGroupMessage(interaction, group, components = [buildGroupRo
     await replyEphemeral(interaction, '⚠️ This group\'s post no longer exists.').catch(() => {});
     return false;
   }
+}
+
+function isCoordinator(interaction) {
+  return hasAnyRole(interaction.member, [process.env.COORDINATOR_ROLE_ID]);
 }
 
 function isStaff(interaction) {
@@ -707,14 +782,13 @@ async function handleJoinButton(interaction, groupId) {
   if (group.status === 'closed') {
     group.queue.push(interaction.user.id);
     if (!(await updateGroupMessage(interaction, group))) return;
-    await syncBackendQueueCount(group);
     return followUpEphemeral(
       interaction,
       `⏳ This group is full — you're in the queue (position ${group.queue.length}). You'll be pinged here if a spot opens up.`
     );
   }
 
-  group.members.add(interaction.user.id);
+  addMember(group, interaction.user.id);
   // No longer empty.
   cancelScheduledCleanup(group);
   const justFilled = isGroupFull(group);
@@ -723,19 +797,6 @@ async function handleJoinButton(interaction, groupId) {
   }
 
   if (!(await updateGroupMessage(interaction, group))) return;
-
-  if (group.backendGroupId && isLfgBackendConfigured()) {
-    try {
-      await actOnBackendGroup({
-        member: interaction.member,
-        groupId: group.backendGroupId,
-        action: 'join',
-        idempotencyKey: interaction.id,
-      });
-    } catch (err) {
-      await notifyBackendMirrorFailure(interaction, group, 'join', err);
-    }
-  }
 
   // A join shows the group is still active.
   resetKeepAliveCheck(interaction.client, group);
@@ -767,9 +828,15 @@ async function handleLeaveButton(interaction, groupId) {
       return replyEphemeral(interaction, 'You\'re not in this group.');
     }
     group.queue.splice(queueIndex, 1);
+    const heldOffer = group.pendingOfferUserId === interaction.user.id;
+    // Drop their offer before awaiting, so its timeout or Accept can't act on someone else.
+    if (heldOffer) clearPendingOffer(group);
     if (!(await updateGroupMessage(interaction, group))) return;
-    await syncBackendQueueCount(group);
-    return followUpEphemeral(interaction, 'You left the queue.');
+    await followUpEphemeral(interaction, 'You left the queue.');
+    if (heldOffer) {
+      await advanceQueueOrReopen(interaction.client, interaction.channel, group, `↪️ <@${interaction.user.id}> left the queue.`);
+    }
+    return;
   }
 
   group.members.delete(interaction.user.id);
@@ -780,36 +847,27 @@ async function handleLeaveButton(interaction, groupId) {
 
   // No group-wide ping for a routine leave.
   const leftText = `⚠️ <@${interaction.user.id}> left the group.`;
-  if (group.backendGroupId && isLfgBackendConfigured()) {
-    try {
-      await actOnBackendGroup({
-        member: interaction.member,
-        groupId: group.backendGroupId,
-        action: 'leave',
-        idempotencyKey: interaction.id,
-      });
-    } catch (err) {
-      await notifyBackendMirrorFailure(interaction, group, 'leave', err);
-    }
-  }
 
-  if (wasFull) {
+  await afterMemberLeft(interaction.client, interaction.channel, group, wasFull, leftText);
+}
+
+// What follows a member leaving or being removed: offer the freed spot, note it, or start the
+// empty-group countdown. No other timers are touched.
+async function afterMemberLeft(client, channel, group, wasFull, text) {
+  const plan = planAfterMemberLeft(group, wasFull);
+  if (plan === 'advance') {
     // The queue gets first refusal on the freed spot.
-    await advanceQueueOrReopen(interaction.client, interaction.channel, group, leftText);
-    return;
-  }
-
-  if (group.members.size > 0) {
-    await sendOrEditActivity(interaction.channel, group, leftText);
+    await advanceQueueOrReopen(client, channel, group, text);
+  } else if (plan === 'notice') {
+    await postNotice(channel, group, text);
   } else {
-    // Empty: start the auto-close countdown and announce it.
     const closesAtEpoch = Math.floor((Date.now() + EMPTY_GROUP_CLEANUP_DELAY_MS) / 1000);
-    await sendOrEditActivity(
-      interaction.channel,
+    await postNotice(
+      channel,
       group,
-      `${leftText}\n\n💤 **This group is now empty.** It will automatically close <t:${closesAtEpoch}:R> unless someone rejoins.`
+      `${text}\n\n💤 **This group is now empty.** It will automatically close <t:${closesAtEpoch}:R> unless someone rejoins.`
     );
-    schedulePostGroupCleanup(interaction.client, group, EMPTY_GROUP_CLEANUP_DELAY_MS);
+    schedulePostGroupCleanup(client, group, EMPTY_GROUP_CLEANUP_DELAY_MS);
   }
 }
 
@@ -834,26 +892,13 @@ async function handleQueueAcceptButton(interaction, groupId) {
   // Mutate before awaiting, so the offer timeout can't also shift this person off the queue.
   clearPendingOffer(group);
   group.queue.shift();
-  group.members.add(interaction.user.id);
+  addMember(group, interaction.user.id);
   group.status = isGroupFull(group) ? 'closed' : 'open';
 
   await interaction.deferUpdate();
-  await syncBackendQueueCount(group);
 
   // No group-wide ping for a routine join.
   const acceptedText = `✅ <@${interaction.user.id}> accepted the open spot and joined!`;
-  if (group.backendGroupId && isLfgBackendConfigured()) {
-    try {
-      await actOnBackendGroup({
-        member: interaction.member,
-        groupId: group.backendGroupId,
-        action: 'join',
-        idempotencyKey: interaction.id,
-      });
-    } catch (err) {
-      await notifyBackendMirrorFailure(interaction, group, 'queue accept', err);
-    }
-  }
   resetKeepAliveCheck(interaction.client, group);
 
   if (group.status === 'open') {
@@ -880,17 +925,13 @@ async function handleQueueDeclineButton(interaction, groupId) {
   const declinedUserId = group.queue.shift();
 
   await interaction.deferUpdate();
-  await syncBackendQueueCount(group);
 
   await advanceQueueOrReopen(interaction.client, interaction.channel, group, `↪️ <@${declinedUserId}> declined the spot.`);
 }
 
 async function handleStartNowButton(interaction, groupId) {
-  const group = await requireGroup(interaction, groupId);
+  const group = await requireManageableGroup(interaction, groupId, '⚠️ Only members of this group, or a Coordinator or higher, can start it early.');
   if (!group) return;
-  if (!canManageGroup(interaction, group)) {
-    return replyEphemeral(interaction, '⚠️ Only members of this group, or a Coordinator or higher, can start it early.');
-  }
   if (group.timeEpoch * 1000 <= Date.now()) {
     return replyEphemeral(interaction, '⚠️ This group has already started.');
   }
@@ -898,6 +939,7 @@ async function handleStartNowButton(interaction, groupId) {
   console.log(`[LFG] ${interaction.user.username} started group ${groupId} early`);
   group.timeEpoch = Math.floor(Date.now() / 1000);
   stopCountdownRefresh(group);
+  stopStartPing(group);
   // Keep-alive waits for the start time, so reschedule it from now (and drop any open reply window).
   stopKeepAliveCheck(group);
   scheduleKeepAliveCheck(interaction.client, group);
@@ -912,12 +954,14 @@ async function handleStartNowButton(interaction, groupId) {
 }
 
 // Starts the disband grace period: stops timers, posts the notice with Cancel Disband, and
-// schedules the post's deletion. The caller removes the main post's buttons first.
-async function beginDisband(client, channel, group, announcementText) {
+// schedules the post's closing. The caller removes the main post's buttons first.
+async function beginDisband(client, channel, group, announcementText, reason = 'disbanded') {
   console.log(`[LFG] Beginning disband for group ${group.id}`);
   group.status = 'disbanded';
+  group.closeReason = reason;
   clearPendingOffer(group);
   stopCountdownRefresh(group);
+  stopStartPing(group);
   stopKeepAliveCheck(group);
 
   const closesAtEpoch = Math.floor((Date.now() + DISBAND_DELAY_MS) / 1000);
@@ -948,18 +992,6 @@ async function handleDisbandButton(interaction, groupId) {
   // Remove the main post's buttons.
   if (!(await updateGroupMessage(interaction, group, []))) return;
 
-  if (group.backendGroupId && isLfgBackendConfigured()) {
-    try {
-      await actOnBackendGroup({
-        member: interaction.member,
-        groupId: group.backendGroupId,
-        action: 'close',
-        idempotencyKey: interaction.id,
-      });
-    } catch (err) {
-      await notifyBackendMirrorFailure(interaction, group, 'close', err);
-    }
-  }
   await beginDisband(interaction.client, interaction.channel, group, `🛑 <@${interaction.user.id}> has selected to disband this group.`);
 }
 
@@ -978,12 +1010,13 @@ async function handleCancelDisbandButton(interaction, groupId) {
 
   await interaction.deferUpdate();
 
-  // The thread may already be mid-delete.
+  // The thread may already be closing.
   if (group.cleanupInFlight) {
-    return followUpEphemeral(interaction, '⚠️ Too late — this group\'s post was already being removed. Start a new one with the usual command.');
+    return followUpEphemeral(interaction, '⚠️ Too late — this group\'s post was already being closed. Start a new one with the usual command.');
   }
 
   console.log(`[LFG] ${interaction.user.username} cancelled disband for group ${groupId}`);
+  group.closeReason = null;
   group.status = isGroupFull(group) ? 'closed' : 'open';
 
   if (group.status === 'open') scheduleCountdownRefresh(interaction.client, group);
@@ -996,6 +1029,79 @@ async function handleCancelDisbandButton(interaction, groupId) {
   ]);
 }
 
+// How long to wait on the title change, which Discord rate-limits to 2 per 10 minutes.
+const RENAME_WAIT_MS = 10 * 1000;
+
+// The finished-group line goes to LFG_LOG_CHANNEL_ID if set, otherwise the admin log.
+async function postGroupLog(client, text) {
+  const logChannelId = process.env.LFG_LOG_CHANNEL_ID;
+  if (!logChannelId) {
+    return notifyAdminLog(client, '📁 LFG Group Closed', text, [], GROUP_LOG_COLOR);
+  }
+  try {
+    const channel = await client.channels.fetch(logChannelId);
+    const embed = new EmbedBuilder().setTitle('📁 LFG Group Closed').setDescription(text).setColor(GROUP_LOG_COLOR).setTimestamp();
+    await channel.send({ embeds: [embed] });
+  } catch (err) {
+    console.error('[LFG] Could not post to LFG_LOG_CHANNEL_ID:', err.message);
+  }
+}
+
+// Appends the group to the history file and posts a one-line summary.
+async function recordFinishedGroup(client, group) {
+  const reason = group.closeReason ?? 'empty';
+  try {
+    fs.mkdirSync(historyDir(), { recursive: true });
+    fs.appendFileSync(path.join(historyDir(), HISTORY_FILE), `${JSON.stringify(buildHistoryRecord(group, reason))}\n`);
+  } catch (err) {
+    console.error(`[LFG] Could not write history for group ${group.id}:`, err.message);
+  }
+  await postGroupLog(
+    client,
+    `**${group.roleLabel}** (${group.sizeLabel}) in <#${group.threadId}> was ${reason} with ${group.members.size} member(s).`
+  );
+}
+
+// Closes a finished group's post: removes the buttons, records it, then renames, locks and
+// archives. The rename comes last so a rate limit has had time to clear, and each step is tried
+// on its own so one failure doesn't skip the rest.
+async function finishGroupThread(client, thread, group, { renameWaitMs = RENAME_WAIT_MS } = {}) {
+  const failures = [];
+  const attempt = async (label, step) => {
+    try {
+      await step();
+    } catch (err) {
+      if (!isAlreadyGoneError(err)) failures.push(`${label}: ${err.message}`);
+    }
+  };
+
+  await attempt('remove buttons', () => thread.messages.edit(thread.id, { components: [] }));
+  await recordFinishedGroup(client, group);
+
+  // The title's [Open]/[Full] would be misleading on a finished group. Not worth holding up the
+  // archive over, so a rename still waiting on the rate limit is given up on.
+  let waitId;
+  const giveUp = new Promise((_, reject) => {
+    waitId = setTimeout(() => reject(new Error('rate limited')), renameWaitMs);
+  });
+  await Promise.race([thread.setName(truncate(`[Closed] - ${group.roleLabel}`, 100)), giveUp]).catch((err) => {
+    console.log(`[LFG] Left the title of closed post ${group.id} as is: ${err.message}`);
+  });
+  clearTimeout(waitId);
+
+  await attempt('lock', () => thread.setLocked(true));
+  await attempt('archive', () => thread.setArchived(true));
+
+  if (failures.length) {
+    console.error(`[LFG] Could not fully close post ${group.id}:`, failures.join('; '));
+    await notifyAdminLog(
+      client,
+      '⚠️ LFG Post Cleanup Incomplete',
+      `Group **${group.roleLabel}** (thread <#${group.threadId}>) wasn't fully closed — ${failures.join('; ')}. Check the bot has **Manage Threads**, then lock and archive it manually.`
+    );
+  }
+}
+
 function schedulePostGroupCleanup(client, group, delayMs) {
   if (group.cleanupTimeoutId) {
     clearTimeout(group.cleanupTimeoutId);
@@ -1006,21 +1112,16 @@ function schedulePostGroupCleanup(client, group, delayMs) {
     console.log(`[LFG] Cleanup timer fired for group ${group.id} (thread ${group.threadId})`);
     // Tells a racing Cancel Disband that it's too late.
     group.cleanupInFlight = true;
-    const startedAt = Date.now();
     try {
       const thread = client.channels.cache.get(group.threadId) ?? await client.channels.fetch(group.threadId);
-      await thread.delete();
-      const tookMs = Date.now() - startedAt;
-      // Usually means Discord rate-limited the delete.
-      if (tookMs > 5000) console.log(`[LFG] Deleted expired post ${group.id}, but it took ${tookMs}ms — likely Discord API rate-limiting, not a bug in the timer.`);
+      await finishGroupThread(client, thread, group);
     } catch (err) {
       if (!isAlreadyGoneError(err)) {
-        // Nothing retries this, so the thread would be left behind; tell the admins.
-        console.error(`[LFG] Could not delete expired post ${group.id}:`, err.message);
+        console.error(`[LFG] Could not close expired post ${group.id}:`, err.message);
         await notifyAdminLog(
           client,
           '⚠️ LFG Post Cleanup Failed',
-          `Could not delete the expired post for group **${group.roleLabel}** (thread <#${group.threadId}>): ${err.message}. It will need to be deleted manually.`
+          `Could not close the expired post for group **${group.roleLabel}** (thread <#${group.threadId}>): ${err.message}. It will need to be closed manually.`
         );
       }
     }
@@ -1110,7 +1211,7 @@ async function handleKeepAliveTimeout(client, group) {
     const channel = await client.channels.fetch(group.threadId);
     // Remove the main post's buttons.
     await updateMainPost(channel, group, []);
-    await beginDisband(client, channel, group, '⌛ No one confirmed this group was still active, so it was automatically disbanded.');
+    await beginDisband(client, channel, group, '⌛ No one confirmed this group was still active, so it was automatically disbanded.', 'inactive');
     console.log(`[LFG] Group ${group.id} auto-disbanded after a missed keep-alive check.`);
   } catch (err) {
     cleanupStaleGroupOrLog(group, err, `[LFG] Could not auto-disband group ${group.id} after a missed keep-alive check:`);
@@ -1140,6 +1241,7 @@ async function handleKeepAliveButton(interaction, groupId) {
 // Restarts a restored group's timers from now, as if its current state had just begun.
 async function resumeGroup(client, channel, group) {
   if (group.status === 'disbanded') {
+    group.closeReason ??= 'disbanded';
     const closesAtEpoch = Math.floor((Date.now() + DISBAND_DELAY_MS) / 1000);
     await sendOrEditActivity(
       channel,
@@ -1157,6 +1259,11 @@ async function resumeGroup(client, channel, group) {
   if (channel.name !== buildThreadName(group, statusWordFor(group))) renameThreadChannel(channel, group);
 
   scheduleCountdownRefresh(client, group);
+  scheduleStartPing(client, group);
+
+  // Re-render the starter post as text-only.
+  await updateMainPost(channel, group);
+  if (!activeGroups.has(group.id)) return;
 
   if (group.members.size === 0) {
     const closesAtEpoch = Math.floor((Date.now() + EMPTY_GROUP_CLEANUP_DELAY_MS) / 1000);
@@ -1251,16 +1358,13 @@ async function recoverFromForum(client) {
   const sections = [];
   if (rebuilt.length) {
     sections.push(`Rebuilt from their posts, since the save file didn't have them:\n${rebuilt.join('\n')}`);
-    if (isLfgBackendConfigured()) {
-      sections.push('These groups no longer sync to the RuneLite plugin (the backend link was only in the save file).');
-    }
   }
   if (unreadable.length) sections.push(`Couldn't be restored, so their buttons were removed:\n${unreadable.join('\n')}`);
   await notifyAdminLog(client, 'ℹ️ LFG Groups Rebuilt From Posts', truncate(sections.join('\n\n'), 4096));
 }
 
 // Rebuilds one group from its post. Returns null for posts that aren't /lfg-post groups with
-// buttons (the start page, plugin posts, or a group already closing), { unreadable: true } if the
+// buttons (the start page, or a group already closing), { unreadable: true } if the
 // post can't be read (its buttons are removed), or { group, hidden }.
 async function recoverFromPost(client, thread) {
   const starter = await thread.messages.fetch(thread.id);
@@ -1290,7 +1394,6 @@ async function recoverFromPost(client, thread) {
     creatorTag: parsed.creatorTag,
     roleLabel: parsed.roleLabel,
     roleId: parsed.roleId,
-    color: activity.color,
     emoji: activity.emoji,
     timeEpoch: parsed.timeEpoch,
     sizeLabel: parsed.sizeLabel,
@@ -1302,7 +1405,6 @@ async function recoverFromPost(client, thread) {
     activityMessageId: latestNotice?.id ?? null,
     queue: parsed.queue,
     pendingOfferUserId: parsed.pendingOfferUserId,
-    backendGroupId: null,
   });
   // Full, or holding a spot for the queue.
   group.status = isGroupFull(group) || group.queue.length > 0 ? 'closed' : 'open';
@@ -1319,11 +1421,220 @@ async function recoverFromPost(client, thread) {
   return { group, hidden: parsed.hiddenMembers + parsed.hiddenQueued };
 }
 
+// Buttons on posts from the retired shared LFG system: explain, then remove the buttons.
+async function handleRetiredSyncedGroupButton(interaction) {
+  await replyEphemeral(
+    interaction,
+    'This group came from the old shared LFG system and is no longer active. Start a new one with `/lfg-post`.'
+  );
+  try {
+    await interaction.message.edit({ components: [] });
+  } catch (err) {
+    if (!isAlreadyGoneError(err)) throw err;
+  }
+}
+
+// ---- Manage: remove a member, edit the description, start time or size ----
+// Anyone in the group, or a Coordinator or higher, can use these.
+
+const MANAGE_DENIED = '⚠️ Only members of this group, or a Coordinator or higher, can manage it.';
+
+function buildManageRows(groupId) {
+  const button = (action, label) =>
+    new ButtonBuilder().setCustomId(`${GROUP_BUTTON_PREFIX}:${action}:${groupId}`).setLabel(label).setStyle(ButtonStyle.Secondary);
+  return [
+    new ActionRowBuilder().addComponents(
+      button('mgremove', 'Remove Member'),
+      button('mgdesc', 'Edit Description'),
+      button('mgtime', 'Edit Start Time'),
+      button('mgsize', 'Edit Size')
+    ),
+  ];
+}
+
+async function requireManageableGroup(interaction, groupId, deniedMessage = MANAGE_DENIED) {
+  const group = await requireGroup(interaction, groupId);
+  if (!group) return null;
+  if (!canManageGroup(interaction, group)) {
+    await replyEphemeral(interaction, deniedMessage);
+    return null;
+  }
+  return group;
+}
+
+async function handleManageButton(interaction, groupId) {
+  const group = await requireManageableGroup(interaction, groupId);
+  if (!group) return;
+  await interaction.reply({
+    content: 'What would you like to change?',
+    components: buildManageRows(groupId),
+    flags: MessageFlags.Ephemeral,
+  });
+}
+
+async function handleManageRemoveButton(interaction, groupId) {
+  const group = await requireManageableGroup(interaction, groupId);
+  if (!group) return;
+  if (group.members.size < 2) {
+    return interaction.update({ content: "There's nobody else in the group to remove. Use **Leave Group** for yourself.", components: [] });
+  }
+  const select = new UserSelectMenuBuilder()
+    .setCustomId(`lfgmanage:remove:${groupId}`)
+    .setPlaceholder('Choose a member to remove');
+  await interaction.update({ content: 'Who should be removed?', components: [new ActionRowBuilder().addComponents(select)] });
+}
+
+async function handleManageDescButton(interaction, groupId) {
+  const group = await requireManageableGroup(interaction, groupId);
+  if (!group) return;
+  const input = new TextInputBuilder()
+    .setCustomId('description')
+    .setLabel(`Description (up to ${MAX_DESCRIPTION_CHARS} characters)`)
+    .setStyle(TextInputStyle.Paragraph)
+    .setRequired(false)
+    .setMaxLength(MAX_DESCRIPTION_CHARS);
+  if (group.description) input.setValue(group.description);
+  const modal = new ModalBuilder()
+    .setCustomId(`lfgmanage:desc:${groupId}`)
+    .setTitle('Edit description')
+    .addComponents(new ActionRowBuilder().addComponents(input));
+  await interaction.showModal(modal);
+}
+
+async function handleManageTimeButton(interaction, groupId) {
+  const group = await requireManageableGroup(interaction, groupId);
+  if (!group) return;
+  const select = new StringSelectMenuBuilder()
+    .setCustomId(`lfgmanage:time:${groupId}`)
+    .setPlaceholder('Start in...')
+    .addOptions(TIME_OFFSET_OPTIONS.map((o) => ({ value: o.value, label: o.label })));
+  await interaction.update({ content: 'New start time (counted from now):', components: [new ActionRowBuilder().addComponents(select)] });
+}
+
+async function handleManageSizeButton(interaction, groupId) {
+  const group = await requireManageableGroup(interaction, groupId);
+  if (!group) return;
+  const activity = findActivityByRoleLabel(group.roleLabel);
+  if (!activity || activity.sizeOptions.length < 2) {
+    return interaction.update({ content: 'This activity has only one size.', components: [] });
+  }
+  const select = new StringSelectMenuBuilder()
+    .setCustomId(`lfgmanage:size:${groupId}`)
+    .setPlaceholder('New group size')
+    .addOptions(activity.sizeOptions.map((o) => ({ value: o.value, label: o.label, default: o.label === group.sizeLabel })));
+  await interaction.update({ content: 'New group size:', components: [new ActionRowBuilder().addComponents(select)] });
+}
+
+async function applyMemberRemoval(interaction, group, removedId) {
+  if (removedId === interaction.user.id) {
+    return interaction.update({ content: 'Use **Leave Group** to remove yourself.', components: [] });
+  }
+  if (!group.members.has(removedId)) {
+    return interaction.update({ content: "They're not in the group.", components: [] });
+  }
+  group.members.delete(removedId);
+  const wasFull = group.status === 'closed';
+  console.log(`[LFG] ${interaction.user.username} removed ${removedId} from group ${group.id}`);
+  await interaction.update({ content: 'Removed.', components: [] });
+
+  await updateMainPost(interaction.channel, group);
+  const text = `🚪 <@${removedId}> was removed from the group by <@${interaction.user.id}>.`;
+  await afterMemberLeft(interaction.client, interaction.channel, group, wasFull, text);
+}
+
+async function applyTimeChange(interaction, group, offsetValue) {
+  if (!findTimeOption(offsetValue)) return;
+  group.timeEpoch = resolveTimeEpoch(offsetValue);
+  console.log(`[LFG] ${interaction.user.username} changed start time of group ${group.id} to ${offsetValue} min from now`);
+  await interaction.update({ content: 'Start time updated.', components: [] });
+
+  scheduleCountdownRefresh(interaction.client, group);
+  scheduleStartPing(interaction.client, group);
+  // Keep-alive waits for the start time, so move it too.
+  stopKeepAliveCheck(group);
+  scheduleKeepAliveCheck(interaction.client, group);
+
+  await Promise.all([
+    updateMainPost(interaction.channel, group),
+    renameThreadChannel(interaction.channel, group),
+    postNotice(
+      interaction.channel,
+      group,
+      memberNotice(group, `✏️ <@${interaction.user.id}> changed the start time to <t:${group.timeEpoch}:t> (<t:${group.timeEpoch}:R>).`)
+    ),
+  ]);
+}
+
+async function applySizeChange(interaction, group, sizeValue) {
+  const option = findActivityByRoleLabel(group.roleLabel)?.sizeOptions.find((o) => o.value === sizeValue);
+  if (!option) return;
+  const newCap = parseSizeCap(option.value);
+  if (planSizeChange(group, newCap) === 'refuse') {
+    return interaction.update({
+      content: `⚠️ There are ${group.members.size} members, more than ${option.label}. Remove some first.`,
+      components: [],
+    });
+  }
+
+  const plan = planSizeChange(group, newCap);
+  group.sizeLabel = option.label;
+  group.sizeCap = newCap;
+  console.log(`[LFG] ${interaction.user.username} changed size of group ${group.id} to ${option.label}`);
+  await interaction.update({ content: 'Group size updated.', components: [] });
+
+  const notice = `✏️ <@${interaction.user.id}> changed the group size to **${option.label}**.`;
+  if (plan === 'full') {
+    // A held spot is gone; the queue keeps its places.
+    clearPendingOffer(group);
+    group.status = 'closed';
+    await Promise.all([
+      updateMainPost(interaction.channel, group),
+      renameThreadChannel(interaction.channel, group),
+      postNotice(interaction.channel, group, notice),
+    ]);
+  } else if (plan === 'advance') {
+    // Room opened up: offer it to the queue, or reopen.
+    await advanceQueueOrReopen(interaction.client, interaction.channel, group, notice);
+  } else {
+    await Promise.all([updateMainPost(interaction.channel, group), postNotice(interaction.channel, group, notice)]);
+  }
+}
+
+async function handleLfgManageSelect(interaction) {
+  const [, field, groupId] = interaction.customId.split(':'); // "lfgmanage:<field>:<groupId>"
+  const group = await requireManageableGroup(interaction, groupId);
+  if (!group) return;
+  const value = interaction.values[0];
+  if (field === 'remove') return applyMemberRemoval(interaction, group, value);
+  if (field === 'time') return applyTimeChange(interaction, group, value);
+  if (field === 'size') return applySizeChange(interaction, group, value);
+}
+
+async function handleLfgManageModalSubmit(interaction) {
+  const [, field, groupId] = interaction.customId.split(':');
+  if (field !== 'desc') return;
+  const group = await requireManageableGroup(interaction, groupId);
+  if (!group) return;
+  group.description = interaction.fields.getTextInputValue('description')?.trim() || null;
+  console.log(`[LFG] ${interaction.user.username} edited the description of group ${group.id}`);
+  await replyEphemeral(interaction, '✅ Description updated.');
+  await Promise.all([
+    updateMainPost(interaction.channel, group),
+    postNotice(interaction.channel, group, `✏️ <@${interaction.user.id}> changed the description.`),
+  ]);
+}
+
 // ---- Entry points called from eventHandler.js ----
 async function handleLfgPostSelectInteraction(interaction) {
   const field = interaction.customId.split(':')[2]; // "lfgpost:select:<field>"
   if (!['category', 'activity', 'size', 'time'].includes(field)) return;
   return handleSetupSelect(interaction, field);
+}
+
+async function handleLfgPostButtonInteraction(interaction) {
+  if (interaction.customId === 'lfgpost:createanyway') {
+    return handleCreateAnywayButton(interaction);
+  }
 }
 
 async function handleLfgPostModalSubmit(interaction) {
@@ -1356,12 +1667,24 @@ async function handleLfgPostGroupButtonInteraction(interaction) {
   if (action === 'disband') return handleDisbandButton(interaction, groupId);
   if (action === 'canceldisband') return handleCancelDisbandButton(interaction, groupId);
   if (action === 'keepalive') return handleKeepAliveButton(interaction, groupId);
+  if (action === 'manage') return handleManageButton(interaction, groupId);
+  if (action === 'mgremove') return handleManageRemoveButton(interaction, groupId);
+  if (action === 'mgdesc') return handleManageDescButton(interaction, groupId);
+  if (action === 'mgtime') return handleManageTimeButton(interaction, groupId);
+  if (action === 'mgsize') return handleManageSizeButton(interaction, groupId);
 }
 
 module.exports = {
   sendSetupMenu,
   handleLfgPostSelectInteraction,
+  handleLfgPostButtonInteraction,
   handleLfgPostModalSubmit,
+  handleLfgManageSelect,
+  handleLfgManageModalSubmit,
   handleLfgPostGroupButtonInteraction,
+  handleRetiredSyncedGroupButton,
   restoreLfgGroups,
+  // Exported for tests.
+  finishGroupThread,
+  recordFinishedGroup,
 };

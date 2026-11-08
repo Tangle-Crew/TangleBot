@@ -10,18 +10,20 @@ const {
 const { handleRoleMenuButtonInteraction, syncRoleAppearance } = require('../utils/roleMenu');
 const {
   handleLfgPostSelectInteraction,
+  handleLfgManageSelect,
+  handleLfgManageModalSubmit,
+  handleLfgPostButtonInteraction,
   handleLfgPostModalSubmit,
   handleLfgPostGroupButtonInteraction,
+  handleRetiredSyncedGroupButton,
   restoreLfgGroups,
 } = require('../utils/lfgPost');
 const { ensureLfgStartPost } = require('../utils/lfgStartPage');
 const { refreshLeaderboard: refreshPetLeaderboard } = require('../commands/pethighscore');
 const { refreshLeaderboard: refreshDonationLeaderboard } = require('../commands/donationhighscore');
 const { handleStaleMembersButton, handleStaleMembersSelect, start: startStaleMembers } = require('../commands/stalemembers');
-const { syncDiscordCatalog, isConfigured: isLfgBackendConfigured } = require('../utils/lfgBackend');
-const { startLfgDeliveryWorker } = require('../utils/lfgDeliveryWorker');
+const { handleSuggestButton, handleSuggestModalSubmit } = require('../utils/lfgSuggestion');
 const { startCompEndingReminder } = require('../utils/compEndingReminder');
-const { handleSyncedGroupButtonInteraction } = require('../utils/lfgSyncedPost');
 const { handleWeeklyAnnounceButton, handleWeeklyAnnounceSelect, handleWeeklyAnnounceModal } = require('../commands/weeklyannounce');
 const { restoreWeeklyAnnouncements, stopWeeklyAnnouncements } = require('../utils/weeklyAnnounceSchedule');
 
@@ -30,17 +32,22 @@ const { restoreWeeklyAnnouncements, stopWeeklyAnnouncements } = require('../util
 const BUTTON_ROUTES = [
   { prefix: 'hp:', handler: handleHoneypotButtonInteraction, errorLabel: '[Honeypot] Button interaction error:' },
   { prefix: 'roles:', handler: handleRoleMenuButtonInteraction, errorLabel: '[LFG] Role menu button interaction error:', errorReply: 'Something went wrong updating your roles.' },
+  { prefix: 'lfgpost:', handler: handleLfgPostButtonInteraction, errorLabel: '[LFG] Post button interaction error:', errorReply: 'Something went wrong creating your LFG post.' },
+  { prefix: 'lfgsuggest:', handler: handleSuggestButton, errorLabel: '[LFG] Suggestion button error:', errorReply: 'Something went wrong opening the suggestion form.' },
   { prefix: 'lfgpostgroup:', handler: handleLfgPostGroupButtonInteraction, errorLabel: '[LFG] Post group button interaction error:', errorReply: 'Something went wrong updating that group.' },
-  { prefix: 'lfgsyncgroup:', handler: handleSyncedGroupButtonInteraction, errorLabel: '[LFG] Synced group button interaction error:', errorReply: 'Something went wrong updating that shared LFG group.' },
+  { prefix: 'lfgsyncgroup:', handler: handleRetiredSyncedGroupButton, errorLabel: '[LFG] Retired group button interaction error:', errorReply: 'Something went wrong with that LFG group.' },
   { prefix: 'stalemembers:', handler: handleStaleMembersButton, errorLabel: '[StaleMembers] Button interaction error:', errorReply: 'Something went wrong with that stale members list.' },
   { prefix: 'weeklyannounce:', handler: handleWeeklyAnnounceButton, errorLabel: '[WeeklyAnnounce] Button interaction error:', errorReply: 'Something went wrong updating that weekly announcement.' },
 ];
 const SELECT_ROUTES = [
+  { prefix: 'lfgmanage:', handler: handleLfgManageSelect, errorLabel: '[LFG] Manage select interaction error:', errorReply: 'Something went wrong updating that group.' },
   { prefix: 'lfgpost:', handler: handleLfgPostSelectInteraction, errorLabel: '[LFG] Post select interaction error:', errorReply: 'Something went wrong updating your LFG post setup.' },
   { prefix: 'stalemembers:', handler: handleStaleMembersSelect, errorLabel: '[StaleMembers] Rank picker interaction error:', errorReply: 'Something went wrong with the rank picker.' },
   { prefix: 'weeklyannounce:', handler: handleWeeklyAnnounceSelect, errorLabel: '[WeeklyAnnounce] Competition picker interaction error:', errorReply: 'Something went wrong updating that weekly announcement.' },
 ];
 const MODAL_ROUTES = [
+  { prefix: 'lfgsuggest:', handler: handleSuggestModalSubmit, errorLabel: '[LFG] Suggestion submit error:', errorReply: 'Something went wrong sending your suggestion.' },
+  { prefix: 'lfgmanage:', handler: handleLfgManageModalSubmit, errorLabel: '[LFG] Manage modal submit error:', errorReply: 'Something went wrong updating that group.' },
   { prefix: 'lfgpost:', handler: handleLfgPostModalSubmit, errorLabel: '[LFG] Post modal submit error:', errorReply: 'Something went wrong creating your LFG post.' },
   { prefix: 'weeklyannounce:', handler: handleWeeklyAnnounceModal, errorLabel: '[WeeklyAnnounce] Modal submit error:', errorReply: 'Something went wrong saving that announcement.' },
 ];
@@ -58,7 +65,6 @@ async function dispatchByCustomIdPrefix(interaction, routes) {
 }
 
 function loadEvents(client) {
-  let stopLfgDeliveryWorker = null;
   let stopCompEndingReminder = null;
   const submissionConfig = loadSubmissionConfig();
   client.submissionConfig = submissionConfig;
@@ -84,17 +90,6 @@ function loadEvents(client) {
     } catch (err) {
       console.error('[LFG] Failed to restore groups:', err);
     }
-    if (isLfgBackendConfigured()) {
-      try {
-        const result = await syncDiscordCatalog();
-        if (!result?.skipped) {
-          console.log(`[LFG] Synced Discord catalog to Supabase (${result?.updated ?? 0} rows updated).`);
-        }
-      } catch (err) {
-        console.error('[LFG] Failed to sync Discord catalog to Supabase:', err.message);
-      }
-    }
-    stopLfgDeliveryWorker = startLfgDeliveryWorker();
     stopCompEndingReminder = startCompEndingReminder(client);
     // Before the slower startup steps, so a post due while the bot was down goes out promptly.
     if (client.commands.has('weeklyannounce')) {
@@ -190,7 +185,7 @@ function loadEvents(client) {
       return;
     }
 
-    if (interaction.isStringSelectMenu()) {
+    if (interaction.isStringSelectMenu() || interaction.isUserSelectMenu()) {
       await dispatchByCustomIdPrefix(interaction, SELECT_ROUTES);
       return;
     }
@@ -223,11 +218,6 @@ function loadEvents(client) {
   });
 
   client.once(Events.ClientDestroy, () => {
-    if (stopLfgDeliveryWorker) {
-      console.log('[LFG] Stopping delivery worker on client destroy');
-      stopLfgDeliveryWorker();
-      stopLfgDeliveryWorker = null;
-    }
     if (stopCompEndingReminder) {
       stopCompEndingReminder();
       stopCompEndingReminder = null;

@@ -156,7 +156,12 @@ function buildGroupRow(groupId) {
     .setLabel('Disband Group')
     .setStyle(ButtonStyle.Danger);
 
-  return new ActionRowBuilder().addComponents(join, leave, startNow, disband);
+  const manage = new ButtonBuilder()
+    .setCustomId(`${GROUP_BUTTON_PREFIX}:manage:${groupId}`)
+    .setLabel('Manage')
+    .setStyle(ButtonStyle.Secondary);
+
+  return new ActionRowBuilder().addComponents(join, leave, startNow, manage, disband);
 }
 
 // Offer to the front of the queue. Decline, or not answering in time, removes them from the queue.
@@ -188,6 +193,49 @@ function buildKeepAliveRow(groupId) {
     .setLabel('Still Here')
     .setStyle(ButtonStyle.Success);
   return new ActionRowBuilder().addComponents(stillHere);
+}
+
+// Open (not disbanding) groups a user started.
+function findOpenGroupsOwnedBy(groups, userId) {
+  return [...groups].filter((g) => g.creatorId === userId && g.status !== 'disbanded');
+}
+
+// An open group for the same activity that still has space, or undefined.
+function findJoinableDuplicate(groups, roleLabel) {
+  return [...groups].find((g) => g.roleLabel === roleLabel && g.status === 'open' && !isGroupFull(g) && g.threadId);
+}
+
+// What changing a group's size does: 'refuse' (fewer spots than members), 'full' (now full),
+// 'advance' (a full group gained room: offer it to the queue or reopen), or 'update'.
+function planSizeChange(group, newCap) {
+  if (newCap < group.members.size) return 'refuse';
+  if (newCap !== Infinity && group.members.size >= newCap) return 'full';
+  if (group.status === 'closed' && group.pendingOfferUserId === null) return 'advance';
+  return 'update';
+}
+
+// What follows a member leaving: 'advance' (a full group's spot is offered or reopened),
+// 'notice' (just announce it) or 'empty' (nobody left).
+function planAfterMemberLeft(group, wasFull) {
+  if (wasFull) return 'advance';
+  return group.members.size > 0 ? 'notice' : 'empty';
+}
+
+// One line of lfg-history.jsonl. participantIds is everyone who was ever a member; memberIds is
+// who was still in at the end. closeReason: 'empty' | 'disbanded' | 'inactive'.
+function buildHistoryRecord(group, reason, now = new Date()) {
+  return {
+    closedAt: now.toISOString(),
+    createdAt: group.createdAt ? new Date(group.createdAt).toISOString() : null,
+    id: group.id,
+    activity: group.roleLabel,
+    size: group.sizeLabel,
+    startEpoch: group.timeEpoch,
+    creatorId: group.creatorId,
+    memberIds: [...group.members],
+    participantIds: [...(group.participants ?? group.members)],
+    reason,
+  };
 }
 
 function formatCapacity(group) {
@@ -362,6 +410,13 @@ module.exports = {
   buildQueueOfferRow,
   buildCancelDisbandRow,
   buildKeepAliveRow,
+  GROUP_BUTTON_PREFIX,
+  MAX_DESCRIPTION_CHARS,
+  findOpenGroupsOwnedBy,
+  findJoinableDuplicate,
+  planSizeChange,
+  planAfterMemberLeft,
+  buildHistoryRecord,
   makeGroupId,
   isGroupFull,
 };

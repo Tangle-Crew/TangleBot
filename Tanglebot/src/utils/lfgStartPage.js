@@ -2,6 +2,7 @@ const { ChannelType, ChannelFlags, EmbedBuilder } = require('discord.js');
 const { readJson, writeJson, truncate } = require('./db');
 const { CATEGORIES, emojiLabel, isAlreadyGoneError, notifyAdminLog } = require('./roleMenu');
 const { DEFAULT_EMBED_COLOR } = require('./embedColor');
+const { buildSuggestRows } = require('./lfgSuggestion');
 
 // The /lfg-post forum; the start page is pinned there.
 const FORUM_CHANNEL_ID = process.env.LFG_FORUM_CHANNEL_ID;
@@ -19,22 +20,24 @@ const EMBED_COLOR = DEFAULT_EMBED_COLOR;
 
 const FIELD_DIVIDER = '─'.repeat(20);
 
-// From the main branch, so pushing a new gif updates the post without a redeploy.
-const HOW_TO_GIF_URL = 'https://raw.githubusercontent.com/Tangle-Crew/TangleBot/main/assets/lfg-tour.gif';
-
 function buildInstructionsEmbed() {
   return new EmbedBuilder()
     .setTitle(START_POST_TITLE)
-    .setImage(HOW_TO_GIF_URL)
     .setDescription(
       [
-        'Use this forum to find, or start, groups for OSRS bosses, raids, and minigames.',
+        'Find or start groups for OSRS bosses, raids and minigames.',
         '',
         '**Commands**',
-        '• `/lfg-post` — create a new LFG group: pick a category, activity, group size, and start time.',
-        '• `/lfg-roles` — opt in/out of ping roles for specific activities, so you get notified when a group forms.',
+        '• `/lfg-post` — Start a new group.',
+        '• `/lfg-roles` — Choose which activities ping you.',
         '',
-        '_See the gif below for how joining, leaving, and the queue work on a group post._',
+        '**Buttons**',
+        '• **Join / Leave** — Take or give up a spot (a full group has a queue).',
+        '• **Start Now** — Start the group early.',
+        '• **Manage** — Remove a member or edit the details.',
+        '• **Disband** — Close the group after a short grace period.',
+        '',
+        '**Missing an activity?** Use **Make a Suggestion** below.',
       ].join('\n')
     )
     .setColor(EMBED_COLOR);
@@ -46,13 +49,12 @@ function buildAutomationEmbed() {
     .setTitle('⏱️ Automations')
     .setDescription(
       [
-        'A few things happen on their own, without anyone clicking a button:',
-        '',
-        '• **Empty groups auto-close** after 15 minutes.',
-        '• **Keep-alive checks** every 2 hours — no response in 10 minutes closes the group.',
-        '• **Queue offers expire** after 5 minutes.',
-        '• **Disband has a 60s grace period** to cancel.',
-        '• **The post tidies itself up** — old notices get replaced automatically.',
+        '• **Start ping** — Members are pinged when the start time arrives.',
+        '• **Empty groups** — Close after 15 minutes.',
+        '• **Keep-alive** — Every 2 hours; no reply in 10 minutes closes the group.',
+        '• **Queue offers** — Expire after 5 minutes.',
+        '• **Closed groups** — Locked and archived, not deleted.',
+        '• **Limit** — 2 open groups per person.',
       ].join('\n')
     )
     .setColor(EMBED_COLOR);
@@ -126,7 +128,7 @@ async function pinStartPost(client, thread) {
 async function createStartPost(client, forumChannel, embeds) {
   const thread = await forumChannel.threads.create({
     name: START_POST_TITLE,
-    message: { embeds },
+    message: { embeds, components: buildSuggestRows() },
   });
   writeJson(START_POST_DATA_FILE, { threadId: thread.id });
   console.log(`[LFG] Created start page post: thread ${thread.id}`);
@@ -163,7 +165,7 @@ async function ensureLfgStartPost(client) {
   if (thread) {
     try {
       if (thread.archived) await thread.setArchived(false);
-      await thread.messages.edit(thread.id, { embeds });
+      await thread.messages.edit(thread.id, { embeds, components: buildSuggestRows() });
       writeJson(START_POST_DATA_FILE, { threadId: thread.id });
       await pinStartPost(client, thread);
       console.log(`[LFG] Updated start page post: thread ${thread.id}`);
