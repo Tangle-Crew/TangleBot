@@ -182,7 +182,7 @@ function loadEvents(client) {
       return;
     }
 
-    if (interaction.isStringSelectMenu()) {
+    if (interaction.isStringSelectMenu() || interaction.isUserSelectMenu()) {
       await dispatchByCustomIdPrefix(interaction, SELECT_ROUTES);
       return;
     }

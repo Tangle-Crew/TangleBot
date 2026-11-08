@@ -34,7 +34,13 @@ function buildInstructionsEmbed() {
         '• `/lfg-post` — create a new LFG group: pick a category, activity, group size, and start time.',
         '• `/lfg-roles` — opt in/out of ping roles for specific activities, so you get notified when a group forms.',
         '',
-        '_See the gif below for how joining, leaving, and the queue work on a group post._',
+        '**Buttons on a group post**',
+        '• **Join / Leave** — join the group, or the queue if it\'s full.',
+        '• **Start Now** — start early.',
+        '• **Manage** — remove a member, or change the description, start time or size.',
+        '• **Disband** — close the group after a short grace period.',
+        '',
+        '_Members and Coordinators can use every button. See the gif below for joining, leaving, and the queue._',
       ].join('\n')
     )
     .setColor(EMBED_COLOR);
@@ -48,10 +54,13 @@ function buildAutomationEmbed() {
       [
         'A few things happen on their own, without anyone clicking a button:',
         '',
+        '• **Members are pinged** when the start time arrives.',
         '• **Empty groups auto-close** after 15 minutes.',
         '• **Keep-alive checks** every 2 hours — no response in 10 minutes closes the group.',
         '• **Queue offers expire** after 5 minutes.',
         '• **Disband has a 60s grace period** to cancel.',
+        '• **Closed groups are locked and archived**, not deleted.',
+        '• **You can have 2 open groups** at a time.',
         '• **The post tidies itself up** — old notices get replaced automatically.',
       ].join('\n')
     )

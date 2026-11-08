@@ -102,3 +102,78 @@ test('parseGroupText rejects text that is not a group post', () => {
   assert.equal(lfg.parseGroupText('hello'), null);
   assert.equal(lfg.parseGroupText(undefined), null);
 });
+
+const g = (over = {}) => ({
+  id: 'g1', roleLabel: 'Bosses: Yama', status: 'open', threadId: 't1', creatorId: 'u1',
+  sizeCap: 5, sizeLabel: '5 Players', timeEpoch: 1800000000,
+  members: new Set(['u1']), queue: [], pendingOfferUserId: null, ...over,
+});
+
+test('findOpenGroupsOwnedBy skips other creators and disbanding groups', () => {
+  const groups = [g(), g({ id: 'g2', status: 'disbanded' }), g({ id: 'g3', creatorId: 'u2' }), g({ id: 'g4', status: 'closed' })];
+  assert.deepEqual(lfg.findOpenGroupsOwnedBy(groups, 'u1').map((x) => x.id), ['g1', 'g4']);
+  assert.deepEqual(lfg.findOpenGroupsOwnedBy([], 'u1'), []);
+});
+
+test('findJoinableDuplicate needs the same activity, space and an open status', () => {
+  assert.equal(lfg.findJoinableDuplicate([g()], 'Bosses: Yama').id, 'g1');
+  assert.equal(lfg.findJoinableDuplicate([g()], 'Bosses: Zulrah'), undefined);
+  assert.equal(lfg.findJoinableDuplicate([g({ status: 'closed' })], 'Bosses: Yama'), undefined);
+  assert.equal(lfg.findJoinableDuplicate([g({ sizeCap: 1 })], 'Bosses: Yama'), undefined);
+  assert.equal(lfg.findJoinableDuplicate([g({ threadId: null })], 'Bosses: Yama'), undefined);
+  assert.equal(lfg.findJoinableDuplicate([g({ sizeCap: Infinity })], 'Bosses: Yama').id, 'g1');
+});
+
+test('planSizeChange', () => {
+  const three = g({ members: new Set(['a', 'b', 'c']), status: 'open', sizeCap: 5 });
+  assert.equal(lfg.planSizeChange(three, 2), 'refuse');
+  assert.equal(lfg.planSizeChange(three, 3), 'full');
+  assert.equal(lfg.planSizeChange(three, 4), 'update');
+  assert.equal(lfg.planSizeChange(three, Infinity), 'update');
+  const full = g({ members: new Set(['a', 'b']), status: 'closed', sizeCap: 2 });
+  assert.equal(lfg.planSizeChange(full, 4), 'advance');
+  assert.equal(lfg.planSizeChange(full, Infinity), 'advance');
+  assert.equal(lfg.planSizeChange({ ...full, pendingOfferUserId: 'q1' }, 4), 'update');
+});
+
+test('planAfterMemberLeft', () => {
+  assert.equal(lfg.planAfterMemberLeft(g(), true), 'advance');
+  assert.equal(lfg.planAfterMemberLeft(g(), false), 'notice');
+  assert.equal(lfg.planAfterMemberLeft(g({ members: new Set() }), false), 'empty');
+  assert.equal(lfg.planAfterMemberLeft(g({ members: new Set() }), true), 'advance');
+});
+
+test('buildHistoryRecord keeps what stats need and is JSON-safe', () => {
+  const record = lfg.buildHistoryRecord(g({ members: new Set(['u1', 'u2']) }), 'disbanded', new Date('2026-01-02T03:04:05Z'));
+  assert.deepEqual(record, {
+    closedAt: '2026-01-02T03:04:05.000Z', id: 'g1', activity: 'Bosses: Yama', size: '5 Players',
+    startEpoch: 1800000000, creatorId: 'u1', memberIds: ['u1', 'u2'], reason: 'disbanded',
+  });
+  assert.equal(JSON.parse(JSON.stringify(record)).memberIds.length, 2);
+});
+
+test('the group row has Join, Leave, Start Now, Manage and Disband, all tied to the group id', () => {
+  const row = lfg.buildGroupRow('abc');
+  assert.deepEqual(row.components.map((c) => c.data.label), ['Join Group', 'Leave Group', 'Start Now', 'Manage', 'Disband Group']);
+  assert.deepEqual(row.components.map((c) => c.data.custom_id.split(':')[1]), ['join', 'leave', 'startnow', 'manage', 'disband']);
+  for (const c of row.components) assert.ok(c.data.custom_id.startsWith(`${lfg.GROUP_BUTTON_PREFIX}:`) && c.data.custom_id.endsWith(':abc'));
+});
+
+test('a description at the length cap survives the round trip', () => {
+  const description = 'x'.repeat(lfg.MAX_DESCRIPTION_CHARS);
+  const parsed = lfg.parseGroupText(lfg.buildGroupText(sampleGroup({ description })));
+  assert.equal(parsed.description, description);
+});
+
+test('a description with blank lines or fake headers does not confuse parsing', () => {
+  const description = 'first\n\n**Members (9/9):**\n<@999>\nlast';
+  const parsed = lfg.parseGroupText(lfg.buildGroupText(sampleGroup({ description })));
+  assert.deepEqual(parsed.members, ['111', '222']);
+  assert.equal(parsed.description, description);
+});
+
+test('the queue and offer rows carry the group id', () => {
+  assert.deepEqual(lfg.buildQueueOfferRow('abc').components.map((c) => c.data.custom_id), ['lfgpostgroup:queueaccept:abc', 'lfgpostgroup:queuedecline:abc']);
+  assert.equal(lfg.buildCancelDisbandRow('abc').components[0].data.custom_id, 'lfgpostgroup:canceldisband:abc');
+  assert.equal(lfg.buildKeepAliveRow('abc').components[0].data.custom_id, 'lfgpostgroup:keepalive:abc');
+});
