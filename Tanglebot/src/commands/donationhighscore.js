@@ -453,6 +453,7 @@ module.exports = {
       await interaction.editReply(summary);
     } catch (err) {
       console.error('[DonationHighscore] Fatal error:', err);
+      interaction.commandError = err; // for the command log
       await interaction.editReply(`Error: ${err.message}`);
     }
   },

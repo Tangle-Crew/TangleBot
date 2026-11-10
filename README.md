@@ -704,6 +704,29 @@ On startup, before any command loads, the bot applies every `Tanglebot/migration
 
 - `001_high_scores.sql`: `members`, `donations`, `donation_log`, `pets`, `member_pets`, `pet_log`.
 - `002_member_history.sql`: the pet catalog's display order, `member_names` and `member_stays`.
+- `003_command_log.sql`: `command_log`.
+
+</details>
+
+<details>
+<summary><strong>Command log</strong></summary>
+
+Every slash command run is recorded: who ran it, which command and subcommand, the options they gave (long text is cut to 200 characters), the channel, when, how long it took, and whether it worked. A command that threw an error, or that isn't loaded, is recorded with `status = 'error'` and the error message.
+
+With `DATABASE_URL` set it goes in the `command_log` table. Without it, one JSON line per run is appended to `Tanglebot/data/command-log.jsonl`. Autocomplete, buttons and menus aren't logged. A failed log write is logged to the console and never affects the command.
+
+A command that handles its own error and replies normally is recorded as `ok`, except `/donationhighscore` and `/pethighscore`, which report their errors to the log.
+
+```sql
+-- the last 50 runs
+select created_at, discord_id, command, options, status, error from command_log order by id desc limit 50;
+-- everything one person ran
+select created_at, command, options, status from command_log where discord_id = '<id>' order by id desc;
+-- failures in the last week
+select created_at, discord_id, command, error from command_log where status = 'error' and created_at > now() - interval '7 days' order by id desc;
+```
+
+The log isn't pruned automatically. To keep 1 year: `delete from command_log where created_at < now() - interval '1 year';`
 
 </details>
 
