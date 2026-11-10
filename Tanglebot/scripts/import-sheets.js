@@ -152,11 +152,104 @@ function printSummary({ sheets, database: db }, log = console.log) {
   log('Differences are explained by the warnings above (skipped pet keys or members).');
 }
 
-async function main() {
-  const missing = ['DATABASE_URL', 'GOOGLE_SERVICE_ACCOUNT_JSON', 'DONATIONS_SHEET_ID', 'PET_HIGHSCORES_SHEET_ID']
-    .filter(key => !process.env[key]?.trim());
-  if (missing.length) throw new Error(`Missing env var(s): ${missing.join(', ')}`);
+// Compares the parsed sheet data with the database, member by member. Read only.
+// Returns { differences, notes }: differences are mismatches; notes are expected gaps (members
+// changed since the import, pets added since, pet keys the import skipped).
+async function verifyData(client, { donations, highscores, catalog }) {
+  const differences = [];
+  const notes = [];
+  const rows = async sql => (await client.query(sql)).rows;
+  const gp = n => n.toLocaleString('en-US');
 
+  // Catalog: same keys, names and emoji IDs, in the sheet's order.
+  const dbCatalog = await rows('select key, name, emoji_id from pets order by sort_order, key');
+  const dbPet = new Map(dbCatalog.map(p => [p.key, p]));
+  const sheetKeys = new Set(catalog.map(p => p.key));
+  for (const pet of catalog) {
+    const row = dbPet.get(pet.key);
+    if (!row) differences.push(`Pet "${pet.key}" is on the Pets tab but not in the database.`);
+    else if (row.name !== pet.name || (row.emoji_id || '') !== pet.emojiId) {
+      differences.push(`Pet "${pet.key}": sheet has "${pet.name}" / ${pet.emojiId || 'no emoji'}, database has "${row.name}" / ${row.emoji_id || 'no emoji'}.`);
+    }
+  }
+  const dbOrder = dbCatalog.filter(p => sheetKeys.has(p.key)).map(p => p.key);
+  const sheetOrder = catalog.map(p => p.key).filter(k => dbPet.has(k));
+  if (dbOrder.join() !== sheetOrder.join()) differences.push('The pet catalog is in a different order than the Pets tab.');
+  const extra = dbCatalog.filter(p => !sheetKeys.has(p.key)).map(p => p.key);
+  if (extra.length) notes.push(`${extra.length} pet(s) only in the database (added since the import): ${extra.join(', ')}.`);
+
+  // Donations. A member with a command or manual log row has changed since the import.
+  const dbTotals = new Map((await rows('select discord_id, total_gp from donations')).map(r => [r.discord_id, Number(r.total_gp)]));
+  const donationChanged = new Set((await rows("select distinct discord_id from donation_log where source <> 'import'")).map(r => r.discord_id));
+  const seenDonors = new Set();
+  for (const e of donations) {
+    if (seenDonors.has(e.discordId)) continue;
+    seenDonors.add(e.discordId);
+    const expected = Math.max(e.donated, 0);
+    if (expected > MAX_TOTAL_GP) continue;
+    const label = `${e.displayName || e.discordId} (${e.discordId})`;
+    if (donationChanged.has(e.discordId)) {
+      notes.push(`${label}: donations changed in the database since the import, not compared.`);
+    } else if (!dbTotals.has(e.discordId)) {
+      differences.push(`${label}: sheet has ${gp(expected)} GP donated, the database has no row.`);
+    } else if (dbTotals.get(e.discordId) !== expected) {
+      differences.push(`${label}: sheet has ${gp(expected)} GP donated, database has ${gp(dbTotals.get(e.discordId))}.`);
+    }
+  }
+  const newDonors = [...dbTotals.keys()].filter(id => !seenDonors.has(id));
+  if (newDonors.length) notes.push(`${newDonors.length} donor(s) only in the database (added since the import).`);
+
+  // Pets: each member's set of pets. Keys not in the catalog were skipped by the import.
+  const dbPets = new Map();
+  for (const r of await rows('select discord_id, pet_key from member_pets')) {
+    if (!dbPets.has(r.discord_id)) dbPets.set(r.discord_id, new Set());
+    dbPets.get(r.discord_id).add(r.pet_key);
+  }
+  const petsChanged = new Set((await rows('select distinct discord_id from pet_log')).map(r => r.discord_id));
+  const seenCollectors = new Set();
+  for (const e of highscores) {
+    if (seenCollectors.has(e.discordId)) continue;
+    seenCollectors.add(e.discordId);
+    const label = `${e.displayName || e.discordId} (${e.discordId})`;
+    const unknown = [...new Set(e.petKeys)].filter(k => !sheetKeys.has(k));
+    if (unknown.length) notes.push(`${label}: pet key(s) not in the catalog, skipped by the import: ${unknown.join(', ')}.`);
+    if (petsChanged.has(e.discordId)) {
+      notes.push(`${label}: pets changed in the database since the import, not compared.`);
+      continue;
+    }
+    const expected = new Set(e.petKeys.filter(k => sheetKeys.has(k)));
+    const actual = dbPets.get(e.discordId) ?? new Set();
+    const missingPets = [...expected].filter(k => !actual.has(k));
+    const extraPets = [...actual].filter(k => !expected.has(k));
+    if (missingPets.length) differences.push(`${label}: missing from the database: ${missingPets.join(', ')}.`);
+    if (extraPets.length) differences.push(`${label}: in the database but not on the sheet: ${extraPets.join(', ')}.`);
+  }
+  const newCollectors = [...dbPets.keys()].filter(id => !seenCollectors.has(id) && !petsChanged.has(id));
+  if (newCollectors.length) differences.push(`${newCollectors.length} member(s) have pets in the database but are not on the Highscores tab.`);
+
+  return { differences, notes };
+}
+
+function printVerification({ differences, notes }, log = console.log) {
+  log('');
+  for (const n of notes) log(`Note: ${n}`);
+  if (!differences.length) {
+    log('Verified: every donation total, member pet list and the pet catalog match the sheets.');
+    return;
+  }
+  log(`${differences.length} difference(s) found:`);
+  for (const d of differences) log(`  - ${d}`);
+}
+
+// Thrown to roll back a dry run's transaction.
+class DryRunComplete extends Error {
+  constructor(result) {
+    super('dry run');
+    this.result = result;
+  }
+}
+
+async function readSheets() {
   // Loaded here because googleapis is slow to load and the tests do not need it.
   const { getRows } = require('../src/utils/googleSheets');
   console.log('Reading the sheets (read only)...');
@@ -165,7 +258,45 @@ async function main() {
     getRows(process.env.PET_HIGHSCORES_SHEET_ID, 'Highscores!A2:C'),
     getRows(process.env.PET_HIGHSCORES_SHEET_ID, 'Pets!A2:C'),
   ]);
-  const data = parseSheets({ donationRows, highscoreRows, catalogRows });
+  return parseSheets({ donationRows, highscoreRows, catalogRows });
+}
+
+// Modes: (none) import; --verify compares the sheets with the database; --dry-run imports and
+// verifies inside a transaction that is rolled back.
+async function main(args = process.argv.slice(2)) {
+  const verify = args.includes('--verify');
+  const dryRun = args.includes('--dry-run');
+  if (verify && dryRun) throw new Error('Use --verify or --dry-run, not both');
+
+  const missing = ['DATABASE_URL', 'GOOGLE_SERVICE_ACCOUNT_JSON', 'DONATIONS_SHEET_ID', 'PET_HIGHSCORES_SHEET_ID']
+    .filter(key => !process.env[key]?.trim());
+  if (missing.length) throw new Error(`Missing env var(s): ${missing.join(', ')}`);
+
+  const data = await readSheets();
+
+  if (verify) {
+    const result = await verifyData(database.getPool(), data);
+    printVerification(result);
+    if (result.differences.length) process.exitCode = 1;
+    return;
+  }
+
+  if (dryRun) {
+    console.log('Dry run: nothing will be saved. The migrations must already be applied (start the bot once).');
+    try {
+      await database.withTransaction(async client => {
+        const summary = await importData(client, data);
+        throw new DryRunComplete({ summary, verification: await verifyData(client, data) });
+      });
+    } catch (err) {
+      if (!(err instanceof DryRunComplete)) throw err;
+      printSummary(err.result.summary);
+      printVerification(err.result.verification);
+      console.log('Dry run finished and rolled back; the database is unchanged.');
+      if (err.result.verification.differences.length) process.exitCode = 1;
+    }
+    return;
+  }
 
   await database.runMigrations();
   const summary = await database.withTransaction(client => importData(client, data));
@@ -176,10 +307,10 @@ if (require.main === module) {
   main()
     .then(() => database.closePool())
     .catch(async err => {
-      console.error(`Import failed, nothing was written: ${err.message}`);
+      console.error(`Failed, nothing was written: ${err.message}`);
       await database.closePool().catch(() => {});
       process.exitCode = 1;
     });
 }
 
-module.exports = { parseSheets, importData };
+module.exports = { parseSheets, importData, verifyData, main };

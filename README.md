@@ -735,7 +735,14 @@ select joined_at, left_at from member_stays where discord_id = '<id>' order by j
    ```
    (Without Docker: `cd Tanglebot && node scripts/import-sheets.js`.) It needs `DATABASE_URL`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `DONATIONS_SHEET_ID` and `PET_HIGHSCORES_SHEET_ID`, reads the `Donations`, `Highscores` and `Pets` tabs, and never writes to the sheets. Everything is written in one transaction, so a failure writes nothing.
 3. Compare the numbers it prints (members, total GP, total pets owned, catalog size) with the sheets. A pet key missing from the `Pets` tab is skipped with a warning.
-4. Run `/refreshboards` to repost the leaderboards from the database.
+4. Check every member, not just the totals:
+   ```bash
+   docker compose run --rm tanglebot node scripts/import-sheets.js --verify
+   ```
+   It re-reads the sheets and compares them with the database: each member's donation total and pet list, and the pet catalog (names, emoji IDs and order). It lists each difference, for example `Snow (123…): sheet has 150,000,000 GP donated, database has 140,000,000.`, and exits with an error if there are any. Members changed by a command since the import, pets added since, and pet keys the import skipped are shown as notes, not differences. It writes nothing, so you can run it again later.
+5. Run `/refreshboards` to repost the leaderboards from the database.
+
+To preview first, run the import with `--dry-run` once the migrations have been applied (start the bot once with `DATABASE_URL` set). It does the whole import and verification inside a transaction that is rolled back, so the database is left unchanged.
 
 The import is safe to run again: it updates totals and the catalog, adds an `import` row to `donation_log` only when a member's total changed, and keeps the names already in the database. A member whose total was changed by a command since the first import is left alone, with a warning.
 
