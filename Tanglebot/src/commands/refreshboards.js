@@ -10,12 +10,16 @@ const BOARDS = [
 ];
 
 module.exports = {
-  requiredEnv: ['GOOGLE_SERVICE_ACCOUNT_JSON'],
+  requiredEnvWithoutDatabase: ['GOOGLE_SERVICE_ACCOUNT_JSON'],
 
   data: new SlashCommandBuilder()
     .setName('refreshboards')
     .setDefaultMemberPermissions(0)
-    .setDescription('Repost every leaderboard (pet and donation high scores) from their sheets'),
+    .setDescription(
+      process.env.DATABASE_URL?.trim()
+        ? 'Repost every leaderboard (pet and donation high scores) from the database'
+        : 'Repost every leaderboard (pet and donation high scores) from their sheets'
+    ),
 
   async execute(interaction) {
     if (TEMPLAR_ROLE_ID && !interaction.member.roles.cache.has(TEMPLAR_ROLE_ID)) {

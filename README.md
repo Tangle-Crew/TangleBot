@@ -70,7 +70,7 @@ Ranges count either way (`5-1` counts down). Labels longer than 16 characters ar
 
 ### 💰 `/donationhighscore` — Donation High Scores
 
-Tracks each member's total GP donated in a Google Sheet, posts a ranked leaderboard, and assigns stacking donation tier roles (Zenyte / Onyx / Dragonstone / Diamond / Ruby).
+Tracks each member's total GP donated in PostgreSQL (or a Google Sheet, see [Database](#database)), posts a ranked leaderboard, and assigns stacking donation tier roles (Zenyte / Onyx / Dragonstone / Diamond / Ruby).
 
 | Subcommand | Description |
 |------------|-------------|
@@ -84,9 +84,10 @@ Both take a `player` and an `amount`: a raw number or shorthand like `10k`, `10m
 
 | Variable | Required | Description |
 |---|---|---|
-| `DONATIONS_SHEET_ID` | Yes | The Google Sheet's ID. The command isn't loaded without this, `DONATIONS_CHANNEL_ID` and `GOOGLE_SERVICE_ACCOUNT_JSON`. |
-| `DONATIONS_CHANNEL_ID` | Yes | Channel for the leaderboard. |
-| `GOOGLE_SERVICE_ACCOUNT_JSON` | Yes | See [Google service account](#google-service-account). |
+| `DONATIONS_CHANNEL_ID` | Yes | Channel for the leaderboard. The command isn't loaded without it. |
+| `DATABASE_URL` | Recommended | PostgreSQL connection string. See [Database](#database). |
+| `DONATIONS_SHEET_ID` | Without `DATABASE_URL` | The Google Sheet's ID. Only needed for the Sheets fallback and the import. |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | Without `DATABASE_URL` | See [Google service account](#google-service-account). Only needed for the Sheets fallback and the import. |
 | `TEMPLAR_ROLE_ID` | Recommended | Restricts the command to Templars (fails open). |
 | `DONATION_<TIER>_THRESHOLD` | No | GP needed per tier. Defaults: Zenyte 1B, Onyx 600M, Dragonstone 300M, Diamond 150M, Ruby 75M. |
 | `DONATION_<TIER>_ROLE_ID` | No | Role granted at each tier. Leave blank to skip that tier's role. |
@@ -99,8 +100,8 @@ Both take a `player` and an `amount`: a raw number or shorthand like `10k`, `10m
 <details>
 <summary><strong>How it works</strong></summary>
 
-1. Reads the member's row from the `Donations` tab (by Discord ID), or adds one.
-2. Updates their total and writes the row back.
+1. In one database transaction: saves the member's current display name, changes their total in the `donations` table (never below 0) and adds a `donation_log` row with the change, the new total and who ran the command. With the Sheets fallback it reads the member's row from the `Donations` tab (by Discord ID), or adds one, then writes the new total back.
+2. Clamps `remove` at 0 and says so in the reply.
 3. Grants every tier role the new total qualifies for (a Zenyte donor also keeps Onyx, Dragonstone, Diamond and Ruby) and removes the rest.
 4. Rebuilds the leaderboard: the combined total as the heading, then one line per donor with their highest tier's emoji, **display name** and total. The top donor's line is larger.
 5. Edits the existing leaderboard messages in place. If the stored message IDs are missing, it finds its previous post in the channel's recent history instead of posting a duplicate.
@@ -110,7 +111,9 @@ Display names are refreshed from the server on every post. Members who left keep
 </details>
 
 <details>
-<summary><strong>Setup</strong></summary>
+<summary><strong>Setup (Google Sheets fallback)</strong></summary>
+
+Skip this when you use [the database](#database).
 
 1. Import `Tanglebot/example/donationhighscores_template.xlsx` at [sheets.google.com](https://sheets.google.com) with **File → Import → Upload → Create new spreadsheet**. Other import options can leave it in Office mode, which the Sheets API rejects with `must not be an Office file`. Keep the `Donations` tab name (`DiscordID`, `DisplayName`, `Donated` columns) and clear the example rows.
 2. Share the sheet with your [service account](#google-service-account) as an **Editor**.
@@ -125,13 +128,13 @@ Display names are refreshed from the server on every post. Members who left keep
 
 ### 🐾 `/pethighscore` — Pet High Scores
 
-Tracks which OSRS pets each member has in a Google Sheet, posts a ranked leaderboard, and grants a Pet Master role at a set pet count.
+Tracks which OSRS pets each member has in PostgreSQL (or a Google Sheet, see [Database](#database)), posts a ranked leaderboard, and grants a Pet Master role at a set pet count.
 
 | Subcommand | Description |
 |------------|-------------|
 | `add` | Adds up to five pets to a member (`user`, `pet`, `pet2`–`pet5`) |
 | `remove` | Removes up to five pets from a member |
-| `new` | Adds a new pet type (`name`, `emoji`) to the `Pets` tab — **Owner only** |
+| `new` | Adds a new pet type (`name`, `emoji`) to the pet catalog (the `pets` table, or the `Pets` tab) — **Owner only** |
 
 Pet slots autocomplete and skip pets picked in another slot. Once `user` is set, `add` only suggests pets the member doesn't have and `remove` only suggests pets they do. For `new`, paste the custom emoji or its numeric ID. The pet is available in autocomplete immediately.
 
@@ -140,9 +143,10 @@ Pet slots autocomplete and skip pets picked in another slot. Once `user` is set,
 
 | Variable | Required | Description |
 |---|---|---|
-| `PET_HIGHSCORES_SHEET_ID` | Yes | The Google Sheet's ID. The command isn't loaded without this, `PET_HIGHSCORES_CHANNEL_ID` and `GOOGLE_SERVICE_ACCOUNT_JSON`. |
-| `PET_HIGHSCORES_CHANNEL_ID` | Yes | Channel for the leaderboard. |
-| `GOOGLE_SERVICE_ACCOUNT_JSON` | Yes | See [Google service account](#google-service-account). |
+| `PET_HIGHSCORES_CHANNEL_ID` | Yes | Channel for the leaderboard. The command isn't loaded without it. |
+| `DATABASE_URL` | Recommended | PostgreSQL connection string. See [Database](#database). |
+| `PET_HIGHSCORES_SHEET_ID` | Without `DATABASE_URL` | The Google Sheet's ID. Only needed for the Sheets fallback and the import. |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | Without `DATABASE_URL` | See [Google service account](#google-service-account). Only needed for the Sheets fallback and the import. |
 | `TEMPLAR_ROLE_ID` | Recommended | Restricts `add`/`remove` to Templars (fails open). |
 | `OWNER_ROLE_ID` | Recommended | Restricts `new` to Owners (fails open). |
 | `PET_MASTER_ROLE_ID` | No | Role granted at `PET_MASTER_THRESHOLD` pets. Leave blank to skip. |
@@ -154,7 +158,7 @@ Pet slots autocomplete and skip pets picked in another slot. Once `user` is set,
 <details>
 <summary><strong>How it works</strong></summary>
 
-1. Adds or removes every given pet in one sheet write, skipping pets already owned (`add`) or not owned (`remove`) and noting them in the reply. Pets are stored in `Pets` tab order.
+1. Adds or removes every given pet in one database transaction (one sheet write with the Sheets fallback), skipping pets already owned (`add`) or not owned (`remove`) and noting them in the reply. Each pet changed gets a `pet_log` row with who ran the command. Pets show in catalog order (the `Pets` tab's row order, kept by the import).
 2. Rebuilds the leaderboard sorted by pet count: 🥇🥈🥉 for the top three (ties share a medal), the member's **display name** and count, then a large row of their pet emojis.
 3. Edits the existing leaderboard messages in place, the same way as `/donationhighscore`.
 4. Grants or removes Pet Master when the member's count crosses the threshold.
@@ -162,7 +166,9 @@ Pet slots autocomplete and skip pets picked in another slot. Once `user` is set,
 </details>
 
 <details>
-<summary><strong>Setup</strong></summary>
+<summary><strong>Setup (Google Sheets fallback)</strong></summary>
+
+Skip this when you use [the database](#database). With the database, the import copies the `Pets` catalog over and `/pethighscore new` adds to it.
 
 1. Import `Tanglebot/example/pethighscores_template.xlsx` the same way as the donations template. Keep both tab names:
    - `Highscores` — `DiscordID`, `DisplayName`, `Pets`. `Pets` is a comma-separated list of pet **keys** (e.g. `baby_mole, heron`), not names.
@@ -181,9 +187,9 @@ Hand edits to the `Pets` tab take effect on the next restart or `/refreshboards`
 
 ### 🔄 `/refreshboards` — Refresh Leaderboards
 
-Reposts the pet and donation leaderboards from their Google Sheets, e.g. after editing a sheet by hand. The reply says whether each board was refreshed, skipped (env vars not set) or failed, with the error. The same refresh runs on startup.
+Reposts the pet and donation leaderboards from the database (or from their Google Sheets when `DATABASE_URL` is unset), e.g. after the import or after editing a table or sheet by hand. The reply says whether each board was refreshed, skipped (env vars not set) or failed, with the error. The same refresh runs on startup.
 
-Requires `GOOGLE_SERVICE_ACCOUNT_JSON` to load. Restricted to Templars (`TEMPLAR_ROLE_ID`, fails open).
+Loads with `DATABASE_URL`, or with `GOOGLE_SERVICE_ACCOUNT_JSON` when there is no database. Restricted to Templars (`TEMPLAR_ROLE_ID`, fails open).
 
 ---
 
@@ -683,9 +689,65 @@ Each feature's variables are listed in its section above. These are the base one
 | `ADMIN_LOG_CHANNEL_ID` | Optional. Staff channel for alerts, logs and the "Bot is online" message (which pings `OWNER_ROLE_ID` if set). |
 | `OWNER_ID` | Unused. |
 
+### Database
+
+`/donationhighscore`, `/pethighscore` and `/refreshboards` store their data in PostgreSQL (tested with `postgres:17-alpine`). The database also holds each member's clan history, ready for more clan data later.
+
+| Variable | Description |
+|---|---|
+| `DATABASE_URL` | `postgres://<user>:<password>@<host>:5432/<database>`. In Docker Compose the host is the database service's name, e.g. `postgres://tanglebot:<password>@tanglebot-db:5432/tanglebot`. Leave it unset to keep using the Google Sheets. |
+
+<details>
+<summary><strong>Migrations</strong></summary>
+
+On startup, before any command loads, the bot applies every `Tanglebot/migrations/NNN_name.sql` file not yet listed in the `schema_migrations` table, in order, each in its own transaction, and logs each one it applied. If a migration fails, startup stops with the file's name and the database's error. Applied files are never changed; a schema change is a new numbered file.
+
+- `001_high_scores.sql`: `members`, `donations`, `donation_log`, `pets`, `member_pets`, `pet_log`.
+- `002_member_history.sql`: the pet catalog's display order, `member_names` and `member_stays`.
+
+</details>
+
+<details>
+<summary><strong>Member history</strong></summary>
+
+While `DATABASE_URL` is set the bot keeps this for every server member (bots excluded), in addition to the high scores:
+
+- **Name changes:** `member_names` has one row per display name a member has had, oldest first. A row is added when the name changes: live from the server, when a high score command saves the member, and in the leaderboard's display-name refresh.
+- **Joins and leaves:** `member_stays` has one row per time a member was in the server. The earliest `joined_at` is their first join, a later row is a rejoin, and `left_at` is empty while they are still in. Join dates come from Discord.
+- **While the bot is down:** on startup the bot compares every server member with the database. Members it has never seen are added with their Discord join date, and members stored as present who are gone get `left_at` set to the time the bot noticed. A member who left and rejoined entirely while the bot was down shows as one stay.
+
+A member's whole history:
+
+```sql
+select display_name, changed_at from member_names where discord_id = '<id>' order by changed_at;
+select joined_at, left_at from member_stays where discord_id = '<id>' order by joined_at;
+```
+
+</details>
+
+<details>
+<summary><strong>Moving from the sheets</strong></summary>
+
+1. Set `DATABASE_URL` in `Tanglebot/.env` and restart the bot. It applies the migrations and the commands now use the database, which is still empty.
+2. Run the one-off import straight away, before anyone uses `/donationhighscore` or `/pethighscore`:
+   ```bash
+   docker compose run --rm tanglebot node scripts/import-sheets.js
+   ```
+   (Without Docker: `cd Tanglebot && node scripts/import-sheets.js`.) It needs `DATABASE_URL`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `DONATIONS_SHEET_ID` and `PET_HIGHSCORES_SHEET_ID`, reads the `Donations`, `Highscores` and `Pets` tabs, and never writes to the sheets. Everything is written in one transaction, so a failure writes nothing.
+3. Compare the numbers it prints (members, total GP, total pets owned, catalog size) with the sheets. A pet key missing from the `Pets` tab is skipped with a warning.
+4. Run `/refreshboards` to repost the leaderboards from the database.
+
+The import is safe to run again: it updates totals and the catalog, adds an `import` row to `donation_log` only when a member's total changed, and keeps the names already in the database. A member whose total was changed by a command since the first import is left alone, with a warning.
+
+**Keep the sheets for a month** as a read-only fallback: stop editing them, but don't delete them.
+
+**Rollback:** remove `DATABASE_URL` from `Tanglebot/.env` and restart. The commands go back to the sheets exactly as before (set the sheet variables back if you removed them). Anything changed since the cutover exists only in the database, so a rollback after real use needs those changes copied back to the sheets by hand.
+
+</details>
+
 ### Google service account
 
-`/donationhighscore` and `/pethighscore` write to Google Sheets, which needs a service account.
+With the Sheets fallback (no `DATABASE_URL`) `/donationhighscore` and `/pethighscore` write to Google Sheets, which needs a service account. The import script uses it too, to read them.
 
 <details>
 <summary><strong>Steps</strong></summary>
@@ -713,7 +775,7 @@ The bot registers its slash commands with your server each time it starts. `npm 
 
 To run with Docker instead, use `docker compose up -d --build` from the repo root. It reads `Tanglebot/.env` and keeps `Tanglebot/data/` between restarts.
 
-`Tanglebot/data/` holds small state files: leaderboard message IDs, open LFG groups, the LFG start post ID, honeypot test mode, the intake URL override, and the last accepted submission.
+`Tanglebot/data/` holds small state files (the database itself lives in PostgreSQL): leaderboard message IDs, open LFG groups, the LFG start post ID, honeypot test mode, the intake URL override, and the last accepted submission.
 
 ---
 
@@ -721,7 +783,8 @@ To run with Docker instead, use `docker compose up -d --build` from the repo roo
 
 - [discord.js](https://discord.js.org/) v14
 - [@napi-rs/canvas](https://github.com/Brooooooklyn/canvas) and [gif-encoder-2](https://github.com/benjaminadk/gif-encoder-2) — the `/spinwheel` GIF
-- [googleapis](https://github.com/googleapis/google-api-nodejs-client) — Google Sheets for the high score commands
+- [pg](https://node-postgres.com/) — PostgreSQL for the high score commands and member history
+- [googleapis](https://github.com/googleapis/google-api-nodejs-client) — Google Sheets for the high score commands' fallback and the import
 - [axios](https://axios-http.com/) — Supabase
 - [@wise-old-man/utils](https://github.com/wise-old-man/wise-old-man) — Wise Old Man API client
 - [Claude by Anthropic](https://claude.ai/) — AI-assisted development

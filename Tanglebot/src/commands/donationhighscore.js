@@ -4,6 +4,7 @@ const { DEFAULT_EMBED_COLOR } = require('../utils/embedColor');
 const { withFileLock, intEnv } = require('../utils/db');
 const { mentionOrName, postLeaderboard: postLeaderboardShared } = require('../utils/leaderboard');
 const { notifyAdminLog } = require('../utils/roleMenu');
+const highScoresDb = require('../utils/highScoresDb');
 
 const TEMPLAR_ROLE_ID = process.env.TEMPLAR_ROLE_ID;
 
@@ -50,8 +51,12 @@ function highestTierFor(donated) {
   return DONATION_TIERS.find(t => donated >= t.threshold) || null;
 }
 
-// withFileLock key (not a file) serializing edits to the donations sheet.
+// withFileLock key (not a file) serializing edits to the donations sheet, and (with the database)
+// reading the totals and posting them.
 const DONATION_LOCK_KEY = 'donations-sheet';
+
+// True when DATABASE_URL is set; otherwise the Google Sheet is used.
+const usingDb = () => highScoresDb.usingDatabase();
 
 // Parses "300M", "10.1m", "75,000,000", etc. Returns null if unreadable.
 function parseDonationAmount(raw) {
@@ -169,6 +174,15 @@ async function postLeaderboard(guild, channelId, entries, botUserId) {
     logPrefix: 'DonationHighscore',
     isOwnLeaderboardMessage,
     onDisplayNameChange: async (entry) => {
+      if (usingDb()) {
+        try {
+          await highScoresDb.updateDisplayName(entry);
+        } catch (err) {
+          console.error(`[DonationHighscore] Failed to persist refreshed display name for ${entry.discordId}:`, err);
+        }
+        return;
+      }
+      if (entry.rowNumber == null) return;
       try {
         await updateRow(
           process.env.DONATIONS_SHEET_ID,
@@ -184,6 +198,7 @@ async function postLeaderboard(guild, channelId, entries, botUserId) {
 }
 
 async function loadEntries() {
+  if (usingDb()) return highScoresDb.getDonations();
   console.log('[DonationHighscore] Fetching donation entries from sheet');
   const rows = await getRows(process.env.DONATIONS_SHEET_ID, DATA_RANGE);
   return rows
@@ -202,15 +217,28 @@ function sortedForDisplay(entries) {
     .sort((a, b) => b.donated - a.donated || a.displayName.localeCompare(b.displayName));
 }
 
-// Reposts the leaderboard from the sheet. Runs on startup and from /refreshboards. Returns false
+// Reads the totals from the database and posts them. Serialized so posts land in write order.
+function postFromDatabase(guild, channelId, botUserId) {
+  return withFileLock(DONATION_LOCK_KEY, async () => {
+    const entries = await highScoresDb.getDonations();
+    await postLeaderboard(guild, channelId, sortedForDisplay(entries), botUserId);
+  });
+}
+
+// Reposts the leaderboard from the sheet or database. Runs on startup and from /refreshboards. Returns false
 // if the leaderboard isn't configured; errors are thrown to the caller.
 async function refreshLeaderboard(client) {
   const channelId = process.env.DONATIONS_CHANNEL_ID;
-  if (!process.env.DONATIONS_SHEET_ID || !channelId || !process.env.GOOGLE_SERVICE_ACCOUNT_JSON) return false;
+  if (!channelId) return false;
+  if (!usingDb() && (!process.env.DONATIONS_SHEET_ID || !process.env.GOOGLE_SERVICE_ACCOUNT_JSON)) return false;
 
   // Without it, fetch() returns every server instead of one and the post fails with a cryptic error.
   if (!process.env.CLAN_ID) throw new Error('CLAN_ID is not set, so the server to post in is unknown.');
   const guild = await client.guilds.fetch(process.env.CLAN_ID);
+  if (usingDb()) {
+    await postFromDatabase(guild, channelId, client.user.id);
+    return true;
+  }
   // Locked because the display-name refresh writes rows too.
   await withFileLock(DONATION_LOCK_KEY, async () => {
     const entries = await loadEntries();
@@ -259,7 +287,8 @@ async function syncDonationRoles(guild, discordId, previousDonated, newDonated) 
 }
 
 module.exports = {
-  requiredEnv: ['DONATIONS_SHEET_ID', 'DONATIONS_CHANNEL_ID', 'GOOGLE_SERVICE_ACCOUNT_JSON'],
+  requiredEnv: ['DONATIONS_CHANNEL_ID'],
+  requiredEnvWithoutDatabase: ['DONATIONS_SHEET_ID', 'GOOGLE_SERVICE_ACCOUNT_JSON'],
   refreshLeaderboard,
 
   data: new SlashCommandBuilder()
@@ -319,7 +348,27 @@ module.exports = {
       if (!member) console.warn(`[DonationHighscore] Could not fetch member ${targetUser.id} (${targetUser.tag}) — falling back to username`);
       const displayName = member?.displayName || targetUser.username;
 
-      const { currentAmount, newAmount, clamped, noDonationsLogged } = await withFileLock(DONATION_LOCK_KEY, async () => {
+      // Changes the total in one transaction, then reposts the leaderboard unless nothing changed.
+      const changeInDatabase = async () => {
+        const result = await highScoresDb.changeDonation({
+          discordId: targetUser.id,
+          displayName,
+          joinedAt: member?.joinedAt ?? null,
+          amount,
+          action: subcommand,
+          byDiscordId: interaction.user.id,
+        });
+        if (!result.noDonationsLogged) {
+          try {
+            await postFromDatabase(guild, channelId, interaction.client.user.id);
+          } catch (err) {
+            console.error('[DonationHighscore] Failed to update leaderboard post after a donation edit:', err.message);
+          }
+        }
+        return result;
+      };
+
+      const { currentAmount, newAmount, clamped, noDonationsLogged } = usingDb() ? await changeInDatabase() : await withFileLock(DONATION_LOCK_KEY, async () => {
         const loadedEntries = await loadEntries();
         const existingIndex = loadedEntries.findIndex(e => e.discordId === targetUser.id);
         const existing = existingIndex === -1 ? null : loadedEntries[existingIndex];

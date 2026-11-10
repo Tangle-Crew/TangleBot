@@ -23,6 +23,7 @@ const { refreshLeaderboard: refreshPetLeaderboard } = require('../commands/pethi
 const { refreshLeaderboard: refreshDonationLeaderboard } = require('../commands/donationhighscore');
 const { handleStaleMembersButton, handleStaleMembersSelect, start: startStaleMembers } = require('../commands/stalemembers');
 const { handleSuggestButton, handleSuggestModalSubmit } = require('../utils/lfgSuggestion');
+const { registerMemberHistory, syncMemberRoster } = require('../utils/memberHistory');
 const { startCompEndingReminder } = require('../utils/compEndingReminder');
 const { handleWeeklyAnnounceButton, handleWeeklyAnnounceSelect, handleWeeklyAnnounceModal } = require('../commands/weeklyannounce');
 const { restoreWeeklyAnnouncements, stopWeeklyAnnouncements } = require('../utils/weeklyAnnounceSchedule');
@@ -112,6 +113,9 @@ function loadEvents(client) {
       console.error('[LFG] Failed to ensure LFG start post:', err);
     }
 
+    // Before the leaderboards, so a first sync stores everyone before names are refreshed.
+    await syncMemberRoster(client);
+
     try {
       await refreshPetLeaderboard(client);
     } catch (err) {
@@ -151,6 +155,8 @@ function loadEvents(client) {
     }
     console.log('[Bot] Startup finished.');
   });
+
+  registerMemberHistory(client);
 
   client.on(Events.MessageCreate, async (message) => {
     try {

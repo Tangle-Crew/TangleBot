@@ -4,13 +4,18 @@ const { DEFAULT_EMBED_COLOR } = require('../utils/embedColor');
 const { mentionOrName, postLeaderboard: postLeaderboardShared } = require('../utils/leaderboard');
 const { notifyAdminLog } = require('../utils/roleMenu');
 const { withFileLock, intEnv } = require('../utils/db');
+const highScoresDb = require('../utils/highScoresDb');
 
 const TEMPLAR_ROLE_ID = process.env.TEMPLAR_ROLE_ID;
 const OWNER_ROLE_ID = process.env.OWNER_ROLE_ID;
 const PET_MASTER_THRESHOLD = intEnv('PET_MASTER_THRESHOLD', 10);
 
-// withFileLock key (not a file) serializing edits to the pet sheet.
+// withFileLock key (not a file) serializing edits to the pet sheet, and (with the database)
+// reading the members and posting them.
 const PET_LOCK_KEY = 'pethighscores-sheet';
+
+// True when DATABASE_URL is set; otherwise the Google Sheet is used.
+const usingDb = () => highScoresDb.usingDatabase();
 
 // Tab names from Tanglebot/example/pethighscores_template.xlsx.
 const SHEET_TAB = 'Highscores';
@@ -38,24 +43,31 @@ function rebuildPetIndexes() {
   });
 }
 
+// Reads the pet catalog from the database or the Pets tab.
+async function fetchPetCatalog() {
+  if (usingDb()) return highScoresDb.getPetCatalog();
+  const rows = await getRows(process.env.PET_HIGHSCORES_SHEET_ID, PET_CATALOG_RANGE);
+  return rows
+    .filter(r => r[0])
+    .map(r => ({
+      key: String(r[0]).trim(),
+      name: String(r[1] || '').trim(),
+      emojiId: String(r[2] || '').trim(),
+    }));
+}
+
 // The pet catalog, shared by autocomplete and commands. Reloaded by reloadPets.
 let petsLoadPromise = null;
 function ensurePetsLoaded() {
   if (!petsLoadPromise) {
-    petsLoadPromise = getRows(process.env.PET_HIGHSCORES_SHEET_ID, PET_CATALOG_RANGE)
-      .then(rows => {
-        PETS = rows
-          .filter(r => r[0])
-          .map(r => ({
-            key: String(r[0]).trim(),
-            name: String(r[1] || '').trim(),
-            emojiId: String(r[2] || '').trim(),
-          }));
+    petsLoadPromise = fetchPetCatalog()
+      .then(pets => {
+        PETS = pets;
         rebuildPetIndexes();
       })
       .catch(err => {
         petsLoadPromise = null; // retry next call instead of caching the failure
-        console.error('[PetHighscore] Failed to load pet catalog from the Pets sheet tab:', err);
+        console.error(`[PetHighscore] Failed to load pet catalog from ${usingDb() ? 'the database' : 'the Pets sheet tab'}:`, err);
         throw err;
       });
   }
@@ -197,6 +209,15 @@ async function postLeaderboard(guild, channelId, entries, botUserId) {
     logPrefix: 'PetHighscore',
     isOwnLeaderboardMessage,
     onDisplayNameChange: async (entry) => {
+      if (usingDb()) {
+        try {
+          await highScoresDb.updateDisplayName(entry);
+        } catch (err) {
+          console.error(`[PetHighscore] Failed to persist refreshed display name for ${entry.discordId}:`, err);
+        }
+        return;
+      }
+      if (entry.rowNumber == null) return;
       try {
         await updateRow(
           process.env.PET_HIGHSCORES_SHEET_ID,
@@ -212,6 +233,13 @@ async function postLeaderboard(guild, channelId, entries, botUserId) {
 }
 
 async function fetchEntries() {
+  if (usingDb()) {
+    const members = await highScoresDb.getMemberPets();
+    return members.map(e => {
+      const petKeys = sortPetKeys(e.petKeys);
+      return { ...e, petKeys, count: petKeys.length };
+    });
+  }
   console.log('[PetHighscore] Fetching pet highscore entries from sheet');
   const rows = await getRows(process.env.PET_HIGHSCORES_SHEET_ID, DATA_RANGE);
   return rows
@@ -252,16 +280,29 @@ function sortedForDisplay(entries) {
     .sort((a, b) => b.count - a.count || a.displayName.localeCompare(b.displayName));
 }
 
-// Reposts the leaderboard from the sheet. Runs on startup and from /refreshboards. Returns false
+// Reads the members from the database and posts them. Serialized so posts land in write order.
+function postFromDatabase(guild, channelId, botUserId) {
+  return withFileLock(PET_LOCK_KEY, async () => {
+    const entries = await fetchEntries();
+    await postLeaderboard(guild, channelId, sortedForDisplay(entries), botUserId);
+  });
+}
+
+// Reposts the leaderboard from the sheet or database. Runs on startup and from /refreshboards. Returns false
 // if the leaderboard isn't configured; errors are thrown to the caller.
 async function refreshLeaderboard(client) {
   const channelId = process.env.PET_HIGHSCORES_CHANNEL_ID;
-  if (!process.env.PET_HIGHSCORES_SHEET_ID || !channelId || !process.env.GOOGLE_SERVICE_ACCOUNT_JSON) return false;
+  if (!channelId) return false;
+  if (!usingDb() && (!process.env.PET_HIGHSCORES_SHEET_ID || !process.env.GOOGLE_SERVICE_ACCOUNT_JSON)) return false;
 
   await reloadPets();
   // Without it, fetch() returns every server instead of one and the post fails with a cryptic error.
   if (!process.env.CLAN_ID) throw new Error('CLAN_ID is not set, so the server to post in is unknown.');
   const guild = await client.guilds.fetch(process.env.CLAN_ID);
+  if (usingDb()) {
+    await postFromDatabase(guild, channelId, client.user.id);
+    return true;
+  }
   // Locked because the display-name refresh writes rows too.
   await withFileLock(PET_LOCK_KEY, async () => {
     const entries = await loadFreshEntries();
@@ -342,9 +383,13 @@ async function handleNewPet(interaction) {
   const pet = { key, name, emojiId };
 
   try {
-    await appendRow(process.env.PET_HIGHSCORES_SHEET_ID, PET_CATALOG_APPEND_RANGE, [key, name, emojiId]);
+    if (usingDb()) {
+      await highScoresDb.addPetToCatalog(pet);
+    } else {
+      await appendRow(process.env.PET_HIGHSCORES_SHEET_ID, PET_CATALOG_APPEND_RANGE, [key, name, emojiId]);
+    }
   } catch (err) {
-    console.error('[PetHighscore] Failed to append to the Pets sheet tab:', err);
+    console.error(`[PetHighscore] Failed to add the pet to ${usingDb() ? 'the database' : 'the Pets sheet tab'}:`, err);
     return interaction.editReply(`Error saving the new pet: ${err.message}`);
   }
 
@@ -359,7 +404,8 @@ async function handleNewPet(interaction) {
 }
 
 module.exports = {
-  requiredEnv: ['PET_HIGHSCORES_SHEET_ID', 'PET_HIGHSCORES_CHANNEL_ID', 'GOOGLE_SERVICE_ACCOUNT_JSON'],
+  requiredEnv: ['PET_HIGHSCORES_CHANNEL_ID'],
+  requiredEnvWithoutDatabase: ['PET_HIGHSCORES_SHEET_ID', 'GOOGLE_SERVICE_ACCOUNT_JSON'],
   refreshLeaderboard,
 
   data: new SlashCommandBuilder()
@@ -508,7 +554,28 @@ module.exports = {
       if (!member) console.warn(`[PetHighscore] Could not fetch member ${targetUser.id} (${targetUser.tag}) — falling back to username`);
       const displayName = member?.displayName || targetUser.username;
 
-      const { toApply, skipped, newKeys, appliedNames, noOp } = await withFileLock(PET_LOCK_KEY, async () => {
+      // Changes the pets in one transaction, then reposts the leaderboard unless nothing changed.
+      const changeInDatabase = async () => {
+        const result = await highScoresDb.changeMemberPets({
+          discordId: targetUser.id,
+          displayName,
+          joinedAt: member?.joinedAt ?? null,
+          petKeys: pets.map(p => p.key),
+          action: subcommand,
+          byDiscordId: interaction.user.id,
+        });
+        const toApply = pets.filter(p => result.applied.includes(p.key));
+        const skipped = pets.filter(p => result.skipped.includes(p.key));
+        if (toApply.length === 0) return { toApply, skipped, newKeys: result.petKeys, appliedNames: '', noOp: true };
+        try {
+          await postFromDatabase(guild, channelId, interaction.client.user.id);
+        } catch (err) {
+          console.error('[PetHighscore] Failed to update leaderboard post after a pet edit:', err.message);
+        }
+        return { toApply, skipped, newKeys: result.petKeys, appliedNames: toApply.map(p => p.name).join(', '), noOp: false };
+      };
+
+      const { toApply, skipped, newKeys, appliedNames, noOp } = usingDb() ? await changeInDatabase() : await withFileLock(PET_LOCK_KEY, async () => {
         const entries = await loadFreshEntries();
         const existingIndex = entries.findIndex(e => e.discordId === targetUser.id);
         const existing = existingIndex === -1 ? null : entries[existingIndex];
