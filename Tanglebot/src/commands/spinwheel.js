@@ -289,6 +289,7 @@ module.exports = {
   async execute(interaction) {
     if (!interaction.member.roles.cache.has(COORDINATOR_ROLE_ID)) {
       console.log(`[Spinwheel] ${interaction.user.tag} was denied /spinwheel (missing Coordinator role)`);
+      interaction.commandDenied = true; // for the command log
       return interaction.reply({ content: 'You need the Coordinator role to use this command.', flags: MessageFlags.Ephemeral });
     }
 

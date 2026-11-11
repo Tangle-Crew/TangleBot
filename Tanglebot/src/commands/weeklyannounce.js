@@ -566,6 +566,7 @@ module.exports = {
     };
 
     if (!isTemplar(interaction.member)) {
+      interaction.commandDenied = true; // for the command log
       return reject('You need the Templar role to use this command.');
     }
 

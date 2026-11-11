@@ -23,7 +23,7 @@ const { refreshLeaderboard: refreshPetLeaderboard } = require('../commands/pethi
 const { refreshLeaderboard: refreshDonationLeaderboard } = require('../commands/donationhighscore');
 const { handleStaleMembersButton, handleStaleMembersSelect, start: startStaleMembers } = require('../commands/stalemembers');
 const { handleSuggestButton, handleSuggestModalSubmit } = require('../utils/lfgSuggestion');
-const { logCommand } = require('../utils/commandLog');
+const { logCommand, startCommandLogPrune } = require('../utils/commandLog');
 const { databaseConfigured } = require('../utils/commandAvailability');
 const migrationTools = require('../utils/migrationTools');
 const { registerMemberHistory, syncMemberRoster } = require('../utils/memberHistory');
@@ -70,6 +70,7 @@ async function dispatchByCustomIdPrefix(interaction, routes) {
 
 function loadEvents(client) {
   let stopCompEndingReminder = null;
+  let stopCommandLogPrune = null;
   const submissionConfig = loadSubmissionConfig();
   client.submissionConfig = submissionConfig;
 
@@ -95,6 +96,7 @@ function loadEvents(client) {
       console.error('[LFG] Failed to restore groups:', err);
     }
     stopCompEndingReminder = startCompEndingReminder(client);
+    stopCommandLogPrune = startCommandLogPrune();
     // Before the slower startup steps, so a post due while the bot was down goes out promptly.
     if (client.commands.has('weeklyannounce')) {
       try {
@@ -231,6 +233,10 @@ function loadEvents(client) {
   });
 
   client.once(Events.ClientDestroy, () => {
+    if (stopCommandLogPrune) {
+      stopCommandLogPrune();
+      stopCommandLogPrune = null;
+    }
     if (stopCompEndingReminder) {
       stopCompEndingReminder();
       stopCompEndingReminder = null;
@@ -263,8 +269,9 @@ async function runCommand(interaction, command) {
     console.error(`[Interactions] /${interaction.commandName} failed for ${interaction.user.tag}:`, err);
     await replyOrFollowUp(interaction, 'Something went wrong running that command.');
   }
-  // Commands that catch their own errors set interaction.commandError so they are still logged as failed.
-  await logCommand(interaction, { startedAt, error: error ?? interaction.commandError ?? null });
+  // Commands that catch their own errors set interaction.commandError so they are still logged as failed,
+  // and commands that refuse someone for lacking a role set interaction.commandDenied.
+  await logCommand(interaction, { startedAt, error: error ?? interaction.commandError ?? null, denied: Boolean(interaction.commandDenied) });
 }
 
 async function replyOrFollowUp(interaction, content) {

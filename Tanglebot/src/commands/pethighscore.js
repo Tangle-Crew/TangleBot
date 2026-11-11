@@ -347,6 +347,7 @@ async function syncMasterRole(guild, discordId, count) {
 async function handleNewPet(interaction) {
   if (OWNER_ROLE_ID && !interaction.member.roles.cache.has(OWNER_ROLE_ID)) {
     console.log(`[PetHighscore] ${interaction.user.tag} was denied /pethighscore new (missing Owner role)`);
+    interaction.commandDenied = true; // for the command log
     return interaction.reply({
       content: 'Only the Owner role can register new pets.',
       flags: MessageFlags.Ephemeral,
@@ -503,6 +504,7 @@ module.exports = {
 
     if (TEMPLAR_ROLE_ID && !interaction.member.roles.cache.has(TEMPLAR_ROLE_ID)) {
       console.log(`[PetHighscore] ${interaction.user.tag} was denied /pethighscore ${subcommand} (missing Templar role)`);
+      interaction.commandDenied = true; // for the command log
       return interaction.reply({
         content: 'You need the Templar role to use this command.',
         flags: MessageFlags.Ephemeral,
