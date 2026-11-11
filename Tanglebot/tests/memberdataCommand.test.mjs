@@ -73,6 +73,7 @@ test('status shows the accounts, the history counts and the automatic sync setti
   assert.match(replies[0], /1,265 rank changes, newest none/);
   assert.match(replies[0], /every 60 minutes, once the first sync has been run/);
   assert.match(replies[0], /Competitions: 24 saved, 288 results, newest ended 2026-11-07/);
+  assert.match(replies[0], /Last automatic run: none since the bot started/);
 });
 
 test('preview reads without saving and reports what a sync would change', async () => {
@@ -170,4 +171,13 @@ test('competitions previews unless confirmed, then saves a batch and says how ma
 
   competitionSync.syncCompetitions = async () => ({ competitions: 3, results: 20, remaining: 0 });
   assert.match((await run('competitions', { confirm: true })).replies.at(-1), /Every finished competition is saved/);
+});
+
+test('status shows how the last automatic run went', async () => {
+  competitionSync.competitionStatus = async () => ({ competitions: 0, results: 0, newest: null });
+  memberSync.memberDataStatus = async () => ({ accounts: { total: 1, active: 1, left: 0, linked: 0, syncedAt: null }, events: [] });
+  memberSync.lastAutomaticRun = () => ({ at: new Date('2026-11-10T20:00:00Z'), ok: true, summary: '0 new and 0 changed accounts, 1 new events' });
+  assert.match((await run('status')).replies[0], /Last automatic run: 2026-11-10 20:00 UTC, worked \(0 new and 0 changed accounts, 1 new events\)/);
+  memberSync.lastAutomaticRun = () => ({ at: new Date('2026-11-10T21:00:00Z'), ok: false, error: 'WOM is down' });
+  assert.match((await run('status')).replies[0], /Last automatic run: 2026-11-10 21:00 UTC, FAILED: WOM is down/);
 });

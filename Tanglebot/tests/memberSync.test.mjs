@@ -239,3 +239,97 @@ test('the timer does nothing without the database, a group, or with the interval
     Object.assign(process.env, saved);
   }
 });
+
+
+// ── The automatic sync and its alerts ────────────────────────────────────────
+
+const HOUR = 60 * 60 * 1000;
+function fakeRun(over = {}) {
+  const sent = [];
+  let clock = 1_000_000_000_000;
+  const state = {
+    sent,
+    advance: ms => { clock += ms; },
+    run: (deps = {}) => sync.automaticRun({
+      client: { tag: 'client' }, groupId: 9, intervalMinutes: 60,
+      deps: {
+        isEmpty: async () => false,
+        syncMembers: async () => ({ counts: { accountsNew: 1, accountsChanged: 2, events: { joined: 3, left: 0 } }, truncated: false }),
+        competitionStatus: async () => ({ competitions: 0 }),
+        syncCompetitions: async () => ({ competitions: 0 }),
+        notify: async (client, title, description, fields, color) => { sent.push({ client, title, description, color }); },
+        now: () => clock,
+        ...over, ...deps,
+      },
+    }),
+  };
+  return state;
+}
+
+test('a working automatic sync records its summary and sends no alert', async () => {
+  sync.resetAutomaticState();
+  const t = fakeRun({ competitionStatus: async () => ({ competitions: 5 }), syncCompetitions: async () => ({ competitions: 2 }) });
+  await t.run();
+  assert.deepEqual(t.sent, []);
+  const last = sync.lastAutomaticRun();
+  assert.equal(last.ok, true);
+  assert.match(last.summary, /1 new and 2 changed accounts, 3 new events, 2 competition\(s\)/);
+});
+
+test('a failure alerts the admin log once, repeats only after six hours, and a recovery is announced', async () => {
+  sync.resetAutomaticState();
+  const t = fakeRun({ syncMembers: async () => { throw new Error('WOM is down'); } });
+  await t.run();
+  assert.equal(t.sent.length, 1);
+  assert.equal(t.sent[0].title, '⚠️ Member sync failed');
+  assert.match(t.sent[0].description, /WOM is down/);
+  assert.match(t.sent[0].description, /every 60 minutes/);
+  assert.deepEqual(t.sent[0].client, { tag: 'client' });
+  assert.equal(sync.lastAutomaticRun().ok, false);
+  assert.equal(sync.lastAutomaticRun().error, 'WOM is down');
+
+  t.advance(HOUR);
+  await t.run();
+  t.advance(HOUR);
+  await t.run();
+  assert.equal(t.sent.length, 1, 'still failing, but no new alert within six hours');
+
+  t.advance(5 * HOUR);
+  await t.run();
+  assert.equal(t.sent.length, 2, 'repeated after six hours');
+
+  await t.run({ syncMembers: async () => ({ counts: { accountsNew: 0, accountsChanged: 0, events: {} }, truncated: false }) });
+  assert.equal(t.sent.length, 3);
+  assert.equal(t.sent[2].title, '✅ Member sync recovered');
+  assert.match(t.sent[2].description, /failing since <t:\d+:R>/);
+  assert.equal(sync.lastAutomaticRun().ok, true);
+
+  await t.run({ syncMembers: async () => ({ counts: { accountsNew: 0, accountsChanged: 0, events: {} }, truncated: false }) });
+  assert.equal(t.sent.length, 3, 'no second recovery message');
+});
+
+test('a competition failure is reported as such, and a manual sync in progress is not a failure', async () => {
+  sync.resetAutomaticState();
+  const t = fakeRun({
+    competitionStatus: async () => ({ competitions: 3 }),
+    syncCompetitions: async () => { throw new Error('WOM rate limited'); },
+  });
+  await t.run();
+  assert.match(t.sent[0].description, /Saving finished competitions: WOM rate limited/);
+
+  sync.resetAutomaticState();
+  const busy = fakeRun({ syncMembers: async () => { throw Object.assign(new Error('A member data sync is already running'), { code: 'SYNC_RUNNING' }); } });
+  await busy.run();
+  assert.deepEqual(busy.sent, []);
+  assert.equal(sync.lastAutomaticRun(), null);
+});
+
+test('before the first manual sync the automatic one waits, quietly', async () => {
+  sync.resetAutomaticState();
+  let called = false;
+  const t = fakeRun({ isEmpty: async () => true, syncMembers: async () => { called = true; } });
+  await t.run();
+  assert.equal(called, false);
+  assert.deepEqual(t.sent, []);
+  assert.equal(sync.lastAutomaticRun(), null);
+});

@@ -119,6 +119,7 @@ Milestones (donation tiers, Pet Master) are event kinds, not a table.
 
 - **Two entities, not one table:** a person (Discord) and an account (OSRS) are different things. WOM tracks accounts and the clan has alts, so one row per person cannot hold ranks per account, and one row per account cannot be the target of donations and pets. Keeping `members` as the person table also meant the six tables pointing at it did not change.
 - **History as events:** a new kind of history is a new event kind, with no schema change. A unique key on events keeps a re-sync from duplicating them.
+- **Sync failures are alerted, not just logged:** an automatic sync that fails posts to the admin log once, repeats at most every 6 hours, and says when it recovers, so a stopped sync is noticed rather than found weeks later.
 - **Manual first:** data moves (the sheets, the WOM sync) are Owner commands with a preview and a verify step, run by hand the first time. Nothing imports on startup, and the timer does nothing until the first manual WOM sync has happened.
 - **`command_log` has no foreign key:** staff attempts by people not in `members` should still be logged.
 - **Donation total cap:** 10 trillion GP per member, as a typo guard and to stay inside safe Number range.

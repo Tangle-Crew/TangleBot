@@ -27,6 +27,13 @@ function countLines(result) {
   return lines;
 }
 
+// The status line for the automatic sync's last run.
+function lastRunLine(last) {
+  if (!last) return 'Last automatic run: none since the bot started';
+  const when = `${last.at.toISOString().replace('T', ' ').slice(0, 16)} UTC`;
+  return last.ok ? `Last automatic run: ${when}, worked (${last.summary})` : `Last automatic run: ${when}, FAILED: ${last.error}`;
+}
+
 const SUBCOMMANDS = {
   async status() {
     const { accounts, events } = await memberSync.memberDataStatus();
@@ -39,6 +46,7 @@ const SUBCOMMANDS = {
         : ['  No events yet.']),
       `Competitions: ${fmt(competitions.competitions)} saved, ${fmt(competitions.results)} results${competitions.newest ? `, newest ended ${competitions.newest.toISOString().slice(0, 10)}` : ''}`,
       `Automatic sync: ${memberSync.syncIntervalMinutes() === 0 ? 'off' : `every ${memberSync.syncIntervalMinutes()} minutes, once the first sync has been run`}`,
+      lastRunLine(memberSync.lastAutomaticRun()),
     ];
   },
 

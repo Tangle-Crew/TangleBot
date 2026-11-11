@@ -2,6 +2,7 @@ const database = require('./database');
 const wiseOldMan = require('./wiseOldMan');
 const { databaseConfigured } = require('./commandAvailability');
 const competitionSync = require('./competitionSync');
+const { notifyAdminLog } = require('./roleMenu');
 const { intEnv } = require('./db');
 
 // Copies the clan's Wise Old Man (WOM) group into the accounts and member_events tables: who is in
@@ -206,7 +207,7 @@ let syncRunning = false;
 // first run (no accounts yet) reads the whole history; later runs read back from the newest saved
 // event. Returns { counts, backfill, truncated }.
 async function syncMembers({ apply, groupId, source = womSource(), db = database.getPool(), gapMs, wait } = {}) {
-  if (syncRunning) throw new Error('A member data sync is already running');
+  if (syncRunning) throw Object.assign(new Error('A member data sync is already running'), { code: 'SYNC_RUNNING' });
   syncRunning = true;
   try {
     const backfill = await accountsEmpty(db);
@@ -291,33 +292,95 @@ function syncIntervalMinutes() {
   return minutes < 0 ? 60 : minutes;
 }
 
+// A failing automatic sync alerts the admin log once, repeats at most this often while it keeps
+// failing, and says when it works again.
+const ALERT_REPEAT_MS = 6 * 60 * 60 * 1000;
+const RECOVERED_COLOR = 0x2e7d32;
+
+// What the automatic sync has done: when it started failing, when it last alerted, its last result.
+const automatic = { failingSince: null, lastAlertAt: 0, last: null, announcedWaiting: false };
+
+// The last automatic run as { at, ok, summary or error }, or null if none has run.
+function lastAutomaticRun() {
+  return automatic.last ? { ...automatic.last } : null;
+}
+
+// Forgets the automatic sync's history (for tests).
+function resetAutomaticState() {
+  Object.assign(automatic, { failingSince: null, lastAlertAt: 0, last: null, announcedWaiting: false });
+}
+
+const stamp = date => `<t:${Math.floor(new Date(date).getTime() / 1000)}:R>`;
+
+// One automatic run: syncs the members, then the finished competitions. A failure alerts the admin
+// log (not while a manual sync is running, which is not a failure). deps replace the real work.
+async function automaticRun({ client = null, groupId, intervalMinutes, deps = {} } = {}) {
+  const d = {
+    isEmpty: () => accountsEmpty(database.getPool()),
+    syncMembers,
+    syncCompetitions: competitionSync.syncCompetitions,
+    competitionStatus: competitionSync.competitionStatus,
+    notify: notifyAdminLog,
+    now: () => Date.now(),
+    ...deps,
+  };
+  const now = d.now();
+  try {
+    if (await d.isEmpty()) {
+      if (!automatic.announcedWaiting) console.log('[MemberSync] Waiting for the first /memberdata sync before syncing automatically');
+      automatic.announcedWaiting = true;
+      return;
+    }
+    const { counts, truncated } = await d.syncMembers({ apply: true, groupId });
+    const events = Object.values(counts.events).reduce((a, b) => a + b, 0);
+    let summary = `${counts.accountsNew} new and ${counts.accountsChanged} changed accounts, ${events} new events${truncated ? ' (stopped at the page limit)' : ''}`;
+    console.log(`[MemberSync] Synced: ${summary}`);
+    // Newly finished competitions too, but only after the first full read has been done by hand.
+    if ((await d.competitionStatus()).competitions > 0) {
+      try {
+        const saved = await d.syncCompetitions({ groupId, limit: 5 });
+        if (saved.competitions) {
+          console.log(`[MemberSync] Saved ${saved.competitions} finished competition(s)`);
+          summary += `, ${saved.competitions} competition(s)`;
+        }
+      } catch (err) {
+        err.message = `Saving finished competitions: ${err.message}`;
+        throw err;
+      }
+    }
+    automatic.last = { at: new Date(now), ok: true, summary };
+    if (automatic.failingSince) {
+      const since = automatic.failingSince;
+      automatic.failingSince = null;
+      await d.notify(client, '✅ Member sync recovered', `The automatic Wise Old Man sync is working again. It had been failing since ${stamp(since)}.`, [], RECOVERED_COLOR);
+    }
+  } catch (err) {
+    if (err.code === 'SYNC_RUNNING') return;
+    console.error('[MemberSync] Automatic sync failed:', err.message);
+    automatic.last = { at: new Date(now), ok: false, error: err.message };
+    const first = !automatic.failingSince;
+    if (first) automatic.failingSince = new Date(now);
+    if (first || now - automatic.lastAlertAt >= ALERT_REPEAT_MS) {
+      automatic.lastAlertAt = now;
+      await d.notify(
+        client,
+        '⚠️ Member sync failed',
+        `The automatic Wise Old Man sync failed: ${String(err.message).slice(0, 500)}\n` +
+          `Failing since ${stamp(automatic.failingSince)}. It tries again every ${intervalMinutes} minutes; this alert repeats at most every 6 hours. ` +
+          'Run `/memberdata status` to see when it last worked.'
+      );
+    }
+  }
+}
+
 // Syncs on a timer. Does nothing until the first sync has been run by hand with /memberdata, so
 // the first full read is always checked by a person. Returns a function that stops it.
-function startMemberSync() {
+function startMemberSync(client = null) {
   const groupId = Number(process.env.WOM_GROUP_ID);
   const minutes = syncIntervalMinutes();
   if (!databaseConfigured() || !groupId || minutes === 0) return () => {};
 
-  let announced = false;
-  const run = async () => {
-    try {
-      if (await accountsEmpty(database.getPool())) {
-        if (!announced) console.log('[MemberSync] Waiting for the first /memberdata sync before syncing automatically');
-        announced = true;
-        return;
-      }
-      const { counts, truncated } = await syncMembers({ apply: true, groupId });
-      const events = Object.values(counts.events).reduce((a, b) => a + b, 0);
-      console.log(`[MemberSync] Synced: ${counts.accountsNew} new and ${counts.accountsChanged} changed accounts, ${events} new events${truncated ? ' (stopped at the page limit)' : ''}`);
-      // Newly finished competitions too, but only after the first full read has been done by hand.
-      if ((await competitionSync.competitionStatus()).competitions > 0) {
-        const saved = await competitionSync.syncCompetitions({ groupId, limit: 5 });
-        if (saved.competitions) console.log(`[MemberSync] Saved ${saved.competitions} finished competition(s)`);
-      }
-    } catch (err) {
-      console.error('[MemberSync] Automatic sync failed:', err.message);
-    }
-  };
+  const run = () => automaticRun({ client, groupId, intervalMinutes: minutes });
   const first = setTimeout(run, 60_000);
   first.unref();
   const timer = setInterval(run, minutes * 60_000);
@@ -330,5 +393,6 @@ function startMemberSync() {
 
 module.exports = {
   syncMembers, verifyMembers, memberDataStatus, startMemberSync, syncIntervalMinutes,
+  automaticRun, lastAutomaticRun, resetAutomaticState,
   readWom, buildPlan, applyPlan,
 };

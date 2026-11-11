@@ -76,7 +76,7 @@ async function previewCompetitions({ groupId, source = womSource(), db = databas
 // Reads up to `limit` unsaved finished competitions (newest first) and saves them, each in its own
 // transaction. Returns { competitions, results, remaining }.
 async function syncCompetitions({ groupId, source = womSource(), db = database.getPool(), limit = DEFAULT_LIMIT, gapMs = CALL_GAP_MS, wait = sleep } = {}) {
-  if (running) throw new Error('A competition sync is already running');
+  if (running) throw Object.assign(new Error('A competition sync is already running'), { code: 'SYNC_RUNNING' });
   running = true;
   try {
     const pending = await pendingCompetitions({ groupId, source, db });
