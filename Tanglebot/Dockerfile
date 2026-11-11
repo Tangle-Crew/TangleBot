@@ -17,6 +17,5 @@ RUN npm ci --omit=dev
 
 COPY src/ ./src/
 COPY migrations/ ./migrations/
-COPY scripts/ ./scripts/
 
 CMD ["node", "src/index.js"]

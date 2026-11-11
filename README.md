@@ -195,18 +195,18 @@ Loads with `DATABASE_URL`, or with `GOOGLE_SERVICE_ACCOUNT_JSON` when there is n
 
 ### 🚚 `/migration` — Move the Sheets into the Database
 
-Owner-only tools for the one-off move from the Google Sheets to PostgreSQL, with checks along the way. Replies are private. Only loads while `DATABASE_URL`, the Google variables, both sheet IDs and `OWNER_ROLE_ID` are set; see [Moving from the sheets](#database).
+Owner-only (`OWNER_ROLE_ID`) tools for the one-off move from the Google Sheets to PostgreSQL. This is the only way the data is moved: nothing is imported at startup or on a schedule. Replies are private. The command only loads while `DATABASE_URL`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `DONATIONS_SHEET_ID`, `PET_HIGHSCORES_SHEET_ID` and `OWNER_ROLE_ID` are all set. The steps in order are under [Moving from the sheets](#database).
 
-| Subcommand | Description |
-|------------|-------------|
-| `dbconnection` | Tests the connection to the database; shows the server, how long it took and which migrations are applied or pending |
-| `sheets` | Tests reading the three sheet tabs; shows what they hold and any pet keys missing from the catalog |
-| `status` | Shows what the database holds now (members, GP, pets, last import) |
-| `dryrun` | Runs the import and the check, then undoes it |
-| `import` | Imports the sheets (`confirm` must be True), checks the result, and reposts both leaderboards |
-| `verify` | Compares the sheets with the database member by member; writes nothing |
+| Subcommand | What it does | Writes? |
+|------------|--------------|---------|
+| `dbconnection` | Connects to the database and shows the PostgreSQL version, the database and user, how long the round trip took, and which migrations are applied or still pending. | Nothing |
+| `sheets` | Reads the `Donations`, `Highscores` and `Pets` tabs and shows how many members and how much GP are on the donations tab, how many members and pets owned are on the highscores tab, the catalog size, and any pet keys missing from the catalog (the import skips those). | Nothing |
+| `status` | Shows what the database holds now: donors and GP, members with pets and pets owned, catalog size, members stored, when the last import ran, and how many donation changes commands or hand edits have made since. | Nothing |
+| `dryrun` | Runs the whole import and the check inside a transaction, shows the same report as `import`, then undoes everything. | Nothing (rolled back) |
+| `import` | Copies the sheets into the database in one transaction (a failure writes nothing): the pet catalog in sheet order, every member, each donation total with one `import` row in `donation_log`, and each member's pets. It then checks the result against the sheets member by member and reposts both leaderboards. `confirm` must be True, or nothing happens. | Database only |
+| `verify` | Compares the sheets with the database member by member (donation totals, pet lists, and the catalog's names, emoji IDs and order) and lists every difference. Members changed by a command since the import, pets added since, and skipped pet keys are shown as notes, not differences. | Nothing |
 
-The import is safe to run again and never writes to the sheets. Only one import runs at a time, and a failure writes nothing.
+The sheets are only ever read. Only one import runs at a time. Running `import` again is safe: totals and the catalog are updated, a new `donation_log` row is added only if a total changed, and a member whose donations or pets were changed by a command since the first import is left alone, with a warning.
 
 ---
 
@@ -769,20 +769,18 @@ select joined_at, left_at from member_stays where discord_id = '<id>' order by j
 <details>
 <summary><strong>Moving from the sheets</strong></summary>
 
-The import is run from Discord with [`/migration`](#-migration--move-the-sheets-into-the-database), by the Owner. It never runs on its own at startup. (The schema migrations above still apply on startup; `/migration` moves the data.)
+**Nothing is imported automatically.** On startup the bot only creates the database tables (the migrations above). Copying the sheets' data into them happens only when the Owner runs `/migration` in Discord, and there is no other way to run it. Each command is described in [`/migration`](#-migration--move-the-sheets-into-the-database).
 
-1. Keep the Google variables and add `DATABASE_URL` to `Tanglebot/.env`, then restart: `docker compose up -d --build`. The schema is created. While the database is still empty and the sheets are still set up, the bot does not repost the leaderboards on startup, so the live boards are not replaced by empty ones. `/donationhighscore` and `/pethighscore` already write to the database, so ask staff to hold off using them until the import is done.
-2. `/migration dbconnection` checks the bot can reach the database and shows its applied migrations.
-3. `/migration sheets` checks the bot can read the sheets and shows what they hold, including any pet keys the import would skip.
-4. `/migration dryrun` runs the whole import and check, then undoes it. Compare its numbers (members, total GP, total pets owned, catalog size) with the sheets.
-5. `/migration import confirm:True` runs the import, checks it against the sheets member by member, and reposts both leaderboards from the database.
-6. `/migration verify` repeats the member-by-member check whenever you like. It lists each difference, for example `Snow (123...): sheet has 150,000,000 GP donated, database has 140,000,000.` Members changed by a command since the import, pets added since, and pet keys the import skipped are shown as notes, not differences. `/migration status` shows what the database holds.
+1. Keep the Google variables and add `DATABASE_URL` to `Tanglebot/.env`, then restart: `docker compose up -d --build`. This creates the empty tables. While the database is empty and the sheets are still set up, the bot does not repost the leaderboards on startup, so the live boards are not replaced by empty ones. `/donationhighscore` and `/pethighscore` already write to the database, so ask staff to hold off using them until the import is done.
+2. `/migration dbconnection`: check the bot can reach the database.
+3. `/migration sheets`: check the bot can read the sheets, and see what they hold and any pet keys the import would skip.
+4. `/migration dryrun`: rehearse the whole import and check, then undo it. Compare its numbers (members, total GP, total pets owned, catalog size) with the sheets.
+5. `/migration import confirm:True`: the real import. It checks the result against the sheets and reposts both leaderboards.
+6. `/migration verify`: repeat the member-by-member check whenever you like. `/migration status` shows what the database holds.
 
 `/migration` only exists while `DATABASE_URL`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `DONATIONS_SHEET_ID`, `PET_HIGHSCORES_SHEET_ID` and `OWNER_ROLE_ID` are all set. When the month of fallback is over, remove the Google variables to retire it.
 
-The same steps are available from a terminal with `docker compose run --rm tanglebot node scripts/import-sheets.js [--dry-run | --verify]` (needs the same variables).
-
-The import is safe to run again: it updates totals and the catalog, adds an `import` row to `donation_log` only when a member's total changed, and keeps the names already in the database. A member whose total was changed by a command since the first import is left alone, with a warning.
+The import is safe to run again: it updates totals and the catalog, adds an `import` row to `donation_log` only when a member's total changed, and keeps the names already in the database. A member whose donations or pets were changed by a command since the first import is left alone, with a warning.
 
 **Keep the sheets for a month** as a read-only fallback: stop editing them, but don't delete them.
 

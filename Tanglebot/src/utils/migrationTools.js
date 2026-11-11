@@ -1,5 +1,5 @@
 // Moving the donation and pet Google Sheets into PostgreSQL: import, verify and connection checks.
-// Used by /migration and scripts/import-sheets.js. The sheets are only ever read.
+// Used only by /migration, so nothing runs unless the Owner runs it in Discord. The sheets are only ever read.
 const fs = require('fs');
 const database = require('./database');
 const { MAX_TOTAL_GP } = require('./highScoresDb');
