@@ -409,6 +409,7 @@ module.exports = {
   requiredEnv: ['PET_HIGHSCORES_CHANNEL_ID'],
   requiredEnvWithoutDatabase: ['PET_HIGHSCORES_SHEET_ID', 'GOOGLE_SERVICE_ACCOUNT_JSON'],
   refreshLeaderboard,
+  PET_MASTER_THRESHOLD,
 
   data: new SlashCommandBuilder()
     .setName('pethighscore')

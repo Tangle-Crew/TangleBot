@@ -290,6 +290,7 @@ module.exports = {
   requiredEnv: ['DONATIONS_CHANNEL_ID'],
   requiredEnvWithoutDatabase: ['DONATIONS_SHEET_ID', 'GOOGLE_SERVICE_ACCOUNT_JSON'],
   refreshLeaderboard,
+  DONATION_TIERS,
 
   data: new SlashCommandBuilder()
     .setName('donationhighscore')

@@ -238,6 +238,21 @@ WOM is only read, one call every 3.5 seconds (0.7 with `WOM_API_KEY`) to stay in
 
 ---
 
+### 🪪 `/profile` — Member and Account Profile
+
+Shows what the database stores about a clan member or an OSRS account, in one private embed. For Coordinator, Templar and Owner. Only loads with `DATABASE_URL`. Give either a `member` or an `rsn`, not both.
+
+| Option | What it shows |
+|---|---|
+| `member` | **Discord:** whether they are in the server, when they first joined, and their previous display names. **Clan accounts:** the OSRS accounts linked to them (none yet, see below). **Donations:** their total, tier, how far the next tier is, and when it last changed. **Pets:** how many, whether they are a Pet Master, and which. |
+| `rsn` | **Clan:** rank, whether they are in the clan or left, first join, when WOM added them and when the RuneLite plugin reported the join, and the leave date. **History:** joins and leaves, rank changes, name changes. **Discord:** the linked member, if any. |
+
+Account names are read the way Wise Old Man stores them: any case, with `_` or `-` as spaces. The `rsn` option autocompletes as you type from the saved accounts: names containing what you typed (names starting with it first), each with its rank or "left" beside it, current members before former ones. Click into the field to see current members straight away. Typing part of a name works if only one account matches; otherwise it lists the matches.
+
+Accounts are not linked to Discord members yet, so `/profile member` shows the Discord side, donations and pets, and says no clan accounts are linked. Use `rsn` for the clan side. Both read the data described in [Database](#database).
+
+---
+
 ### 🔔 `/lfg-roles` — Activity Ping Roles
 
 Opens a private menu for opting in to ping roles for bosses, raids and minigames, so members only get pinged for what they care about. Groups made with `/lfg-post` ping these roles.
@@ -719,7 +734,7 @@ Add these overrides once:
 
 - **Templar:** `/donationhighscore`, `/pethighscore`, `/refreshboards`, `/stalemembers`, `/weeklyannounce`, `/weeklycomp`, `/honeypot`, `/submission`
 - **Owner:** `/migration`, `/memberdata`
-- **Coordinator:** `/spinwheel`, `/commandlog`
+- **Coordinator:** `/spinwheel`, `/commandlog`, `/profile`
 
 Owner also holds Templar, so it needs no separate override for the Templar commands. A renamed or new staff command needs its override added once. Admins always see every command.
 
