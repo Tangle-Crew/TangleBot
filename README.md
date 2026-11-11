@@ -688,6 +688,8 @@ On startup each trap channel is cleared and a warning is posted. When anyone (ex
 
 Only Owners and Templars can use the buttons. After a click, the buttons are removed and the report records the action, who took it and when.
 
+With `DATABASE_URL` set, every incident is also saved in the `honeypot_incidents` table (see [Database](#database)): the automatic timeout, the ban and the false positive, with who was involved, who pressed the button, the channel, and whether it worked. Only what happened is saved, never the message. `/profile member` shows a person's incidents.
+
 `/honeypot testmode true` turns on test mode: the trap still reports and the buttons still work, but nobody is timed out, banned or has messages deleted. `/honeypot testmode false` turns it off, and `/honeypot status` shows the current mode.
 
 </details>
@@ -772,6 +774,7 @@ On startup, before any command loads, the bot applies every `Tanglebot/migration
 - `003_command_log.sql`: `command_log`.
 - `004_command_log_name_and_denied.sql`: the `discord_name` column on `command_log`, and the `denied` status.
 - `005_accounts_and_events.sql`: `accounts` (OSRS accounts from Wise Old Man) and `member_events` (clan history).
+- `009_honeypot_incidents.sql`: `honeypot_incidents` (the honeypot log).
 - `008_competitions.sql`: `competitions` and `competition_results` (finished WOM competitions and how each player did).
 - `007_milestone_source.sql`: allows the `bot` source on `member_events`, for milestones.
 - `006_discord_history_in_events.sql`: copies the Discord name and server history from `member_names` and `member_stays` into `member_events`, and adds the `member_overview` view. The two old tables are left in place; see [DATABASE.md](DATABASE.md) for dropping them once the copy is checked.
@@ -863,6 +866,29 @@ select rsn, wom_role, left_at from accounts where status = 'left' and left_at > 
 -- the latest name changes
 select a.rsn, e.old_value, e.new_value, e.occurred_at from member_events e join accounts a on a.id = e.account_id
   where e.kind = 'name_changed' order by e.occurred_at desc limit 20;
+```
+
+</details>
+
+<details>
+<summary><strong>Honeypot incidents</strong></summary>
+
+Each time the [honeypot](#honeypot-channel-trap) trips, and each time staff press its buttons, one row is saved in `honeypot_incidents`:
+
+- **`action`:** `timeout` (the automatic one-week timeout when someone posts in the trap), `ban` or `false_positive` (the admin buttons).
+- **`outcome`:** `done`, `failed` (the reason is in `details.error`), `skipped` (the poster was not a known server member, so nobody was timed out) or `test` (test mode, nothing happened; `test_mode` is true).
+- Who: the person (`discord_id`, `discord_name`), and for button presses who pressed it (`by_discord_id`, `by_discord_name`). There are no foreign keys, so a banned or departed person is still recorded.
+- `details`: for the automatic timeout, how many images were attached and whether the trap message was deleted; for a failed ban, how many messages the fallback scan deleted. **The message text and images are never saved.**
+
+Without `DATABASE_URL` nothing is saved (the admin log post is unchanged). `/profile member` shows a person's real (non-test) incidents.
+
+```sql
+-- the latest incidents
+select created_at, discord_id, coalesce(discord_name, m.display_name) as name, action, outcome, by_discord_name
+  from honeypot_incidents h left join members m on m.discord_id = h.discord_id
+  where not test_mode order by h.id desc limit 20;
+-- repeat offenders
+select discord_id, count(*) from honeypot_incidents where action = 'timeout' and not test_mode group by discord_id having count(*) > 1;
 ```
 
 </details>

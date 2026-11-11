@@ -177,6 +177,7 @@ test('getMemberProfile turns the rows into numbers and dates, and is null for an
     }
     if (/from member_pets/.test(sql)) return { rows: [{ name: 'Heron' }, { name: 'Rocky' }] };
     if (/max\(created_at\)/.test(sql)) return { rows: [{ at: d('2026-11-01T00:00:00Z') }] };
+    if (/count\(\*\) as n from honeypot_incidents/.test(sql)) return { rows: [{ n: '2' }] };
     return { rows: [] };
   });
   const data = await profile.getMemberProfile('111', db.pool);
@@ -184,6 +185,7 @@ test('getMemberProfile turns the rows into numbers and dates, and is null for an
   assert.strictEqual(data.overview.pets, 2);
   assert.deepEqual(data.petNames, ['Heron', 'Rocky']);
   assert.deepEqual(data.lastDonation, d('2026-11-01T00:00:00Z'));
+  assert.strictEqual(data.honeypotCount, 2);
 
   assert.equal(await profile.getMemberProfile('x', mockPg(() => ({ rows: [] })).pool), null);
 });
