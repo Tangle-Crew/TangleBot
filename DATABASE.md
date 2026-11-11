@@ -21,6 +21,7 @@ How TangleBot stores its information in PostgreSQL, the rules for changing it, a
 | `src/utils/competitionSync.js` | Reads finished WOM competitions and saves them and their results |
 | `src/utils/honeypotLog.js` | Records honeypot incidents (never throws, does nothing without the database) |
 | `src/utils/state.js` | `readState`/`writeState`: the small `data/*.json` files, mirrored in `bot_state` |
+| `src/utils/history.js` | Reads `donation_log` and `pet_log` for `/history` and builds its embeds |
 | `src/utils/profile.js` | Reads one person or one account (read only) and builds the `/profile` embeds |
 | `src/utils/memberSync.js` | Reads the Wise Old Man group and saves `accounts` and clan events (used by `/memberdata` and a timer) |
 | `src/utils/migrationTools.js` | The sheets import and its checks (used only by `/migration`; retired with the sheets) |
@@ -111,6 +112,8 @@ Milestones (donation tiers, Pet Master) are event kinds, not a table.
 | D. Milestones | Donation tier and Pet Master as events, recorded as they happen and rebuilt from the logs by `/memberdata milestones` | Built |
 | E. Competition results | `competitions` and `competition_results`: every finished clan competition, read from WOM by `/memberdata competitions` and then the automatic sync | Built |
 | F. Honeypot incidents | `honeypot_incidents`: the automatic timeout and the admin buttons, metadata only | Built |
+| H. Sync alert | The automatic WOM sync posts to the admin log when it fails, and when it recovers | Built |
+| I. History | `/history donations` and `/history pets`, from `donation_log` and `pet_log` | Built |
 | G. State files | `bot_state`: the simple `data/*.json` files are mirrored in the database. `lfg-groups.json` and `weeklyannounce.json` are still files only | Built for the simple files; LFG groups and weekly announcements planned |
 | Link | Joining accounts to members. Not decided; `/link` does nothing today. `accounts.member_id` is reserved for it | Parked |
 | Retire the sheets | After the one-month fallback: remove the Sheets code paths and `/migration` | Planned |
