@@ -99,7 +99,7 @@ function loadEvents(client) {
     }
     stopCompEndingReminder = startCompEndingReminder(client);
     stopCommandLogPrune = startCommandLogPrune();
-    stopMemberSync = startMemberSync();
+    stopMemberSync = startMemberSync(client);
     // Before the slower startup steps, so a post due while the bot was down goes out promptly.
     if (client.commands.has('weeklyannounce')) {
       try {

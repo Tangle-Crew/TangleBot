@@ -854,7 +854,7 @@ The clan's Wise Old Man group is copied into two tables, so you can query who is
 2. `/memberdata sync confirm:True` saves them and checks the result against WOM.
 3. `/memberdata verify` repeats the check whenever you like.
 
-After the first sync, the bot syncs by itself every `MEMBER_SYNC_INTERVAL_MINUTES` (default 60; `0` turns it off). Before the first manual sync it does nothing, so the first full read is always checked by a person. Each automatic sync only reads the recent history. WOM's history only goes back to when the group started being tracked, so earlier joins are not known.
+After the first sync, the bot syncs by itself every `MEMBER_SYNC_INTERVAL_MINUTES` (default 60; `0` turns it off). If an automatic sync fails, the admin log channel (`ADMIN_LOG_CHANNEL_ID`) gets a ⚠️ message with the reason and when it started failing. While it keeps failing the alert repeats at most every 6 hours, and a ✅ message says when it works again. A sync that overlaps a manual one is skipped quietly, not reported. `/memberdata status` shows how the last automatic run went. Before the first manual sync it does nothing, so the first full read is always checked by a person. Each automatic sync only reads the recent history. WOM's history only goes back to when the group started being tracked, so earlier joins are not known.
 
 ```sql
 -- current members by rank
