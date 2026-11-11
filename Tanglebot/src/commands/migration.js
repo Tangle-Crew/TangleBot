@@ -1,10 +1,10 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const tools = require('../utils/migrationTools');
+const { codeBlock } = require('../utils/discordText');
 const petHighscore = require('./pethighscore');
 const donationHighscore = require('./donationhighscore');
 
 const OWNER_ROLE_ID = process.env.OWNER_ROLE_ID;
-const MAX_REPLY_CHARS = 1850;
 const MAX_WARNINGS = 15;
 
 // Only loaded while both the database and the sheets are configured, so retiring either one
@@ -14,13 +14,6 @@ const REQUIRED_ENV = [
 ];
 
 const fmt = n => n.toLocaleString('en-US');
-
-// A reply as a code block, cut to fit Discord's message limit.
-function codeBlock(lines) {
-  let text = lines.join('\n');
-  if (text.length > MAX_REPLY_CHARS) text = `${text.slice(0, MAX_REPLY_CHARS)}\n... (cut, see the bot log)`;
-  return `\`\`\`\n${text}\n\`\`\``;
-}
 
 function connectionLines(info) {
   return [

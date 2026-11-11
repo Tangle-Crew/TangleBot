@@ -17,13 +17,14 @@ How TangleBot stores its information in PostgreSQL, the rules for changing it, a
 | `src/utils/highScoresDb.js` | Donations, pets and member storage; the only place those tables are written |
 | `src/utils/memberHistory.js` | Records Discord joins, leaves and name changes; the startup roster sync |
 | `src/utils/commandLog.js` | Writes, reads and prunes the command log |
+| `src/utils/memberSync.js` | Reads the Wise Old Man group and saves `accounts` and clan events (used by `/memberdata` and a timer) |
 | `src/utils/migrationTools.js` | The sheets import and its checks (used only by `/migration`; retired with the sheets) |
 
 ## Core concepts
 
 - **Member:** a person on Discord, keyed by their Discord ID. Donations, pets and Discord names belong to a member.
-- **Account** (planned): an OSRS account, keyed by its Wise Old Man (WOM) player ID. A clan rank, a WOM join date and an RSN change belong to an account. A member can have several accounts (alts), and an account can exist before anyone has linked it to a member.
-- **Event** (planned): one row in an append-only history. New kinds of history are new event kinds, not new tables.
+- **Account:** an OSRS account, keyed by its Wise Old Man (WOM) player ID. A clan rank, a WOM join date and an RSN change belong to an account. A member can have several accounts (alts), and an account can exist before anyone has linked it to a member.
+- **Event:** one row in an append-only history. New kinds of history are new event kinds, not new tables.
 - **Source of truth:** Discord for members and their names, WOM for accounts and clan history, the bot's own commands for donations and pets. The Google Sheets are only the old source, kept read-only for a month after the move.
 
 ## Tables
@@ -41,17 +42,17 @@ How TangleBot stores its information in PostgreSQL, the rules for changing it, a
 | `member_names` | A display name a member has had | `discord_id`, `display_name`, `changed_at` | Whenever a name differs from the last one logged. Planned to move into events |
 | `member_stays` | A time a member was in the Discord server | `discord_id`, `joined_at`, `left_at` (empty while still in) | Join and leave events, the roster sync. At most one open stay per member. Planned to move into events |
 | `command_log` | A slash command run | `discord_id` (no foreign key), `discord_name`, `command`, `options` (jsonb), `status` (`ok`, `error`, `denied`), `error`, `duration_ms`, `channel_id`, `created_at` | Every command, from `runCommand` in `eventHandler.js`; pruned daily |
+| `accounts` | An OSRS account, from WOM | `wom_player_id` (unique), `username` (WOM's lower-case form), `rsn`, `member_id` (empty until accounts are linked to people), `is_main` (reserved), `wom_role`, `status` (`active`, `left`), `wom_joined_at`, `client_joined_at`, `first_joined_at`, `left_at`, `wom_data` (jsonb copy of WOM's last payload), `synced_at` | `memberSync.js` (`/memberdata`, hourly timer) |
+| `member_events` | One change in someone's history | `member_id` **or** `account_id` (exactly one), `kind`, `old_value`, `new_value`, `data` (jsonb), `source` (`wom`, `discord`, `import`), `occurred_at`, `recorded_at`. Today only account events from WOM: `joined`, `left`, `rank_changed`, `name_changed` | `memberSync.js`; append-only, a unique key stops duplicates |
 | `schema_migrations` | An applied migration file | `name` (PK), `applied_at` | The migration runner |
 
-How they connect: `donations`, `donation_log`, `member_pets`, `pet_log`, `member_names` and `member_stays` all point at `members.discord_id`. `member_pets` and `pet_log` also point at `pets.key`. `command_log` deliberately points at nothing: anyone who runs a command is logged, member or not.
+How they connect: `accounts.member_id` (empty for now) points at `members`, and `member_events` points at an account or a member. `donations`, `donation_log`, `member_pets`, `pet_log`, `member_names` and `member_stays` all point at `members.discord_id`. `member_pets` and `pet_log` also point at `pets.key`. `command_log` deliberately points at nothing: anyone who runs a command is logged, member or not.
 
 ### Planned
 
 | Table | Purpose | Notes |
 |---|---|---|
-| `accounts` | One OSRS account per row, filled from WOM | `wom_player_id` (unique), `rsn`, `member_id` (empty until accounts are linked to people), WOM rank, clan status, WOM join dates and left date, a `wom_data` jsonb copy of WOM's last payload |
-| `member_events` | Append-only history for people and accounts | Belongs to a member **or** an account, never both. Kinds such as `name_changed`, `rank_changed`, `joined`, `left`, `rejoined`, and milestones. Has `old_value`, `new_value`, a jsonb `data`, `source` (`wom`, `discord`, `import`), `occurred_at` and `recorded_at` |
-| `member_overview` (a view) | One place to read "all member data" | Joins the member, their main account, rank, donations and pet count |
+| `member_overview` (a view) | One place to read "all member data" | Joins the member, their main account, rank, donations, pet count and server join. Built with step B2, when the Discord history is in events |
 | `competition_results` | Weekly competition standings | Per account, saved when `/weeklyannounce` sends, and back-filled from WOM |
 | `honeypot_incidents` | Honeypot timeouts and bans | Metadata only, never message content. No foreign key, like `command_log` |
 | `bot_state` | Small key and JSON values, replacing the `data/*.json` files | Staged: simple files first, LFG and weekly announcements last |
@@ -67,6 +68,7 @@ Milestones (donation tiers, Pet Master) are event kinds, not a table.
 - **Logs are append-only** (`donation_log`, `pet_log`, `command_log`, events). Corrections are new rows. The one exception is the command log's age-based prune.
 - **Every history row records where it came from** (`source`, or `by_discord_id`).
 - **Constrained text** uses `text` plus a `check (... in (...))`, not Postgres enums, so adding a value is a small migration.
+- **Event `kind` is not constrained** (no `check`): a new kind of history is a new value. Account kinds today are `joined`, `left`, `rank_changed` and `name_changed`; a rejoin is a `joined` after a `left`. Person kinds (server joins and leaves, name changes, milestones) come later.
 - **jsonb** is for data you will not join or filter on (options, copies of WOM payloads). If you filter on it, make it a column.
 - **Primary keys:** `members` uses the Discord ID. New tables use `bigint generated always as identity`.
 - **Naming:** lowercase snake_case, plural table names, `<table>_<column>_idx` for indexes.
@@ -78,7 +80,7 @@ Milestones (donation tiers, Pet Master) are event kinds, not a table.
 
 - Files are `Tanglebot/migrations/NNN_name.sql`, three digits, in order. They run in name order, each in its own transaction, once, on startup. A failed migration stops the bot starting.
 - **Applied migrations are not changed.** The runner records the file name only and never compares contents, so an edit changes fresh installs but not the live database. If the live database needs a change, it is a new numbered file.
-- **One planned exception:** when the member data PR stops using `member_names` and `member_stays`, they are removed from `002_member_history.sql` so fresh installs never create them. The live database keeps them until the Owner drops them by hand. The rule: edit an old migration only to remove or reshape something the live database already has and someone will handle by hand. Anything the live database needs applied is a new file.
+- **One planned exception:** when step B2 stops using `member_names` and `member_stays`, they are removed from `002_member_history.sql` so fresh installs never create them. The live database keeps them until the Owner drops them by hand. The rule: edit an old migration only to remove or reshape something the live database already has and someone will handle by hand. Anything the live database needs applied is a new file.
 - **Add in steps** (add the new thing, fill it, switch the code to it, remove the old thing later), so a deploy never leaves the bot and the schema out of step.
 - New columns on existing tables are `nullable` or have a default, so the live table is not rewritten.
 - A migration creates structure only. Moving data between systems is a command a person runs and checks (see `/migration`).
@@ -98,7 +100,8 @@ Milestones (donation tiers, Pet Master) are event kinds, not a table.
 |---|---|---|
 | Sheets to PostgreSQL | High scores, member history, `/migration` | Built |
 | A. Command log | `discord_name`, `denied`, `/commandlog`, daily prune, this file, backup example | Built |
-| B. Member data | `accounts`, `member_events`, `member_overview`, `/memberdata` (Owner only: `status`, `preview`, `sync`, `verify`), copy the old history into events, optional hourly sync (`MEMBER_SYNC_INTERVAL_MINUTES`) | Planned |
+| B. Member data, WOM side | `accounts`, `member_events`, `/memberdata` (Owner only: `status`, `preview`, `sync`, `verify`), automatic sync every `MEMBER_SYNC_INTERVAL_MINUTES` after the first manual one | Built |
+| B2. Discord history in events | Write server joins, leaves and name changes as person events, copy `member_names` and `member_stays` into `member_events`, remove those two tables from `002_member_history.sql`, add `member_overview` | Planned |
 | C. `/profile` | By member or by RSN, for Coordinator and above | Planned |
 | D. Milestones | Donation tier and Pet Master as events, back-filled from the logs | Planned |
 | E. Competition results | `competition_results`, saved on announce, back-filled from WOM | Planned |
@@ -111,7 +114,7 @@ Milestones (donation tiers, Pet Master) are event kinds, not a table.
 
 - **Two entities, not one table:** a person (Discord) and an account (OSRS) are different things. WOM tracks accounts and the clan has alts, so one row per person cannot hold ranks per account, and one row per account cannot be the target of donations and pets. Keeping `members` as the person table also meant the six tables pointing at it did not change.
 - **History as events:** a new kind of history is a new event kind, with no schema change. A unique key on events keeps a re-sync from duplicating them.
-- **Manual first:** data moves (the sheets, the WOM sync) are Owner commands with a preview and a verify step, run by hand the first time. Nothing imports on startup.
+- **Manual first:** data moves (the sheets, the WOM sync) are Owner commands with a preview and a verify step, run by hand the first time. Nothing imports on startup, and the timer does nothing until the first manual WOM sync has happened.
 - **`command_log` has no foreign key:** staff attempts by people not in `members` should still be logged.
 - **Donation total cap:** 10 trillion GP per member, as a typo guard and to stay inside safe Number range.
 - **Milestones are events:** they are history with a reached time, not a separate kind of record.
@@ -122,12 +125,15 @@ Milestones (donation tiers, Pet Master) are event kinds, not a table.
 - A member who left and rejoined the Discord server entirely while the bot was down shows as one stay.
 - A leave noticed by the startup sync is dated when the bot noticed it.
 - Until accounts are linked to members, `/profile @member` can only show the Discord side.
+- WOM's history only goes back to when the group started being tracked. An account with only a leave event and no join date has no `first_joined_at`.
+- An account's `left_at` is its latest leave event, or when the bot noticed it had gone if WOM has no leave event.
+- Name changes are read back 30 days on each automatic sync (WOM lists them by when they were asked for, not approved), so one approved after more than 30 days is only picked up by a fresh full read.
 
 ## Operations
 
 - **Backups and restore:** see the README's Database section.
 - **Useful queries:** the command log and member history queries are in the README's Database section.
-- **Dropping the old history tables** (after the member data PR, once the copied counts match):
+- **Dropping the old history tables** (after step B2, once the copied counts match):
   ```sql
   select (select count(*) from member_names) as old_names,
          (select count(*) from member_events where kind = 'name_changed' and source = 'discord') as copied_names;

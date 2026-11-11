@@ -20,3 +20,8 @@
 - Added a daily prune of the command log, keeping `COMMAND_LOG_RETENTION_DAYS` days (default 365, 0 keeps everything).
 - Added a backup example (`pg_dump` from cron, retention, and a scratch-database restore test) to the README.
 - Added `DATABASE.md`, describing how the database stores its information, its conventions, how to add to it, and the plan for what comes next, and a `CLAUDE.md` that points assistants at it.
+- Added `accounts` (one row per OSRS account from Wise Old Man) and `member_events` (append-only history) in `migrations/005_accounts_and_events.sql`, with a unique key so a re-sync never adds an event twice.
+- Added `src/utils/memberSync.js`, which reads the WOM group (members and ranks), its join, leave and rank change feed and its approved name changes, pacing its calls inside WOM's rate limit, and saves them. The first read takes the whole history, later reads only go back from the newest saved event. Former members seen only in the feed are saved as `left`.
+- Added an Owner-only `/memberdata` command (`status`, `preview`, `sync` with `confirm`, `verify`), and an automatic sync every `MEMBER_SYNC_INTERVAL_MINUTES` (default 60, 0 off) that waits until the first manual sync.
+- Ran the WOM read-only against the clan's real group in an in-memory PostgreSQL: 368 accounts (261 in the group, 107 left), 372 joins, 113 leaves, 1,265 rank changes and 182 name changes in about 40 seconds; the saved accounts matched WOM, and a second sync added no events.
+- Moved the reply code-block helper into `src/utils/discordText.js`, shared by `/migration` and `/memberdata`.
