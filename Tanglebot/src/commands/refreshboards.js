@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const { refreshLeaderboard: refreshPetLeaderboard } = require('./pethighscore');
 const { refreshLeaderboard: refreshDonationLeaderboard } = require('./donationhighscore');
+const { databaseConfigured } = require('../utils/commandAvailability');
 
 const TEMPLAR_ROLE_ID = process.env.TEMPLAR_ROLE_ID;
 
@@ -10,12 +11,16 @@ const BOARDS = [
 ];
 
 module.exports = {
-  requiredEnv: ['GOOGLE_SERVICE_ACCOUNT_JSON'],
+  requiredEnvWithoutDatabase: ['GOOGLE_SERVICE_ACCOUNT_JSON'],
 
   data: new SlashCommandBuilder()
     .setName('refreshboards')
     .setDefaultMemberPermissions(0)
-    .setDescription('Repost every leaderboard (pet and donation high scores) from their sheets'),
+    .setDescription(
+      databaseConfigured()
+        ? 'Repost every leaderboard (pet and donation high scores) from the database'
+        : 'Repost every leaderboard (pet and donation high scores) from their sheets'
+    ),
 
   async execute(interaction) {
     if (TEMPLAR_ROLE_ID && !interaction.member.roles.cache.has(TEMPLAR_ROLE_ID)) {

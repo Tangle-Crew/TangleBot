@@ -2,6 +2,8 @@ require('dotenv').config({ quiet: true });
 const { Client, GatewayIntentBits, Collection, Partials } = require('discord.js');
 const { loadCommands } = require('./handlers/commandHandler');
 const { loadEvents } = require('./handlers/eventHandler');
+const { databaseConfigured } = require('./utils/commandAvailability');
+const { runMigrations } = require('./utils/database');
 
 const discordBotToken = process.env.DISCORD_BOT_TOKEN || process.env.DISCORD_TOKEN;
 
@@ -28,10 +30,27 @@ process.on('unhandledRejection', (err) => {
   console.error('[Bot] Unhandled promise rejection:', err);
 });
 
-loadCommands(client);
-loadEvents(client);
+async function main() {
+  // Migrations run before the commands load. A failed one stops startup.
+  if (databaseConfigured()) {
+    try {
+      await runMigrations();
+    } catch (err) {
+      console.error(`[Database] Startup stopped: ${err.message}`);
+      process.exit(1);
+    }
+  }
 
-client.login(discordBotToken).catch((err) => {
-  console.error('[Bot] Failed to log in to Discord:', err);
+  loadCommands(client);
+  loadEvents(client);
+
+  await client.login(discordBotToken).catch((err) => {
+    console.error('[Bot] Failed to log in to Discord:', err);
+    process.exit(1);
+  });
+}
+
+main().catch((err) => {
+  console.error('[Bot] Startup failed:', err);
   process.exit(1);
 });

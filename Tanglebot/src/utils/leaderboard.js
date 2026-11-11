@@ -9,7 +9,7 @@ function mentionOrName(entry) {
 }
 
 // Updates display names from the server; members who left keep their stored name. onNameChange
-// is awaited for each changed entry so the caller can save it to the sheet.
+// is awaited for each changed entry so the caller can save it.
 async function refreshDisplayNames(guild, entries, onNameChange) {
   console.log(`[Leaderboard] Refreshing display names for ${entries.length} leaderboard entries`);
   const fetchedMembers = await guild.members.fetch().catch(() => null);
@@ -20,7 +20,7 @@ async function refreshDisplayNames(guild, entries, onNameChange) {
     const member = fetchedMembers.get(entry.discordId);
     if (member && member.displayName !== entry.displayName) {
       const updated = { ...entry, displayName: member.displayName };
-      if (onNameChange && entry.rowNumber != null) await onNameChange(updated);
+      if (onNameChange) await onNameChange(updated);
       fresh.push(updated);
     } else {
       fresh.push(entry);
@@ -74,7 +74,7 @@ async function findPreviousLeaderboardMessages(channel, botUserId, isOwnLeaderbo
 //   dataFile                                     data/ JSON file storing the last-posted message IDs
 //   logPrefix                                    tag for console logs, e.g. "PetHighscore"
 //   isOwnLeaderboardMessage(firstEmbed) -> bool   identifies this leaderboard's own post during recovery
-//   onDisplayNameChange(entry) -> Promise         (optional) persists a refreshed display name back to the sheet
+//   onDisplayNameChange(entry) -> Promise         (optional) saves a refreshed display name back to the sheet or database
 async function postLeaderboard(guild, channelId, entries, botUserId, options) {
   // One post at a time per leaderboard.
   return withFileLock(options.dataFile, () => postLeaderboardLocked(guild, channelId, entries, botUserId, options));

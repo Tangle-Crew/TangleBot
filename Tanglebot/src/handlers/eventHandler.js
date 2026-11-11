@@ -23,6 +23,10 @@ const { refreshLeaderboard: refreshPetLeaderboard } = require('../commands/pethi
 const { refreshLeaderboard: refreshDonationLeaderboard } = require('../commands/donationhighscore');
 const { handleStaleMembersButton, handleStaleMembersSelect, start: startStaleMembers } = require('../commands/stalemembers');
 const { handleSuggestButton, handleSuggestModalSubmit } = require('../utils/lfgSuggestion');
+const { logCommand } = require('../utils/commandLog');
+const { databaseConfigured } = require('../utils/commandAvailability');
+const migrationTools = require('../utils/migrationTools');
+const { registerMemberHistory, syncMemberRoster } = require('../utils/memberHistory');
 const { startCompEndingReminder } = require('../utils/compEndingReminder');
 const { handleWeeklyAnnounceButton, handleWeeklyAnnounceSelect, handleWeeklyAnnounceModal } = require('../commands/weeklyannounce');
 const { restoreWeeklyAnnouncements, stopWeeklyAnnouncements } = require('../utils/weeklyAnnounceSchedule');
@@ -112,16 +116,23 @@ function loadEvents(client) {
       console.error('[LFG] Failed to ensure LFG start post:', err);
     }
 
-    try {
-      await refreshPetLeaderboard(client);
-    } catch (err) {
-      console.error('[PetHighscore] Failed to refresh pet leaderboard on startup:', err);
-    }
+    // Before the leaderboards, so a first sync stores everyone before names are refreshed.
+    await syncMemberRoster(client);
 
-    try {
-      await refreshDonationLeaderboard(client);
-    } catch (err) {
-      console.error('[DonationHighscore] Failed to refresh donation leaderboard on startup:', err);
+    if (await boardsWaitForImport()) {
+      console.log('[Database] The high score tables are empty and the sheets are still set up: leaderboards not reposted. Run /migration import.');
+    } else {
+      try {
+        await refreshPetLeaderboard(client);
+      } catch (err) {
+        console.error('[PetHighscore] Failed to refresh pet leaderboard on startup:', err);
+      }
+
+      try {
+        await refreshDonationLeaderboard(client);
+      } catch (err) {
+        console.error('[DonationHighscore] Failed to refresh donation leaderboard on startup:', err);
+      }
     }
 
     if (process.env.CLAN_ID) {
@@ -151,6 +162,8 @@ function loadEvents(client) {
     }
     console.log('[Bot] Startup finished.');
   });
+
+  registerMemberHistory(client);
 
   client.on(Events.MessageCreate, async (message) => {
     try {
@@ -196,7 +209,12 @@ function loadEvents(client) {
     }
 
     const command = interaction.client.commands.get(interaction.commandName);
-    if (!command) return;
+    if (!command) {
+      if (interaction.isChatInputCommand()) {
+        await logCommand(interaction, { startedAt: Date.now(), error: 'Command is not loaded' });
+      }
+      return;
+    }
 
     if (interaction.isAutocomplete()) {
       try {
@@ -209,12 +227,7 @@ function loadEvents(client) {
 
     if (!interaction.isChatInputCommand()) return;
 
-    try {
-      await command.execute(interaction);
-    } catch (err) {
-      console.error(`[Interactions] /${interaction.commandName} failed for ${interaction.user.tag}:`, err);
-      await replyOrFollowUp(interaction, 'Something went wrong running that command.');
-    }
+    await runCommand(interaction, command);
   });
 
   client.once(Events.ClientDestroy, () => {
@@ -226,6 +239,34 @@ function loadEvents(client) {
   });
 }
 
+// True while the database is empty but the sheets are still configured, i.e. the import has not
+// happened yet. Reposting then would replace the live leaderboards with empty ones.
+async function boardsWaitForImport() {
+  if (!databaseConfigured()) return false;
+  if (!process.env.GOOGLE_SERVICE_ACCOUNT_JSON?.trim() || !process.env.DONATIONS_SHEET_ID?.trim()) return false;
+  try {
+    return await migrationTools.waitingForImport();
+  } catch (err) {
+    console.error('[Database] Could not check whether the import has happened:', err.message);
+    return false;
+  }
+}
+
+// Runs a slash command and records who ran it, what it was, and whether it threw.
+async function runCommand(interaction, command) {
+  const startedAt = Date.now();
+  let error = null;
+  try {
+    await command.execute(interaction);
+  } catch (err) {
+    error = err;
+    console.error(`[Interactions] /${interaction.commandName} failed for ${interaction.user.tag}:`, err);
+    await replyOrFollowUp(interaction, 'Something went wrong running that command.');
+  }
+  // Commands that catch their own errors set interaction.commandError so they are still logged as failed.
+  await logCommand(interaction, { startedAt, error: error ?? interaction.commandError ?? null });
+}
+
 async function replyOrFollowUp(interaction, content) {
   const msg = { content, flags: MessageFlags.Ephemeral };
   if (interaction.replied || interaction.deferred) {
@@ -235,4 +276,4 @@ async function replyOrFollowUp(interaction, content) {
   }
 }
 
-module.exports = { loadEvents };
+module.exports = { loadEvents, runCommand, boardsWaitForImport };
