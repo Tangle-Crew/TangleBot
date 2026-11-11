@@ -210,6 +210,19 @@ The sheets are only ever read. Only one import runs at a time. Running `import` 
 
 ---
 
+### 📜 `/commandlog` — Who Ran What
+
+Shows recent command runs from the [command log](#database): who ran each one, the command and options, when, and whether it worked (`ok`), failed (`error`) or was refused for a missing role (`denied`). Replies are private, newest first, 10 a page. For Coordinator, Templar and Owner. Only loads with `DATABASE_URL`.
+
+| Option | Description |
+|---|---|
+| `user` | Only commands run by this person |
+| `command` | Only this command, matched from the start, e.g. `migration` or `donationhighscore add` |
+| `status` | Only `ok`, `error` or `denied` runs |
+| `page` | Page number |
+
+---
+
 ### 🔔 `/lfg-roles` — Activity Ping Roles
 
 Opens a private menu for opting in to ping roles for bosses, raids and minigames, so members only get pinged for what they care about. Groups made with `/lfg-post` ping these roles.
@@ -691,7 +704,7 @@ Add these overrides once:
 
 - **Templar:** `/donationhighscore`, `/pethighscore`, `/refreshboards`, `/stalemembers`, `/weeklyannounce`, `/weeklycomp`, `/honeypot`, `/submission`
 - **Owner:** `/migration`
-- **Coordinator:** `/spinwheel`
+- **Coordinator:** `/spinwheel`, `/commandlog`
 
 Owner also holds Templar, so it needs no separate override for the Templar commands. A renamed or new staff command needs its override added once. Admins always see every command.
 
@@ -709,11 +722,12 @@ Each feature's variables are listed in its section above. These are the base one
 
 ### Database
 
-`/donationhighscore`, `/pethighscore` and `/refreshboards` store their data in PostgreSQL (tested with `postgres:17-alpine`). The database also holds each member's clan history and a log of every command run, ready for more clan data later. To move over from the sheets, follow [Moving from the sheets](#database) below (run from Discord with `/migration`).
+`/donationhighscore`, `/pethighscore` and `/refreshboards` store their data in PostgreSQL (tested with `postgres:17-alpine`). The database also holds each member's clan history and a log of every command run, ready for more clan data later. To move over from the sheets, follow [Moving from the sheets](#database) below (run from Discord with `/migration`). For how the data is organised, and how to add to it, see [DATABASE.md](DATABASE.md).
 
 | Variable | Description |
 |---|---|
 | `DATABASE_URL` | `postgres://<user>:<password>@<host>:5432/<database>`. In Docker Compose the host is the database service's name, e.g. `postgres://tanglebot:<password>@tanglebot-db:5432/tanglebot`. Leave it unset to keep using the Google Sheets. |
+| `COMMAND_LOG_RETENTION_DAYS` | Optional. Days of command log to keep (default 365, `0` keeps everything). |
 
 <details>
 <summary><strong>Migrations</strong></summary>
@@ -723,28 +737,66 @@ On startup, before any command loads, the bot applies every `Tanglebot/migration
 - `001_high_scores.sql`: `members`, `donations`, `donation_log`, `pets`, `member_pets`, `pet_log`.
 - `002_member_history.sql`: the pet catalog's display order, `member_names` and `member_stays`.
 - `003_command_log.sql`: `command_log`.
+- `004_command_log_name_and_denied.sql`: the `discord_name` column on `command_log`, and the `denied` status.
 
 </details>
 
 <details>
 <summary><strong>Command log</strong></summary>
 
-Every slash command run is recorded: who ran it, which command and subcommand, the options they gave (long text is cut to 200 characters), the channel, when, how long it took, and whether it worked. A command that threw an error, or that isn't loaded, is recorded with `status = 'error'` and the error message.
+Every slash command run is recorded: who ran it (their Discord ID and their name, so the log reads easily), which command and subcommand, the options they gave (long text is cut to 200 characters; options named like a URL, token, secret, key or password are not stored), the channel, when, how long it took, and the result:
 
-With `DATABASE_URL` set it goes in the `command_log` table. Without it, one JSON line per run is appended to `Tanglebot/data/command-log.jsonl`. Autocomplete, buttons and menus aren't logged. A failed log write is logged to the console and never affects the command.
+| `status` | Meaning |
+|---|---|
+| `ok` | The command ran. |
+| `error` | The command threw an error, isn't loaded, or reported an error itself (`/donationhighscore`, `/pethighscore`, `/migration` and `/commandlog` do). |
+| `denied` | The person didn't have the role for it. Recorded for every staff command that checks a role. |
 
-A command that handles its own error and replies normally is recorded as `ok`, except `/donationhighscore` and `/pethighscore`, which report their errors to the log.
+A command that catches its own error and replies normally is recorded as `ok`.
+
+With `DATABASE_URL` set the log is the `command_log` table, and the [`/commandlog`](#-commandlog--who-ran-what) command reads it. Without it, one JSON line per run is appended to `Tanglebot/data/command-log.jsonl`. Autocomplete, buttons and menus aren't logged. A failed log write is logged to the console and never affects the command.
+
+The name is the person's server display name when the command ran (their account name if that isn't available), so it can differ from their name today. Rows from before `004_command_log_name_and_denied.sql` have no name.
+
+**Retention:** once a day the bot deletes rows older than `COMMAND_LOG_RETENTION_DAYS` (default 365; `0` keeps everything). The `.jsonl` file isn't pruned.
 
 ```sql
 -- the last 50 runs
-select created_at, discord_id, command, options, status, error from command_log order by id desc limit 50;
+select created_at, discord_name, discord_id, command, options, status, error from command_log order by id desc limit 50;
 -- everything one person ran
-select created_at, command, options, status from command_log where discord_id = '<id>' order by id desc;
--- failures in the last week
-select created_at, discord_id, command, error from command_log where status = 'error' and created_at > now() - interval '7 days' order by id desc;
+select created_at, discord_name, command, options, status from command_log where discord_id = '<id>' order by id desc;
+-- failures and refusals in the last week
+select created_at, discord_name, discord_id, command, status, error from command_log where status <> 'ok' and created_at > now() - interval '7 days' order by id desc;
 ```
 
-The log isn't pruned automatically. To keep 1 year: `delete from command_log where created_at < now() - interval '1 year';`
+</details>
+
+<details>
+<summary><strong>Backups (example)</strong></summary>
+
+Back up the database regularly; it holds the only copy of the high scores, member history and command log once the sheets are retired. If you already have a backup job, keep using it. This is an example for the host that runs Docker, using the `tanglebot-db` container:
+
+```bash
+#!/bin/sh
+# /usr/local/bin/backup-tanglebot.sh: a compressed dump, keeping the last 14 days
+set -e
+mkdir -p /backups
+docker exec tanglebot-db pg_dump -U tanglebot -d tanglebot -Fc > /backups/tanglebot-$(date +%F).dump
+find /backups -name 'tanglebot-*.dump' -mtime +14 -delete
+```
+
+Run it nightly from cron (`crontab -e`): `15 3 * * * /usr/local/bin/backup-tanglebot.sh`. `docker exec` runs inside the container, so no password is needed. Copy the dumps off the host as well.
+
+**Test a restore** into a scratch database, so you know the backups work, without touching the live one:
+
+```bash
+docker exec tanglebot-db createdb -U tanglebot tanglebot_restore_test
+docker exec -i tanglebot-db pg_restore -U tanglebot -d tanglebot_restore_test < /backups/tanglebot-2026-11-10.dump
+docker exec tanglebot-db psql -U tanglebot -d tanglebot_restore_test -c "select count(*) from members;"
+docker exec tanglebot-db dropdb -U tanglebot tanglebot_restore_test
+```
+
+To restore over the live database, stop the bot first, then use `pg_restore --clean --if-exists -d tanglebot` instead of the scratch database.
 
 </details>
 

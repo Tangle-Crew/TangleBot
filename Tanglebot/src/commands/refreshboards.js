@@ -25,6 +25,7 @@ module.exports = {
   async execute(interaction) {
     if (TEMPLAR_ROLE_ID && !interaction.member.roles.cache.has(TEMPLAR_ROLE_ID)) {
       console.log(`[RefreshBoards] ${interaction.user.tag} was denied /refreshboards (missing Templar role)`);
+      interaction.commandDenied = true; // for the command log
       return interaction.reply({
         content: 'You need the Templar role to use this command.',
         flags: MessageFlags.Ephemeral,

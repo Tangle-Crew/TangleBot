@@ -148,6 +148,7 @@ module.exports = {
 
     if (!OWNER_ROLE_ID || !interaction.member.roles.cache.has(OWNER_ROLE_ID)) {
       console.log(`[Migration] ${interaction.user.tag} was denied /migration ${subcommand} (missing Owner role)`);
+      interaction.commandDenied = true; // for the command log
       return interaction.reply({ content: 'Only the Owner role can use this command.', flags: MessageFlags.Ephemeral });
     }
 

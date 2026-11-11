@@ -199,6 +199,7 @@ module.exports = {
     };
 
     if (!interaction.member.roles.cache.has(TEMPLAR_ROLE_ID)) {
+      interaction.commandDenied = true; // for the command log
       return reject('You need the Templar role to use this command.');
     }
 

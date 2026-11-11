@@ -319,6 +319,7 @@ module.exports = {
 
     if (TEMPLAR_ROLE_ID && !interaction.member.roles.cache.has(TEMPLAR_ROLE_ID)) {
       console.log(`[DonationHighscore] ${interaction.user.tag} was denied /donationhighscore ${subcommand} (missing Templar role)`);
+      interaction.commandDenied = true; // for the command log
       return interaction.reply({
         content: 'You need the Templar role to use this command.',
         flags: MessageFlags.Ephemeral,
