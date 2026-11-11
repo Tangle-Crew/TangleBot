@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { readJson, writeJson } = require('./db');
+const { readState, writeState } = require('./state');
 
 const LAST_SUBMISSION_FILE = 'last-submission.json';
 const SUBMISSION_RUNTIME_CONFIG_FILE = 'submission-runtime-config.json';
@@ -59,7 +59,7 @@ function buildResubmitMessage(extraReason) {
 }
 
 function getSubmissionRuntimeConfig() {
-  const config = readJson(SUBMISSION_RUNTIME_CONFIG_FILE);
+  const config = readState(SUBMISSION_RUNTIME_CONFIG_FILE);
   return config && typeof config === 'object' ? config : {};
 }
 
@@ -77,7 +77,7 @@ function setConfiguredIntakeUrl(url) {
   console.log(`[Submission] Submission intake URL override updated to: ${url}`);
   const runtimeConfig = getSubmissionRuntimeConfig();
   runtimeConfig.intakeUrl = url;
-  writeJson(SUBMISSION_RUNTIME_CONFIG_FILE, runtimeConfig);
+  writeState(SUBMISSION_RUNTIME_CONFIG_FILE, runtimeConfig);
   return runtimeConfig.intakeUrl;
 }
 
@@ -282,7 +282,7 @@ function getMessageUrl(message) {
 }
 
 function getLastAcceptedSubmission() {
-  return readJson(LAST_SUBMISSION_FILE);
+  return readState(LAST_SUBMISSION_FILE);
 }
 
 function saveLastAcceptedSubmission({ attachment, eventId, isDrop, message, parsed }) {
@@ -303,7 +303,7 @@ function saveLastAcceptedSubmission({ attachment, eventId, isDrop, message, pars
     type: isDrop ? 'drop' : 'kc',
   };
 
-  writeJson(LAST_SUBMISSION_FILE, submission);
+  writeState(LAST_SUBMISSION_FILE, submission);
   return submission;
 }
 

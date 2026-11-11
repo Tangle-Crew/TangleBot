@@ -4,6 +4,7 @@ const { loadCommands } = require('./handlers/commandHandler');
 const { loadEvents } = require('./handlers/eventHandler');
 const { databaseConfigured } = require('./utils/commandAvailability');
 const { runMigrations } = require('./utils/database');
+const { hydrateState } = require('./utils/state');
 
 const discordBotToken = process.env.DISCORD_BOT_TOKEN || process.env.DISCORD_TOKEN;
 
@@ -38,6 +39,13 @@ async function main() {
     } catch (err) {
       console.error(`[Database] Startup stopped: ${err.message}`);
       process.exit(1);
+    }
+    // The state files are mirrored in the database. If that fails, they are simply used as files.
+    try {
+      const { loaded, imported, restored } = await hydrateState();
+      console.log(`[State] Loaded ${loaded} saved state(s) from the database; ${imported} copied in from files, ${restored} files restored`);
+    } catch (err) {
+      console.error('[State] Could not load the saved state from the database, using the files:', err.message);
     }
   }
 
