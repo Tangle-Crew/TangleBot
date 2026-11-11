@@ -709,7 +709,7 @@ Each feature's variables are listed in its section above. These are the base one
 
 ### Database
 
-`/donationhighscore`, `/pethighscore` and `/refreshboards` store their data in PostgreSQL (tested with `postgres:17-alpine`). The database also holds each member's clan history, ready for more clan data later.
+`/donationhighscore`, `/pethighscore` and `/refreshboards` store their data in PostgreSQL (tested with `postgres:17-alpine`). The database also holds each member's clan history and a log of every command run, ready for more clan data later. To move over from the sheets, follow [Moving from the sheets](#database) below (run from Discord with `/migration`).
 
 | Variable | Description |
 |---|---|
