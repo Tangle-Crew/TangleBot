@@ -1,5 +1,6 @@
 const { ChannelType, ChannelFlags, EmbedBuilder } = require('discord.js');
-const { readJson, writeJson, truncate } = require('./db');
+const { truncate } = require('./db');
+const { readState, writeState } = require('./state');
 const { CATEGORIES, emojiLabel, isAlreadyGoneError, notifyAdminLog } = require('./roleMenu');
 const { DEFAULT_EMBED_COLOR } = require('./embedColor');
 const { buildSuggestRows } = require('./lfgSuggestion');
@@ -130,7 +131,7 @@ async function createStartPost(client, forumChannel, embeds) {
     name: START_POST_TITLE,
     message: { embeds, components: buildSuggestRows() },
   });
-  writeJson(START_POST_DATA_FILE, { threadId: thread.id });
+  writeState(START_POST_DATA_FILE, { threadId: thread.id });
   console.log(`[LFG] Created start page post: thread ${thread.id}`);
   await pinStartPost(client, thread);
 }
@@ -147,7 +148,7 @@ async function ensureLfgStartPost(client) {
     return;
   }
 
-  const stored = readJson(START_POST_DATA_FILE);
+  const stored = readState(START_POST_DATA_FILE);
   let thread = stored.threadId ? await forumChannel.threads.fetch(stored.threadId).catch(() => null) : null;
 
   let adopted = false;
@@ -166,7 +167,7 @@ async function ensureLfgStartPost(client) {
     try {
       if (thread.archived) await thread.setArchived(false);
       await thread.messages.edit(thread.id, { embeds, components: buildSuggestRows() });
-      writeJson(START_POST_DATA_FILE, { threadId: thread.id });
+      writeState(START_POST_DATA_FILE, { threadId: thread.id });
       await pinStartPost(client, thread);
       console.log(`[LFG] Updated start page post: thread ${thread.id}`);
       if (adopted) {

@@ -774,6 +774,7 @@ On startup, before any command loads, the bot applies every `Tanglebot/migration
 - `003_command_log.sql`: `command_log`.
 - `004_command_log_name_and_denied.sql`: the `discord_name` column on `command_log`, and the `denied` status.
 - `005_accounts_and_events.sql`: `accounts` (OSRS accounts from Wise Old Man) and `member_events` (clan history).
+- `010_bot_state.sql`: `bot_state` (a copy of small state files).
 - `009_honeypot_incidents.sql`: `honeypot_incidents` (the honeypot log).
 - `008_competitions.sql`: `competitions` and `competition_results` (finished WOM competitions and how each player did).
 - `007_milestone_source.sql`: allows the `bot` source on `member_events`, for milestones.
@@ -867,6 +868,25 @@ select rsn, wom_role, left_at from accounts where status = 'left' and left_at > 
 select a.rsn, e.old_value, e.new_value, e.occurred_at from member_events e join accounts a on a.id = e.account_id
   where e.kind = 'name_changed' order by e.occurred_at desc limit 20;
 ```
+
+</details>
+
+<details>
+<summary><strong>State files (a copy in the database)</strong></summary>
+
+Some of the bot's small state lives in files in `Tanglebot/data/`. With `DATABASE_URL` set, these files are also kept in the `bot_state` table (the key is the file name, the value is its JSON), so a lost or wiped `data/` folder doesn't lose them:
+
+- the leaderboard message IDs (`pethighscores_message.json`, `donationhighscores_message.json`), the `/stalemembers` list message IDs, the LFG start post ID, the honeypot test mode, the intake URL override and the last accepted submission.
+
+How it works: at startup the bot loads the table. A file that has no row yet is copied into it, and a row whose file is missing is written back to disk (the log says how many). While running, every change is written to the file as before and to the table. The files stay current, so removing `DATABASE_URL` (the rollback) works without any step, and without `DATABASE_URL` nothing changes at all. If the table can't be read at startup, the bot logs it and uses the files.
+
+**Not covered:** the open LFG groups (`lfg-groups.json`) and the scheduled weekly announcements (`weeklyannounce.json`) stay file-only. The announcements' "send once" check relies on the file being shared between a running bot and a new one during a deploy, so moving it needs its own care.
+
+```sql
+select key, updated_at, value from bot_state order by key;
+```
+
+The intake URL override is stored too, so treat database backups as sensitive.
 
 </details>
 
@@ -1012,7 +1032,7 @@ The bot registers its slash commands with your server each time it starts. `npm 
 
 To run with Docker instead, use `docker compose up -d --build` from the repo root. It reads `Tanglebot/.env` and keeps `Tanglebot/data/` between restarts.
 
-`Tanglebot/data/` holds small state files (the database itself lives in PostgreSQL): leaderboard message IDs, open LFG groups, the LFG start post ID, honeypot test mode, the intake URL override, and the last accepted submission.
+`Tanglebot/data/` holds small state files (the database itself lives in PostgreSQL): leaderboard message IDs, open LFG groups, the LFG start post ID, honeypot test mode, the intake URL override, the last accepted submission, and the scheduled weekly announcements. With `DATABASE_URL` set, most of them are also kept in the database, so losing the folder doesn't lose them (see [Database](#database)).
 
 ---
 

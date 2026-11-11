@@ -9,7 +9,8 @@ const {
   PermissionFlagsBits,
 } = require('discord.js');
 const axios = require('axios');
-const { readJson, writeJson, truncate, hasAnyRole } = require('./db');
+const { truncate, hasAnyRole } = require('./db');
+const { readState, writeState } = require('./state');
 const honeypotLog = require('./honeypotLog');
 
 const RUNTIME_CONFIG_FILE = 'honeypot-runtime-config.json';
@@ -37,7 +38,7 @@ function loadHoneypotConfig(env = process.env) {
 }
 
 function getRuntimeConfig() {
-  const config = readJson(RUNTIME_CONFIG_FILE);
+  const config = readState(RUNTIME_CONFIG_FILE);
   return config && typeof config === 'object' ? config : {};
 }
 
@@ -49,7 +50,7 @@ function setTestModeEnabled(enabled) {
   console.log(`[Honeypot] Setting test mode to ${!!enabled}`);
   const runtimeConfig = getRuntimeConfig();
   runtimeConfig.testMode = !!enabled;
-  writeJson(RUNTIME_CONFIG_FILE, runtimeConfig);
+  writeState(RUNTIME_CONFIG_FILE, runtimeConfig);
   return runtimeConfig.testMode;
 }
 

@@ -44,6 +44,7 @@ function load(relative, { axios = {}, env = {}, logs = [], mocks = {}, fastTimer
         if (name === '@wise-old-man/utils' || name === 'events') return nodeRequire(name);
         if (name === './db' || name === '../utils/db') return { readJson: () => ({}), writeJson() {}, withTimeout: promise => promise,
           truncate: (text, max) => (text.length > max ? `${text.slice(0, max - 1)}…` : text) };
+        if (name === './state' || name === '../utils/state') return { readState: () => ({}), writeState() {} };
         if (name === 'discord.js') return { SlashCommandBuilder: Builder, EmbedBuilder: Builder,
           MessageFlags: { Ephemeral: 64 }, PermissionFlagsBits: { ManageRoles: 1, ManageGuild: 2 },
           escapeMarkdown: text => text, ChannelType: { GuildCategory: 4 }, embedLength: () => 0 };

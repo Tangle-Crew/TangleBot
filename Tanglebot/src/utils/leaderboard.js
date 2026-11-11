@@ -1,4 +1,5 @@
-const { readJson, writeJson, withFileLock } = require('./db');
+const { withFileLock } = require('./db');
+const { readState, writeState } = require('./state');
 
 // Discord's per-message limits: 10 embeds and 6000 characters (kept under, to be safe).
 const MAX_EMBEDS_PER_MESSAGE = 10;
@@ -85,7 +86,7 @@ async function postLeaderboardLocked(guild, channelId, entries, botUserId, { bui
   const freshEntries = await refreshDisplayNames(guild, entries, onDisplayNameChange);
   const groups = packEmbedsIntoMessages(buildEmbeds(freshEntries));
 
-  const stored = readJson(dataFile);
+  const stored = readState(dataFile);
   const prevIds = Array.isArray(stored.messageIds) ? stored.messageIds : [];
 
   let prevMessages = await Promise.all(prevIds.map((id) => channel.messages.fetch(id).catch(() => null)));
@@ -124,7 +125,7 @@ async function postLeaderboardLocked(guild, channelId, entries, botUserId, { bui
     }
   }
 
-  writeJson(dataFile, { messageIds: newIds });
+  writeState(dataFile, { messageIds: newIds });
   console.log(`[${logPrefix}] Leaderboard updated (${newIds.length} message${newIds.length === 1 ? '' : 's'})`);
 }
 

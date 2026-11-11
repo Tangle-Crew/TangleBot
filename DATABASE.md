@@ -20,6 +20,7 @@ How TangleBot stores its information in PostgreSQL, the rules for changing it, a
 | `src/utils/milestones.js` | Finds and rebuilds milestones (donation tier changes, Pet Master) from the logs |
 | `src/utils/competitionSync.js` | Reads finished WOM competitions and saves them and their results |
 | `src/utils/honeypotLog.js` | Records honeypot incidents (never throws, does nothing without the database) |
+| `src/utils/state.js` | `readState`/`writeState`: the small `data/*.json` files, mirrored in `bot_state` |
 | `src/utils/profile.js` | Reads one person or one account (read only) and builds the `/profile` embeds |
 | `src/utils/memberSync.js` | Reads the Wise Old Man group and saves `accounts` and clan events (used by `/memberdata` and a timer) |
 | `src/utils/migrationTools.js` | The sheets import and its checks (used only by `/migration`; retired with the sheets) |
@@ -50,6 +51,7 @@ How TangleBot stores its information in PostgreSQL, the rules for changing it, a
 | `competitions` | A finished WOM competition | `wom_competition_id` (PK), `title`, `metric`, `metrics`, `starts_at`, `ends_at`, `participant_count`, `total_gained` | `competitionSync.js` (`/memberdata competitions`, then the automatic sync) |
 | `competition_results` | One player's result in a competition | `(wom_competition_id, wom_player_id)` (PK), `account_id` (empty if the account was not saved yet), `rsn`, `rank`, `gained`. Only players who gained | `competitionSync.js` |
 | `honeypot_incidents` | One honeypot event | `discord_id` and `discord_name` (no foreign key), `action` (`timeout`, `ban`, `false_positive`), `outcome` (`done`, `failed`, `skipped`, `test`), `test_mode`, `channel_id`, `by_discord_id`, `by_discord_name`, `details` (jsonb, never message content), `created_at` | `honeypot.js`, through `honeypotLog.js`; append-only |
+| `bot_state` | A copy of one small state file | `key` (the file name, PK), `value` (jsonb, the file's contents), `updated_at` | `state.js` (loaded at startup; written with every change). Files covered: the leaderboard message IDs, `stalemembers.json`, `lfg-start-post.json`, the honeypot test mode, the intake URL override and `last-submission.json` |
 | `schema_migrations` | An applied migration file | `name` (PK), `applied_at` | The migration runner |
 
 How they connect: `accounts.member_id` (empty for now) points at `members`, `member_events` points at an account or a member, and `competition_results` points at `competitions` and (when known) an account. `donations`, `donation_log`, `member_pets` and `pet_log` all point at `members.discord_id`. `member_pets` and `pet_log` also point at `pets.key`. `command_log` and `honeypot_incidents` deliberately point at nothing: anyone who runs a command or trips the trap is logged, member or not.
@@ -58,7 +60,6 @@ How they connect: `accounts.member_id` (empty for now) points at `members`, `mem
 
 | Table | Purpose | Notes |
 |---|---|---|
-| `bot_state` | Small key and JSON values, replacing the `data/*.json` files | Staged: simple files first, LFG and weekly announcements last |
 
 Milestones (donation tiers, Pet Master) are event kinds, not a table.
 
@@ -110,7 +111,7 @@ Milestones (donation tiers, Pet Master) are event kinds, not a table.
 | D. Milestones | Donation tier and Pet Master as events, recorded as they happen and rebuilt from the logs by `/memberdata milestones` | Built |
 | E. Competition results | `competitions` and `competition_results`: every finished clan competition, read from WOM by `/memberdata competitions` and then the automatic sync | Built |
 | F. Honeypot incidents | `honeypot_incidents`: the automatic timeout and the admin buttons, metadata only | Built |
-| G. State files | `bot_state`, moving the `data/*.json` files, simple ones first | Planned |
+| G. State files | `bot_state`: the simple `data/*.json` files are mirrored in the database. `lfg-groups.json` and `weeklyannounce.json` are still files only | Built for the simple files; LFG groups and weekly announcements planned |
 | Link | Joining accounts to members. Not decided; `/link` does nothing today. `accounts.member_id` is reserved for it | Parked |
 | Retire the sheets | After the one-month fallback: remove the Sheets code paths and `/migration` | Planned |
 
@@ -122,6 +123,7 @@ Milestones (donation tiers, Pet Master) are event kinds, not a table.
 - **`command_log` has no foreign key:** staff attempts by people not in `members` should still be logged.
 - **Donation total cap:** 10 trillion GP per member, as a typo guard and to stay inside safe Number range.
 - **Competitions are saved by the sync, not when `/weeklyannounce` sends:** that covers every competition, announced or not, and needs no hook into the announcement code.
+- **State files are mirrored, not replaced:** every change is still written to the file, and also to `bot_state`. A lost `data/` folder is restored from the table at startup, and removing `DATABASE_URL` still works with no step. Reads come from memory once the table is loaded, so the code that reads them did not need to become asynchronous.
 - **Milestones are events:** they are history with a reached time, not a separate kind of record. Live milestones and the rebuilt ones are told apart from each other by time (within 5 seconds is the same event), so a rebuild after going live adds no duplicates.
 
 ## Known gaps
@@ -129,6 +131,8 @@ Milestones (donation tiers, Pet Master) are event kinds, not a table.
 - A command that catches its own error and replies normally is logged as `ok`, unless it sets `interaction.commandError` (done for `/donationhighscore`, `/pethighscore`, `/migration` and `/commandlog`).
 - A member who left and rejoined the Discord server entirely while the bot was down shows as one stay (no leave is recorded).
 - A leave noticed by the startup sync is dated when the bot noticed it.
+- `lfg-groups.json` and `weeklyannounce.json` are not mirrored. The announcements' "claim a job once" check relies on a running bot and a new one during a deploy sharing the file, which an in-memory copy would break.
+- A state file is not re-read from disk while the bot runs (the table's copy in memory is used), so editing one by hand needs a restart.
 - A competition is only saved once it has ended; a player who gained nothing has no result row; the first history run reads at most 120 competitions at a time.
 - A donation tier already held at the sheets import is dated to the import (`data.basis = 'import'`), and a member who was already a Pet Master before their first logged pet change has no milestone date.
 - Until accounts are linked to members, `/profile member` can only show the Discord side, donations and pets; use `/profile rsn` for the clan side.

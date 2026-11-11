@@ -18,12 +18,11 @@ const { DEFAULT_EMBED_COLOR } = require('../utils/embedColor');
 const {
   DATA_DIR,
   truncate,
-  readJson,
-  writeJson,
   withFileLock,
   discordTimestamp,
   withTimeout,
 } = require('../utils/db');
+const { readState, writeState } = require('../utils/state');
 const { notifyAdminLog } = require('../utils/roleMenu');
 const { buildXlsx } = require('../utils/xlsx');
 
@@ -504,7 +503,7 @@ function isOlder(id, than) {
 
 // The newest list's message IDs from the data file, or null.
 function savedList() {
-  const { list } = readJson(DATA_FILE);
+  const { list } = readState(DATA_FILE);
   return list?.header ? list : null;
 }
 
@@ -546,7 +545,7 @@ function replaceOldLists(client, newIds, others = []) {
     const keep = known.get(newest);
     if (messageIdsOf(keep).join() !== (saved ? messageIdsOf(saved).join() : '')) {
       try {
-        writeJson(DATA_FILE, { list: keep });
+        writeState(DATA_FILE, { list: keep });
       } catch (err) {
         console.error(`[StaleMembers] Couldn't save list ${newest} to ${DATA_FILE}:`, err.message);
       }
