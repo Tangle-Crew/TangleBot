@@ -223,6 +223,21 @@ Shows recent command runs from the [command log](#database): who ran each one, t
 
 ---
 
+### 🧬 `/memberdata` — Clan Accounts and History
+
+Owner-only. Keeps the database's list of the clan's OSRS accounts, and their history, in step with [Wise Old Man](https://wiseoldman.net) (WOM), which is the source of truth for it. Replies are private. Only loads while `DATABASE_URL`, `WOM_GROUP_ID` and `OWNER_ROLE_ID` are set. See [Clan accounts and history](#database) for what is saved.
+
+| Subcommand | What it does | Writes? |
+|------------|--------------|---------|
+| `status` | Shows how many accounts are saved (in the group, left, linked to a person), the history counts and newest dates, when it last synced, and the automatic sync setting. | Nothing |
+| `preview` | Reads WOM and shows what a sync would add or change, then undoes it. The first read takes the whole group history (about a minute for a clan this size). | Nothing (rolled back) |
+| `sync` | Reads WOM and saves the accounts and history, then checks them against WOM. `confirm` must be True, or nothing happens. | Database only |
+| `verify` | Compares the saved accounts with the WOM group: missing, wrongly ranked, renamed, or no longer in the group. | Nothing |
+
+WOM is only read, one call every 3.5 seconds (0.7 with `WOM_API_KEY`) to stay inside its rate limit. Only one sync runs at a time. Running `sync` again is safe: events already saved are not added twice.
+
+---
+
 ### 🔔 `/lfg-roles` — Activity Ping Roles
 
 Opens a private menu for opting in to ping roles for bosses, raids and minigames, so members only get pinged for what they care about. Groups made with `/lfg-post` ping these roles.
@@ -703,7 +718,7 @@ Role-based visibility is set by a server admin in **Server Settings > Integratio
 Add these overrides once:
 
 - **Templar:** `/donationhighscore`, `/pethighscore`, `/refreshboards`, `/stalemembers`, `/weeklyannounce`, `/weeklycomp`, `/honeypot`, `/submission`
-- **Owner:** `/migration`
+- **Owner:** `/migration`, `/memberdata`
 - **Coordinator:** `/spinwheel`, `/commandlog`
 
 Owner also holds Templar, so it needs no separate override for the Templar commands. A renamed or new staff command needs its override added once. Admins always see every command.
@@ -728,6 +743,7 @@ Each feature's variables are listed in its section above. These are the base one
 |---|---|
 | `DATABASE_URL` | `postgres://<user>:<password>@<host>:5432/<database>`. In Docker Compose the host is the database service's name, e.g. `postgres://tanglebot:<password>@tanglebot-db:5432/tanglebot`. Leave it unset to keep using the Google Sheets. |
 | `COMMAND_LOG_RETENTION_DAYS` | Optional. Days of command log to keep (default 365, `0` keeps everything). |
+| `MEMBER_SYNC_INTERVAL_MINUTES` | Optional. Minutes between automatic Wise Old Man syncs (default 60, `0` for manual only). Needs `WOM_GROUP_ID`. |
 
 <details>
 <summary><strong>Migrations</strong></summary>
@@ -738,6 +754,7 @@ On startup, before any command loads, the bot applies every `Tanglebot/migration
 - `002_member_history.sql`: the pet catalog's display order, `member_names` and `member_stays`.
 - `003_command_log.sql`: `command_log`.
 - `004_command_log_name_and_denied.sql`: the `discord_name` column on `command_log`, and the `denied` status.
+- `005_accounts_and_events.sql`: `accounts` (OSRS accounts from Wise Old Man) and `member_events` (clan history).
 
 </details>
 
@@ -797,6 +814,36 @@ docker exec tanglebot-db dropdb -U tanglebot tanglebot_restore_test
 ```
 
 To restore over the live database, stop the bot first, then use `pg_restore --clean --if-exists -d tanglebot` instead of the scratch database.
+
+</details>
+
+<details>
+<summary><strong>Clan accounts and history (Wise Old Man)</strong></summary>
+
+The clan's Wise Old Man group is copied into two tables, so you can query who is in the clan, their rank, and how it has changed:
+
+- **`accounts`:** one row per OSRS account. It holds the name, WOM's player ID, the current rank, whether they are in the group (`active`) or have `left`, the dates WOM added them and the RuneLite plugin reported their clan join, their first join date (the earliest of those and their first join event), and their leave date. `member_id` is for linking an account to a Discord person; nothing fills it in yet, so it is empty.
+- **`member_events`:** the history, one row per change: `joined`, `left`, `rank_changed` (old and new rank) and `name_changed` (old and new name), with the date it happened. A member who left and came back has a `joined` after a `left`.
+
+**First sync (by hand, from Discord):**
+1. `/memberdata preview` reads WOM and shows how many accounts and events would be saved. Nothing is saved.
+2. `/memberdata sync confirm:True` saves them and checks the result against WOM.
+3. `/memberdata verify` repeats the check whenever you like.
+
+After the first sync, the bot syncs by itself every `MEMBER_SYNC_INTERVAL_MINUTES` (default 60; `0` turns it off). Before the first manual sync it does nothing, so the first full read is always checked by a person. Each automatic sync only reads the recent history. WOM's history only goes back to when the group started being tracked, so earlier joins are not known.
+
+```sql
+-- current members by rank
+select wom_role, count(*) from accounts where status = 'active' group by wom_role order by count(*) desc;
+-- one account's history (WOM names are lower case)
+select e.occurred_at, e.kind, e.old_value, e.new_value from member_events e join accounts a on a.id = e.account_id
+  where a.username = lower('Some Name') order by e.occurred_at;
+-- who left in the last 30 days
+select rsn, wom_role, left_at from accounts where status = 'left' and left_at > now() - interval '30 days' order by left_at desc;
+-- the latest name changes
+select a.rsn, e.old_value, e.new_value, e.occurred_at from member_events e join accounts a on a.id = e.account_id
+  where e.kind = 'name_changed' order by e.occurred_at desc limit 20;
+```
 
 </details>
 

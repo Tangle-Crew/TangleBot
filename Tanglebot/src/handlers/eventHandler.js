@@ -25,6 +25,7 @@ const { handleStaleMembersButton, handleStaleMembersSelect, start: startStaleMem
 const { handleSuggestButton, handleSuggestModalSubmit } = require('../utils/lfgSuggestion');
 const { logCommand, startCommandLogPrune } = require('../utils/commandLog');
 const { databaseConfigured } = require('../utils/commandAvailability');
+const { startMemberSync } = require('../utils/memberSync');
 const migrationTools = require('../utils/migrationTools');
 const { registerMemberHistory, syncMemberRoster } = require('../utils/memberHistory');
 const { startCompEndingReminder } = require('../utils/compEndingReminder');
@@ -71,6 +72,7 @@ async function dispatchByCustomIdPrefix(interaction, routes) {
 function loadEvents(client) {
   let stopCompEndingReminder = null;
   let stopCommandLogPrune = null;
+  let stopMemberSync = null;
   const submissionConfig = loadSubmissionConfig();
   client.submissionConfig = submissionConfig;
 
@@ -97,6 +99,7 @@ function loadEvents(client) {
     }
     stopCompEndingReminder = startCompEndingReminder(client);
     stopCommandLogPrune = startCommandLogPrune();
+    stopMemberSync = startMemberSync();
     // Before the slower startup steps, so a post due while the bot was down goes out promptly.
     if (client.commands.has('weeklyannounce')) {
       try {
@@ -236,6 +239,10 @@ function loadEvents(client) {
     if (stopCommandLogPrune) {
       stopCommandLogPrune();
       stopCommandLogPrune = null;
+    }
+    if (stopMemberSync) {
+      stopMemberSync();
+      stopMemberSync = null;
     }
     if (stopCompEndingReminder) {
       stopCompEndingReminder();

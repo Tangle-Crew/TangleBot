@@ -89,6 +89,16 @@ function getGroupDetails(groupId) {
 
 // Each tracked member's gains in `metric` between the two dates. WOM returns every member at once.
 // Members with no snapshots in the range (e.g. never tracked) are left out.
+// A page of the group's join, leave and rank change feed, newest first.
+function getGroupActivity(groupId, pagination) {
+  return womClient().groups.getGroupActivity(groupId, pagination);
+}
+
+// A page of name changes for the group's players, newest first.
+function getGroupNameChanges(groupId, pagination) {
+  return womClient().groups.getGroupNameChanges(groupId, pagination);
+}
+
 function getGroupGains(groupId, metric, startDate, endDate) {
   return womClient().groups.getGroupGains(groupId, { metric, startDate, endDate });
 }
@@ -139,6 +149,8 @@ module.exports = {
   updateAllGroupMembers,
   womEvents,
   getGroupDetails,
+  getGroupActivity,
+  getGroupNameChanges,
   getGroupGains,
   getCompetitionDetails,
   getCompetitionTopHistory,
