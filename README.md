@@ -751,10 +751,11 @@ Each feature's variables are listed in its section above. These are the base one
 On startup, before any command loads, the bot applies every `Tanglebot/migrations/NNN_name.sql` file not yet listed in the `schema_migrations` table, in order, each in its own transaction, and logs each one it applied. If a migration fails, startup stops with the file's name and the database's error. Applied files are never changed; a schema change is a new numbered file.
 
 - `001_high_scores.sql`: `members`, `donations`, `donation_log`, `pets`, `member_pets`, `pet_log`.
-- `002_member_history.sql`: the pet catalog's display order, `member_names` and `member_stays`.
+- `002_member_history.sql`: the pet catalog's display order. (It used to also create `member_names` and `member_stays`; that history is now in `member_events`, so fresh installs no longer create them.)
 - `003_command_log.sql`: `command_log`.
 - `004_command_log_name_and_denied.sql`: the `discord_name` column on `command_log`, and the `denied` status.
 - `005_accounts_and_events.sql`: `accounts` (OSRS accounts from Wise Old Man) and `member_events` (clan history).
+- `006_discord_history_in_events.sql`: copies the Discord name and server history from `member_names` and `member_stays` into `member_events`, and adds the `member_overview` view. The two old tables are left in place; see [DATABASE.md](DATABASE.md) for dropping them once the copy is checked.
 
 </details>
 
@@ -848,19 +849,27 @@ select a.rsn, e.old_value, e.new_value, e.occurred_at from member_events e join 
 </details>
 
 <details>
-<summary><strong>Member history</strong></summary>
+<summary><strong>Member history (Discord)</strong></summary>
 
-While `DATABASE_URL` is set the bot keeps this for every server member (bots excluded), in addition to the high scores:
+While `DATABASE_URL` is set the bot keeps this for every server member (bots excluded), in addition to the high scores. It is stored as events in `member_events`, one row per change, belonging to a person (their Discord ID):
 
-- **Name changes:** `member_names` has one row per display name a member has had, oldest first. A row is added when the name changes: live from the server, when a high score command saves the member, and in the leaderboard's display-name refresh.
-- **Joins and leaves:** `member_stays` has one row per time a member was in the server. The earliest `joined_at` is their first join, a later row is a rejoin, and `left_at` is empty while they are still in. Join dates come from Discord.
-- **While the bot is down:** on startup the bot compares every server member with the database. Members it has never seen are added with their Discord join date, and members stored as present who are gone get `left_at` set to the time the bot noticed. A member who left and rejoined entirely while the bot was down shows as one stay.
+- **`display_name_changed`** (old and new name): live from the server, when a high score command saves the member, and in the leaderboard's display-name refresh.
+- **`server_joined` and `server_left`:** being in the Discord server. A person is in the server when their latest one of these is `server_joined`; a rejoin is a `server_joined` after a `server_left`. Join dates come from Discord.
+- **While the bot is down:** on startup the bot compares every server member with the database. Members it has never seen are added with their Discord join date, and members recorded as in the server who are gone get a `server_left` dated when the bot noticed. A member who left and rejoined entirely while the bot was down shows as one stay.
 
-A member's whole history:
+These are separate from the clan's own `joined` and `left` events on accounts (see above): leaving the Discord server and leaving the clan are different things.
+
+The `member_overview` view has one row per person: name, donation total, pet count, whether they are in the server, their first server join, and their linked accounts (none yet).
 
 ```sql
-select display_name, changed_at from member_names where discord_id = '<id>' order by changed_at;
-select joined_at, left_at from member_stays where discord_id = '<id>' order by joined_at;
+-- a person's name history
+select occurred_at, old_value, new_value from member_events
+  where member_id = '<id>' and kind = 'display_name_changed' order by occurred_at;
+-- when a person was in the server
+select kind, occurred_at from member_events
+  where member_id = '<id>' and kind in ('server_joined', 'server_left') order by occurred_at;
+-- one place for a person
+select * from member_overview where display_name ilike '%name%';
 ```
 
 </details>

@@ -59,7 +59,11 @@ async function importData(client, { donations, highscores, catalog }, log) {
       [discordId, displayName]
     );
     if (inserted.rowCount) {
-      await client.query('insert into member_names (discord_id, display_name) values ($1, $2)', [discordId, displayName]);
+      await client.query(
+        `insert into member_events (member_id, kind, new_value, source, occurred_at)
+         values ($1, 'display_name_changed', $2, 'import', now())`,
+        [discordId, displayName]
+      );
     }
   }
 

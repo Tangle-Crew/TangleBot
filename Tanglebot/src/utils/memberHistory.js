@@ -22,7 +22,7 @@ async function syncMemberRoster(client) {
     }
     const roster = [...members.values()].filter(m => !m.user.bot).map(toRow);
     const { members: count, left } = await highScoresDb.syncRoster(roster);
-    console.log(`[MemberHistory] Synced ${count} server member(s); ${left} stay(s) closed for members who left`);
+    console.log(`[MemberHistory] Synced ${count} server member(s); ${left} leave(s) recorded for members who left`);
   } catch (err) {
     console.error('[MemberHistory] Roster sync failed:', err);
   }

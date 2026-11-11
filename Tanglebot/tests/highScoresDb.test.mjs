@@ -99,16 +99,19 @@ test('a failed write rolls back and releases the client', async () => {
   assert.equal(db.client.released, true);
 });
 
-test('a name or join date is recorded with the member', async () => {
+test('a name or join date is recorded with the member as events', async () => {
   const { store, find } = donationDb('0');
   await store.changeDonation({ ...MEMBER, amount: 1, action: 'add' });
-  assert.deepEqual(find(/insert into member_names/)[0].params, [MEMBER.discordId, 'Snow']);
-  assert.deepEqual(find(/insert into member_stays/)[0].params, [MEMBER.discordId, MEMBER.joinedAt]);
+  const name = find(/insert into member_events[\s\S]*display_name_changed/)[0];
+  assert.deepEqual(name.params, [MEMBER.discordId, 'Snow']);
+  assert.match(name.sql, /on conflict do nothing/);
+  const join = find(/insert into member_events[\s\S]*server_joined/)[0];
+  assert.deepEqual(join.params, [MEMBER.discordId, MEMBER.joinedAt]);
 
-  // Without a join date (the member isn't in the server) no stay is touched.
+  // Without a join date (the member isn't in the server) no join is recorded.
   const other = donationDb('0');
   await other.store.changeDonation({ ...MEMBER, joinedAt: null, amount: 1, action: 'add' });
-  assert.equal(other.find(/member_stays/).length, 0);
+  assert.equal(other.find(/server_joined/).length, 0);
 });
 
 // ── Pets ─────────────────────────────────────────────────────────────────────
@@ -189,33 +192,34 @@ test('member pets are returned with string ids', async () => {
 
 // ── Members: names, joins and leaves ─────────────────────────────────────────
 
-test('a leaderboard name refresh updates only the name, and logs it only when it changed', async () => {
+test('a leaderboard name refresh updates only the name, and records a name event only when it changed', async () => {
   const changed = mockPg(sql => (/update members/.test(sql) ? { rowCount: 1 } : undefined));
   assert.equal(await createStore(() => changed.pool).updateDisplayName({ discordId: '1', displayName: 'New' }), true);
-  assert.equal(changed.find(/insert into member_names/).length, 1);
+  assert.equal(changed.find(/display_name_changed/).length, 1);
   assert.equal(changed.find(/donations|member_pets|donation_log/).length, 0);
 
   const same = mockPg(sql => (/update members/.test(sql) ? { rowCount: 0 } : undefined));
   assert.equal(await createStore(() => same.pool).updateDisplayName({ discordId: '1', displayName: 'Same' }), false);
-  assert.equal(same.find(/member_names/).length, 0);
+  assert.equal(same.find(/display_name_changed/).length, 0);
 });
 
-test('a join opens a stay, and a leave closes the open one', async () => {
+test('a join is a server_joined event unless already in, and a leave a server_left event if in', async () => {
   const db = mockPg();
   const store = createStore(() => db.pool);
   await store.recordJoin({ discordId: '1', displayName: 'A', joinedAt: new Date('2025-01-01T00:00:00Z') });
-  const stay = db.find(/insert into member_stays/)[0];
-  assert.match(stay.sql, /left_at is null/);
-  assert.deepEqual(stay.params, ['1', new Date('2025-01-01T00:00:00Z')]);
+  const join = db.find(/server_joined/)[0];
+  assert.match(join.sql, /is distinct from 'server_joined'/);
+  assert.match(join.sql, /greatest\(\$2::timestamptz, last\.at\)/, 'never dated before the leave it follows');
+  assert.deepEqual(join.params, ['1', new Date('2025-01-01T00:00:00Z')]);
 
   await store.recordLeave({ discordId: '1' });
-  const leave = db.find(/update member_stays/)[0];
-  assert.match(leave.sql, /left_at is null/);
+  const leave = db.find(/'server_left', 'discord'/)[0];
+  assert.match(leave.sql, /= 'server_joined'/);
   assert.deepEqual(leave.params, ['1']);
 });
 
-test('a roster sync stores names and joins and closes stays of members who are gone', async () => {
-  const db = mockPg(sql => (/update member_stays/.test(sql) ? { rowCount: 2 } : undefined));
+test('a roster sync records name changes and joins, and leaves for members who are gone', async () => {
+  const db = mockPg(sql => (/select m\.discord_id, 'server_left'/.test(sql) ? { rows: [{ member_id: '8' }, { member_id: '9' }], rowCount: 2 } : undefined));
   const store = createStore(() => db.pool);
   const joinedAt = new Date('2023-05-05T00:00:00Z');
   const result = await store.syncRoster([
@@ -224,10 +228,11 @@ test('a roster sync stores names and joins and closes stays of members who are g
   ]);
   assert.deepEqual(result, { members: 2, left: 2 });
   assert.deepEqual(db.find(/insert into members/)[0].params, [['1', '2'], ['A', 'B']]);
-  assert.deepEqual(db.find(/insert into member_stays/)[0].params[1], [joinedAt, null]);
-  assert.deepEqual(db.find(/update member_stays/)[0].params, [['1', '2']]);
+  assert.deepEqual(db.find(/display_name_changed/)[0].params, [['1', '2'], ['A', 'B']]);
+  assert.deepEqual(db.find(/select u\.id, 'server_joined'/)[0].params[1], [joinedAt, null]);
+  assert.deepEqual(db.find(/select m\.discord_id, 'server_left'/)[0].params, [['1', '2']]);
 
-  // An empty roster (e.g. a failed fetch) must never close everyone's stay.
+  // An empty roster (e.g. a failed fetch) must never record everyone as having left.
   const empty = mockPg();
   assert.deepEqual(await createStore(() => empty.pool).syncRoster([]), { members: 0, left: 0 });
   assert.equal(empty.calls.length, 0);
