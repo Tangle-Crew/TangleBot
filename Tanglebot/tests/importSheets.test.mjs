@@ -59,7 +59,8 @@ test('imports members, totals, one import log row each, the catalog in order and
   assert.deepEqual(db.find(/insert into donation_log/).map(c => c.params), [['1', 100, 100], ['2', 0, 0]]);
   assert.match(db.find(/insert into donation_log/)[0].sql, /'import'/);
   assert.deepEqual(db.find(/insert into member_pets/).map(c => c.params), [['1', 'heron'], ['1', 'rocky']]);
-  assert.equal(db.find(/insert into member_names/).length, 2);
+  assert.equal(db.find(/display_name_changed/).length, 2);
+  assert.match(db.find(/display_name_changed/)[0].sql, /'import'/);
   assert.deepEqual(logs, []);
 });
 

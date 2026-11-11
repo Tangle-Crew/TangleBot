@@ -4,36 +4,63 @@ const { databaseConfigured } = require('./commandAvailability');
 // Cap on one member's total, so totals stay far inside Number.MAX_SAFE_INTEGER (about 9e15).
 const MAX_TOTAL_GP = 10_000_000_000_000;
 
+// The member's latest server_joined or server_left event (their kind says whether they are in).
+const LAST_STAY_KIND = `(
+  select e.kind from member_events e
+  where e.member_id = $1 and e.kind in ('server_joined', 'server_left')
+  order by e.occurred_at desc, e.id desc limit 1
+)`;
+
+// $1 member, $2 name: records a name different from the last one recorded.
+const NAME_EVENT_SQL = `
+  insert into member_events (member_id, kind, old_value, new_value, source, occurred_at)
+  select $1::text, 'display_name_changed', last.name, $2::text, 'discord', now()
+  from (select (
+    select e.new_value from member_events e
+    where e.member_id = $1 and e.kind = 'display_name_changed'
+    order by e.occurred_at desc, e.id desc limit 1
+  ) as name) last
+  where $2::text is distinct from last.name
+  on conflict do nothing`;
+
+// $1 member, $2 join time: records a join unless the member is already recorded as in the server.
+// A join is never dated before the leave it follows, so it always counts as the latest event.
+const JOIN_EVENT_SQL = `
+  insert into member_events (member_id, kind, source, occurred_at)
+  select $1::text, 'server_joined', 'discord', greatest($2::timestamptz, last.at)
+  from (select
+    (select e.kind from member_events e where e.member_id = $1 and e.kind in ('server_joined', 'server_left')
+      order by e.occurred_at desc, e.id desc limit 1) as kind,
+    (select e.occurred_at from member_events e where e.member_id = $1 and e.kind in ('server_joined', 'server_left')
+      order by e.occurred_at desc, e.id desc limit 1) as at
+  ) last
+  where last.kind is distinct from 'server_joined'
+  on conflict do nothing`;
+
+// $1 member: records a leave if the member is recorded as in the server.
+const LEAVE_EVENT_SQL = `
+  insert into member_events (member_id, kind, source, occurred_at)
+  select $1::text, 'server_left', 'discord', greatest(now(), (
+    select max(e.occurred_at) from member_events e where e.member_id = $1 and e.kind = 'server_joined'
+  ))
+  where ${LAST_STAY_KIND} = 'server_joined'
+  on conflict do nothing`;
+
 // Builds the storage functions on top of getDb() (a pg Pool or anything with connect/query).
 function createStore(getDb) {
   const transaction = fn => database.withTransaction(fn, getDb());
   const query = (sql, params) => getDb().query(sql, params);
 
-  // Upserts the member. A name different from the last logged one is added to member_names, and
-  // joinedAt (a Date, when known) opens a stay if the member has none open.
+  // Upserts the member. A name different from the last one recorded adds a display_name_changed
+  // event, and joinedAt (a Date, when known) adds a server_joined event unless they are already in.
   async function touchMember(client, { discordId, displayName, joinedAt = null }) {
     await client.query(
       `insert into members (discord_id, display_name) values ($1, $2)
        on conflict (discord_id) do update set display_name = excluded.display_name, updated_at = now()`,
       [discordId, displayName]
     );
-    await client.query(
-      `insert into member_names (discord_id, display_name)
-       select $1::text, $2::text
-       where $2::text is distinct from
-         (select display_name from member_names where discord_id = $1 order by id desc limit 1)`,
-      [discordId, displayName]
-    );
-    if (joinedAt) {
-      await client.query(
-        `insert into member_stays (discord_id, joined_at)
-         select $1::text, $2::timestamptz
-         where not exists (
-           select 1 from member_stays where discord_id = $1 and (left_at is null or joined_at = $2::timestamptz)
-         )`,
-        [discordId, joinedAt]
-      );
-    }
+    await client.query(NAME_EVENT_SQL, [discordId, displayName]);
+    if (joinedAt) await client.query(JOIN_EVENT_SQL, [discordId, joinedAt]);
   }
 
   // ── Donations ──────────────────────────────────────────────────────────────
@@ -168,13 +195,7 @@ function createStore(getDb) {
         [discordId, displayName]
       );
       if (!changed.rowCount) return false;
-      await client.query(
-        `insert into member_names (discord_id, display_name)
-         select $1::text, $2::text
-         where $2::text is distinct from
-           (select display_name from member_names where discord_id = $1 order by id desc limit 1)`,
-        [discordId, displayName]
-      );
+      await client.query(NAME_EVENT_SQL, [discordId, displayName]);
       return true;
     });
   }
@@ -184,12 +205,9 @@ function createStore(getDb) {
     return transaction(client => touchMember(client, { discordId, displayName, joinedAt: joinedAt ?? new Date() }));
   }
 
-  // A member left the server. Closes their open stay, if they have one.
+  // A member left the server: a server_left event, if they were recorded as in it.
   async function recordLeave({ discordId }) {
-    await query(
-      'update member_stays set left_at = greatest(now(), joined_at) where discord_id = $1 and left_at is null',
-      [discordId]
-    );
+    await query(LEAVE_EVENT_SQL, [discordId]);
   }
 
   // A member's display name changed on the server.
@@ -198,8 +216,8 @@ function createStore(getDb) {
   }
 
   // Brings the member tables in line with the server's current members (an array of
-  // { discordId, displayName, joinedAt }): stores new members, names and joins, and closes the
-  // stay of anyone stored as present who is gone. Does nothing for an empty roster.
+  // { discordId, displayName, joinedAt }): stores new members, name changes and joins, and records
+  // a leave for anyone recorded as in the server who is gone. Does nothing for an empty roster.
   async function syncRoster(roster) {
     if (!roster.length) return { members: 0, left: 0 };
     const ids = roster.map(m => m.discordId);
@@ -214,23 +232,42 @@ function createStore(getDb) {
         [ids, names]
       );
       await client.query(
-        `insert into member_names (discord_id, display_name)
-         select u.id, u.name from unnest($1::text[], $2::text[]) as u(id, name)
-         where u.name is distinct from
-           (select n.display_name from member_names n where n.discord_id = u.id order by n.id desc limit 1)`,
+        `insert into member_events (member_id, kind, old_value, new_value, source, occurred_at)
+         select u.id, 'display_name_changed', last.name, u.name, 'discord', now()
+         from unnest($1::text[], $2::text[]) as u(id, name)
+         left join lateral (
+           select e.new_value as name from member_events e
+           where e.member_id = u.id and e.kind = 'display_name_changed'
+           order by e.occurred_at desc, e.id desc limit 1
+         ) last on true
+         where u.name is distinct from last.name
+         on conflict do nothing`,
         [ids, names]
       );
       await client.query(
-        `insert into member_stays (discord_id, joined_at)
-         select u.id, u.at from unnest($1::text[], $2::timestamptz[]) as u(id, at)
-         where u.at is not null and not exists (
-           select 1 from member_stays s where s.discord_id = u.id and (s.left_at is null or s.joined_at = u.at)
-         )`,
+        `insert into member_events (member_id, kind, source, occurred_at)
+         select u.id, 'server_joined', 'discord', greatest(u.at, last.at)
+         from unnest($1::text[], $2::timestamptz[]) as u(id, at)
+         left join lateral (
+           select e.kind, e.occurred_at as at from member_events e
+           where e.member_id = u.id and e.kind in ('server_joined', 'server_left')
+           order by e.occurred_at desc, e.id desc limit 1
+         ) last on true
+         where u.at is not null and last.kind is distinct from 'server_joined'
+         on conflict do nothing`,
         [ids, joined]
       );
       const left = await client.query(
-        `update member_stays set left_at = greatest(now(), joined_at)
-         where left_at is null and discord_id <> all($1::text[])`,
+        `insert into member_events (member_id, kind, source, occurred_at)
+         select m.discord_id, 'server_left', 'discord', now()
+         from members m
+         where m.discord_id <> all($1::text[]) and (
+           select e.kind from member_events e
+           where e.member_id = m.discord_id and e.kind in ('server_joined', 'server_left')
+           order by e.occurred_at desc, e.id desc limit 1
+         ) = 'server_joined'
+         on conflict do nothing
+         returning member_id`,
         [ids]
       );
       return { members: roster.length, left: left.rowCount };
