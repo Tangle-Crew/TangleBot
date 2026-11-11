@@ -114,8 +114,15 @@ async function importData(client, { donations, highscores, catalog }, log = cons
       continue;
     }
     seenCollectors.add(e.discordId);
+    for (const key of new Set(e.petKeys)) sheetTotals.pets += 1;
+    // A pet_log row means a command changed their pets since the import; re-adding the sheet's
+    // pets could bring back one that was removed on purpose.
+    const changed = await client.query('select 1 from pet_log where discord_id = $1 limit 1', [e.discordId]);
+    if (changed.rows.length) {
+      log(`Warning: ${e.discordId}'s pets were changed in the database since the first import; their pets were left alone.`);
+      continue;
+    }
     for (const key of new Set(e.petKeys)) {
-      sheetTotals.pets += 1;
       if (!catalogKeys.has(key)) {
         log(`Warning: pet key "${key}" (${e.discordId}) is not in the Pets catalog; skipped.`);
         continue;

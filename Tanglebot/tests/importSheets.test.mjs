@@ -12,13 +12,14 @@ const catalog = [
 ];
 
 // history: what donation_log already holds, by member: { other, last }.
-function importDb(history = {}) {
+function importDb(history = {}, petsChanged = []) {
   return mockPg((sql, params) => {
     if (/from donation_log where discord_id/.test(sql)) {
       const h = history[params[0]] ?? { other: 0, last: null };
       return { rows: [{ other: String(h.other), last_total: h.last === null ? null : String(h.last) }] };
     }
     if (/insert into members/.test(sql)) return { rowCount: 1 };
+    if (/from pet_log/.test(sql)) return { rows: petsChanged.includes(params[0]) ? [{ '?column?': 1 }] : [] };
     if (/^\s*select/.test(sql)) return { rows: [{ n: '0' }] };
   });
 }
@@ -117,4 +118,20 @@ test('the summary has the sheet numbers and the database numbers', async () => {
   assert.deepEqual(summary.sheets, { members: 2, gp: 350, pets: 3, catalog: 2 });
   assert.equal(summary.database.gp, 350);
   assert.equal(typeof summary.database.members, 'number');
+});
+
+test('a member whose pets were changed in the database since the import keeps their pets', async () => {
+  const db = importDb({}, ['1']);
+  const logs = [];
+  await importData(db.client, {
+    donations: [],
+    highscores: [
+      { discordId: '1', displayName: 'A', petKeys: ['heron', 'rocky'] },
+      { discordId: '2', displayName: 'B', petKeys: ['heron'] },
+    ],
+    catalog,
+  }, m => logs.push(m));
+  assert.deepEqual(db.find(/insert into member_pets/).map(c => c.params), [['2', 'heron']]);
+  assert.equal(logs.length, 1);
+  assert.match(logs[0], /1's pets were changed.*left alone/);
 });
