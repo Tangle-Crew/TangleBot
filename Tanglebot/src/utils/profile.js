@@ -92,10 +92,24 @@ async function getAccountProfile(accountId, db = database.getPool()) {
      where account_id = $1 order by occurred_at desc, id desc limit 60`,
     [accountId]
   )).rows;
+  const competitions = (await db.query(
+    `select count(*) as entered, count(*) filter (where r.rank = 1) as wins, count(*) filter (where r.rank <= 3) as podiums
+     from competition_results r where r.account_id = $1`,
+    [accountId]
+  )).rows[0];
+  const recentCompetitions = (await db.query(
+    `select c.title, r.rank, r.gained, c.ends_at from competition_results r
+     join competitions c on c.wom_competition_id = r.wom_competition_id
+     where r.account_id = $1 order by c.ends_at desc limit 3`,
+    [accountId]
+  )).rows;
   const member = account.member_id
     ? (await db.query('select discord_id, display_name from members where discord_id = $1', [account.member_id])).rows[0] ?? null
     : null;
-  return { account, events, member };
+  return {
+    account, events, member, recentCompetitions,
+    competitions: { entered: Number(competitions.entered), wins: Number(competitions.wins), podiums: Number(competitions.podiums) },
+  };
 }
 
 // ── Embeds ───────────────────────────────────────────────────────────────────
@@ -159,7 +173,7 @@ function memberEmbed(profile, { tiers, masterThreshold }) {
     .setColor(DEFAULT_EMBED_COLOR);
 }
 
-function accountEmbed({ account, events, member }) {
+function accountEmbed({ account, events, member, competitions = null, recentCompetitions = [] }) {
   const of = kind => events.filter(e => e.kind === kind);
   const clan = [
     `Rank: ${account.wom_role ?? 'none'}, ${account.status === 'active' ? 'in the clan' : 'left the clan'}`,
@@ -173,6 +187,12 @@ function accountEmbed({ account, events, member }) {
     .map(e => `${e.kind === 'joined' ? 'Joined' : 'Left'} ${day(e.occurred_at)}`);
   const ranks = of('rank_changed').slice(0, 6).map(rankLine);
   const names = of('name_changed').slice(0, 5).map(nameLine);
+  const contests = competitions && competitions.entered > 0
+    ? [
+        `Entered ${competitions.entered}, won ${competitions.wins}, top 3 ${competitions.podiums}`,
+        ...recentCompetitions.map(c => `${c.title}: place ${c.rank}, ${fmt(Number(c.gained))} gained (${day(c.ends_at)})`),
+      ]
+    : ['No competitions recorded.'];
 
   return new EmbedBuilder()
     .setTitle(`Profile: ${account.rsn}`)
@@ -181,6 +201,7 @@ function accountEmbed({ account, events, member }) {
       field('Joins and leaves', movements.length ? movements : ['None recorded.']),
       field('Rank history', ranks.length ? ranks : ['None recorded.']),
       field('Name history', names.length ? names : ['No name changes.']),
+      field('Competitions', contests),
       field('Discord', member ? [`<@${member.discord_id}> (${member.display_name})`] : ['Not linked to a Discord member yet.'])
     )
     .setFooter({ text: `WOM player ${account.wom_player_id}` })

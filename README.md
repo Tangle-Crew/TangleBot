@@ -232,6 +232,7 @@ Owner-only. Keeps the database's list of the clan's OSRS accounts, and their his
 | `status` | Shows how many accounts are saved (in the group, left, linked to a person), the history counts and newest dates, when it last synced, and the automatic sync setting. | Nothing |
 | `preview` | Reads WOM and shows what a sync would add or change, then undoes it. The first read takes the whole group history (about a minute for a clan this size). | Nothing (rolled back) |
 | `sync` | Reads WOM and saves the accounts and history, then checks them against WOM. `confirm` must be True, or nothing happens. | Database only |
+| `competitions` | Saves the clan's finished WOM competitions and each player's result. A preview unless `confirm` is True. The first run reads them newest first, up to 120 a run (one WOM call each, paced), so run it again if some remain. After that the automatic sync saves new ones. | Database only, when confirmed |
 | `milestones` | Rebuilds donation tier and Pet Master [milestones](#database) from `donation_log` and `pet_log`. A preview unless `confirm` is True. Safe to run again: milestones already saved are never added twice. | Database only, when confirmed |
 | `verify` | Compares the saved accounts with the WOM group: missing, wrongly ranked, renamed, or no longer in the group. | Nothing |
 
@@ -246,7 +247,7 @@ Shows what the database stores about a clan member or an OSRS account, in one pr
 | Option | What it shows |
 |---|---|
 | `member` | **Discord:** whether they are in the server, when they first joined, and their previous display names. **Clan accounts:** the OSRS accounts linked to them (none yet, see below). **Donations:** their total, tier, how far the next tier is, and when it last changed. **Pets:** how many, whether they are a Pet Master, and which. **Milestones:** their latest donation tier changes and Pet Master changes. |
-| `rsn` | **Clan:** rank, whether they are in the clan or left, first join, when WOM added them and when the RuneLite plugin reported the join, and the leave date. **History:** joins and leaves, rank changes, name changes. **Discord:** the linked member, if any. |
+| `rsn` | **Clan:** rank, whether they are in the clan or left, first join, when WOM added them and when the RuneLite plugin reported the join, and the leave date. **History:** joins and leaves, rank changes, name changes. **Competitions:** how many they entered, won and placed in the top 3 in, and their latest results. **Discord:** the linked member, if any. |
 
 Account names are read the way Wise Old Man stores them: any case, with `_` or `-` as spaces. The `rsn` option autocompletes as you type from the saved accounts: names containing what you typed (names starting with it first), each with its rank or "left" beside it, current members before former ones. Click into the field to see current members straight away. Typing part of a name works if only one account matches; otherwise it lists the matches.
 
@@ -771,6 +772,7 @@ On startup, before any command loads, the bot applies every `Tanglebot/migration
 - `003_command_log.sql`: `command_log`.
 - `004_command_log_name_and_denied.sql`: the `discord_name` column on `command_log`, and the `denied` status.
 - `005_accounts_and_events.sql`: `accounts` (OSRS accounts from Wise Old Man) and `member_events` (clan history).
+- `008_competitions.sql`: `competitions` and `competition_results` (finished WOM competitions and how each player did).
 - `007_milestone_source.sql`: allows the `bot` source on `member_events`, for milestones.
 - `006_discord_history_in_events.sql`: copies the Discord name and server history from `member_names` and `member_stays` into `member_events`, and adds the `member_overview` view. The two old tables are left in place; see [DATABASE.md](DATABASE.md) for dropping them once the copy is checked.
 
@@ -861,6 +863,26 @@ select rsn, wom_role, left_at from accounts where status = 'left' and left_at > 
 -- the latest name changes
 select a.rsn, e.old_value, e.new_value, e.occurred_at from member_events e join accounts a on a.id = e.account_id
   where e.kind = 'name_changed' order by e.occurred_at desc limit 20;
+```
+
+</details>
+
+<details>
+<summary><strong>Competitions</strong></summary>
+
+Finished clan competitions from Wise Old Man are saved in two tables:
+
+- **`competitions`:** one row per competition: its WOM ID, title, metric(s), start and end, how many players took part and the total gained.
+- **`competition_results`:** one row per player who gained anything: their place, what they gained, and their account. A tie shares a place and the next place is skipped (a tie for 2nd leaves no 3rd), the same as the weekly winners post.
+
+Run `/memberdata competitions` once by hand to save the history (a preview first, then `confirm:True`; repeat if it says some remain). After that the automatic sync saves each competition that has ended since. Competitions are saved once they have ended, so a running one is never half-saved. `/profile rsn` shows an account's record.
+
+```sql
+-- wins by account
+select a.rsn, count(*) as wins from competition_results r join accounts a on a.id = r.account_id
+  where r.rank = 1 group by a.rsn order by wins desc limit 10;
+-- one competition's results
+select r.rank, r.rsn, r.gained from competition_results r where r.wom_competition_id = 12345 order by r.rank, r.rsn;
 ```
 
 </details>

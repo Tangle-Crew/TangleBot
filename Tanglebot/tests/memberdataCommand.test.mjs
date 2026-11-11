@@ -10,12 +10,14 @@ delete process.env.MEMBER_SYNC_INTERVAL_MINUTES;
 const { commandDisabledReason } = require('../src/utils/commandAvailability.js');
 const memberSync = require('../src/utils/memberSync.js');
 const milestones = require('../src/utils/milestones.js');
+const competitionSync = require('../src/utils/competitionSync.js');
 const command = require('../src/commands/memberdata.js');
 
 let saved;
 let savedMilestones;
-beforeEach(() => { saved = { ...memberSync }; savedMilestones = { ...milestones }; });
-afterEach(() => { Object.assign(memberSync, saved); Object.assign(milestones, savedMilestones); });
+let savedCompetitions;
+beforeEach(() => { saved = { ...memberSync }; savedMilestones = { ...milestones }; savedCompetitions = { ...competitionSync }; });
+afterEach(() => { Object.assign(memberSync, saved); Object.assign(milestones, savedMilestones); Object.assign(competitionSync, savedCompetitions); });
 
 function run(subcommand, { owner = true, confirm } = {}) {
   const replies = [];
@@ -41,9 +43,9 @@ test('/memberdata needs the database, the WOM group and the Owner role', () => {
   for (const key of Object.keys(env)) assert.match(commandDisabledReason(command, { ...env, [key]: '' }), new RegExp(key));
 });
 
-test('it offers status, preview, sync, milestones and verify, and sync needs a confirm', () => {
+test('it offers status, preview, sync, competitions, milestones and verify, and sync needs a confirm', () => {
   const options = command.data.toJSON().options;
-  assert.deepEqual(options.map(o => o.name), ['status', 'preview', 'sync', 'milestones', 'verify']);
+  assert.deepEqual(options.map(o => o.name), ['status', 'preview', 'sync', 'competitions', 'milestones', 'verify']);
   const confirm = options.find(o => o.name === 'sync').options[0];
   assert.equal(confirm.name, 'confirm');
   assert.equal(confirm.required, true);
@@ -59,6 +61,7 @@ test('only the Owner can use it; anyone else is refused, told, and logged as den
 });
 
 test('status shows the accounts, the history counts and the automatic sync setting', async () => {
+  competitionSync.competitionStatus = async () => ({ competitions: 24, results: 288, newest: new Date('2026-11-07T16:00:00Z') });
   memberSync.memberDataStatus = async () => ({
     accounts: { total: 368, active: 261, left: 107, linked: 0, syncedAt: new Date('2026-11-10T20:00:00Z') },
     events: [{ kind: 'joined', count: 372, newest: new Date('2026-11-08T02:03:47Z') }, { kind: 'rank_changed', count: 1265, newest: null }],
@@ -69,6 +72,7 @@ test('status shows the accounts, the history counts and the automatic sync setti
   assert.match(replies[0], /372 joined the clan, newest 2026-11-08/);
   assert.match(replies[0], /1,265 rank changes, newest none/);
   assert.match(replies[0], /every 60 minutes, once the first sync has been run/);
+  assert.match(replies[0], /Competitions: 24 saved, 288 results, newest ended 2026-11-07/);
 });
 
 test('preview reads without saving and reports what a sync would change', async () => {
@@ -144,4 +148,26 @@ test('milestones previews unless confirmed, then saves, and explains what cannot
   assert.deepEqual(calls, [false, true]);
   assert.match(saved.replies.at(-1), /Milestones saved from the donation and pet logs/);
   assert.doesNotMatch(saved.replies.at(-1), /Run again/);
+});
+
+test('competitions previews unless confirmed, then saves a batch and says how many remain', async () => {
+  let previewArgs;
+  competitionSync.previewCompetitions = async args => { previewArgs = args; return { pending: 69, toRead: 69, minutes: 5 }; };
+  let syncCalls = 0;
+  competitionSync.syncCompetitions = async () => { syncCalls += 1; return { competitions: 120, results: 1500, remaining: 30 }; };
+
+  const preview = await run('competitions');
+  assert.equal(previewArgs.groupId, 9);
+  assert.equal(syncCalls, 0);
+  assert.match(preview.replies.at(-1), /69 finished competitions are not saved yet/);
+  assert.match(preview.replies.at(-1), /about 5 minute\(s\)/);
+  assert.match(preview.replies.at(-1), /confirm set to True/);
+
+  const saved = await run('competitions', { confirm: true });
+  assert.equal(syncCalls, 1);
+  assert.match(saved.replies.at(-1), /Saved 120 competitions and 1,500 results/);
+  assert.match(saved.replies.at(-1), /30 more are not saved yet: run it again/);
+
+  competitionSync.syncCompetitions = async () => ({ competitions: 3, results: 20, remaining: 0 });
+  assert.match((await run('competitions', { confirm: true })).replies.at(-1), /Every finished competition is saved/);
 });
