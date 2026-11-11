@@ -37,6 +37,12 @@ const memberData = (over = {}) => ({
   accounts: [{ rsn: 'Snow Main', wom_role: 'templar', status: 'active', is_main: true, first_joined_at: d('2023-03-01T00:00:00Z'), left_at: null }],
   petNames: ['Heron', 'Rocky'],
   lastDonation: d('2026-11-01T00:00:00Z'),
+  milestones: [
+    { kind: 'pet_master_reached', old_value: null, new_value: null, occurred_at: d('2026-10-01T00:00:00Z') },
+    { kind: 'donation_tier_changed', old_value: 'Ruby', new_value: 'Diamond', occurred_at: d('2026-09-01T00:00:00Z') },
+    { kind: 'donation_tier_changed', old_value: 'Diamond', new_value: null, occurred_at: d('2026-08-01T00:00:00Z') },
+    { kind: 'pet_master_lost', old_value: null, new_value: null, occurred_at: d('2026-07-01T00:00:00Z') },
+  ],
   ...over,
 });
 
@@ -58,6 +64,10 @@ test('a member embed shows the Discord side, accounts, donations with tier and n
   assert.match(fields.Pets, /Heron, Rocky/);
   assert.doesNotMatch(fields.Pets, /Pet Master/);
   assert.equal(profile.memberEmbed(memberData(), options).toJSON().footer.text, 'Discord ID 111');
+  assert.match(fields.Milestones, /Became a Pet Master \(<t:\d+:D>\)/);
+  assert.match(fields.Milestones, /Donation tier: Ruby → Diamond/);
+  assert.match(fields.Milestones, /Donation tier: Diamond → none/);
+  assert.match(fields.Milestones, /No longer a Pet Master/);
 });
 
 test('a member who left, has nothing logged and no accounts says so plainly', () => {
@@ -70,6 +80,7 @@ test('a member who left, has nothing logged and no accounts says so plainly', ()
   assert.equal(fields['Clan accounts'], 'No clan accounts are linked to this person yet.');
   assert.equal(fields.Donations, 'No donations logged.');
   assert.equal(fields.Pets, 'No pets logged.');
+  assert.equal(text(profile.memberEmbed(memberData({ milestones: [] }), options)).Milestones, 'None recorded.');
 });
 
 test('the top tier has no next tier, Pet Master is shown, and a long pet list is cut', () => {

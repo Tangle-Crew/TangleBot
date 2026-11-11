@@ -187,6 +187,19 @@ function createStore(getDb) {
 
   // ── Members ────────────────────────────────────────────────────────────────
 
+  // Records milestones ({ kind, oldValue, newValue, data }) for a member, dated now. byDiscordId is
+  // who made the change that caused them.
+  async function recordMilestones(discordId, milestones, byDiscordId = null) {
+    for (const m of milestones) {
+      await query(
+        `insert into member_events (member_id, kind, old_value, new_value, data, source, occurred_at)
+         values ($1, $2, $3, $4, $5, 'bot', now())
+         on conflict do nothing`,
+        [discordId, m.kind, m.oldValue, m.newValue, JSON.stringify({ ...m.data, by: byDiscordId })]
+      );
+    }
+  }
+
   // Saves a display name the leaderboard found on the server. Only members already stored.
   async function updateDisplayName({ discordId, displayName }) {
     return transaction(async client => {
@@ -282,6 +295,7 @@ function createStore(getDb) {
     getMemberPets,
     changeMemberPets,
     updateDisplayName,
+    recordMilestones,
     recordJoin,
     recordLeave,
     recordNameChange,

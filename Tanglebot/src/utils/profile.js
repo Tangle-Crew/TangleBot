@@ -39,6 +39,9 @@ async function getMemberProfile(discordId, db = database.getPool()) {
       where member_id = $1 and kind = 'display_name_changed' order by occurred_at desc, id desc limit 6`),
     stays: await rows(`select kind, occurred_at from member_events
       where member_id = $1 and kind in ('server_joined', 'server_left') order by occurred_at desc, id desc limit 4`),
+    milestones: await rows(`select kind, old_value, new_value, occurred_at from member_events
+      where member_id = $1 and kind in ('donation_tier_changed', 'pet_master_reached', 'pet_master_lost')
+      order by occurred_at desc, id desc limit 6`),
     accounts: await rows(`select rsn, wom_role, status, is_main, first_joined_at, left_at from accounts
       where member_id = $1 order by is_main desc, first_joined_at`),
     petNames: (await rows(`select p.name from member_pets mp join pets p on p.key = mp.pet_key
@@ -98,12 +101,18 @@ async function getAccountProfile(accountId, db = database.getPool()) {
 // ── Embeds ───────────────────────────────────────────────────────────────────
 
 const rankLine = e => `${e.old_value ?? 'new'} → ${e.new_value ?? 'none'} (${day(e.occurred_at)})`;
+const milestoneLine = e => {
+  const when = day(e.occurred_at);
+  if (e.kind === 'pet_master_reached') return `Became a Pet Master (${when})`;
+  if (e.kind === 'pet_master_lost') return `No longer a Pet Master (${when})`;
+  return `Donation tier: ${e.old_value ?? 'none'} → ${e.new_value ?? 'none'} (${when})`;
+};
 const nameLine = e => `${e.old_value ?? 'first seen as'} → ${e.new_value} (${day(e.occurred_at)})`;
 
 // tiers: the donation tiers, highest first, each { name, threshold, emoji }; masterThreshold: pets
 // needed for Pet Master.
 function memberEmbed(profile, { tiers, masterThreshold }) {
-  const { overview, nameChanges, stays, accounts, petNames, lastDonation } = profile;
+  const { overview, nameChanges, stays, accounts, petNames, lastDonation, milestones = [] } = profile;
 
   const discord = [
     overview.inServer === false
@@ -139,7 +148,13 @@ function memberEmbed(profile, { tiers, masterThreshold }) {
   return new EmbedBuilder()
     .setTitle(`Profile: ${overview.displayName}`)
     .setDescription(`<@${overview.discordId}>`)
-    .addFields(field('Discord', discord), field('Clan accounts', clan), field('Donations', donations), field('Pets', pets))
+    .addFields(
+      field('Discord', discord),
+      field('Clan accounts', clan),
+      field('Donations', donations),
+      field('Pets', pets),
+      field('Milestones', milestones.length ? milestones.map(milestoneLine) : ['None recorded.'])
+    )
     .setFooter({ text: `Discord ID ${overview.discordId}` })
     .setColor(DEFAULT_EMBED_COLOR);
 }
