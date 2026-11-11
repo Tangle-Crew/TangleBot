@@ -193,6 +193,23 @@ Loads with `DATABASE_URL`, or with `GOOGLE_SERVICE_ACCOUNT_JSON` when there is n
 
 ---
 
+### 🚚 `/migration` — Move the Sheets into the Database
+
+Owner-only tools for the one-off move from the Google Sheets to PostgreSQL, with checks along the way. Replies are private. Only loads while `DATABASE_URL`, the Google variables, both sheet IDs and `OWNER_ROLE_ID` are set; see [Moving from the sheets](#database).
+
+| Subcommand | Description |
+|------------|-------------|
+| `dbconnection` | Tests the connection to the database; shows the server, how long it took and which migrations are applied or pending |
+| `sheets` | Tests reading the three sheet tabs; shows what they hold and any pet keys missing from the catalog |
+| `status` | Shows what the database holds now (members, GP, pets, last import) |
+| `dryrun` | Runs the import and the check, then undoes it |
+| `import` | Imports the sheets (`confirm` must be True), checks the result, and reposts both leaderboards |
+| `verify` | Compares the sheets with the database member by member; writes nothing |
+
+The import is safe to run again and never writes to the sheets. Only one import runs at a time, and a failure writes nothing.
+
+---
+
 ### 🔔 `/lfg-roles` — Activity Ping Roles
 
 Opens a private menu for opting in to ping roles for bosses, raids and minigames, so members only get pinged for what they care about. Groups made with `/lfg-post` ping these roles.
@@ -673,9 +690,10 @@ Role-based visibility is set by a server admin in **Server Settings > Integratio
 Add these overrides once:
 
 - **Templar:** `/donationhighscore`, `/pethighscore`, `/refreshboards`, `/stalemembers`, `/weeklyannounce`, `/weeklycomp`, `/honeypot`, `/submission`
+- **Owner:** `/migration`
 - **Coordinator:** `/spinwheel`
 
-Owner also holds Templar, so it needs no separate override. A renamed or new staff command needs its override added once. Admins always see every command.
+Owner also holds Templar, so it needs no separate override for the Templar commands. A renamed or new staff command needs its override added once. Admins always see every command.
 
 ### Environment variables
 
@@ -751,23 +769,18 @@ select joined_at, left_at from member_stays where discord_id = '<id>' order by j
 <details>
 <summary><strong>Moving from the sheets</strong></summary>
 
-Import before you restart the bot. A bot started with `DATABASE_URL` set reposts both leaderboards from the database on startup, so starting it before the import would show empty leaderboards in Discord until the import finished.
+The import is run from Discord with [`/migration`](#-migration--move-the-sheets-into-the-database), by the Owner. It never runs on its own at startup. (The schema migrations above still apply on startup; `/migration` moves the data.)
 
-1. Add `DATABASE_URL` to `Tanglebot/.env`. The running bot only reads `.env` when it is recreated, so it keeps using the sheets for now.
-2. Build the new image without restarting: `docker compose build`.
-3. Ask staff to stop using `/donationhighscore` and `/pethighscore`, then run the one-off import:
-   ```bash
-   docker compose run --rm tanglebot node scripts/import-sheets.js
-   ```
-   (Without Docker: `cd Tanglebot && node scripts/import-sheets.js`.) It applies the migrations, reads the `Donations`, `Highscores` and `Pets` tabs, and writes everything in one transaction, so a failure writes nothing. It never writes to the sheets. It needs `DATABASE_URL`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `DONATIONS_SHEET_ID` and `PET_HIGHSCORES_SHEET_ID`. Compare the numbers it prints (members, total GP, total pets owned, catalog size) with the sheets. A pet key missing from the `Pets` tab is skipped with a warning.
-4. Check every member, not just the totals:
-   ```bash
-   docker compose run --rm tanglebot node scripts/import-sheets.js --verify
-   ```
-   It re-reads the sheets and compares them with the database: each member's donation total and pet list, and the pet catalog (names, emoji IDs and order). It lists each difference, for example `Snow (123...): sheet has 150,000,000 GP donated, database has 140,000,000.`, and exits with an error if there are any. Members changed by a command since the import, pets added since, and pet keys the import skipped are shown as notes, not differences. It writes nothing, so you can run it again later.
-5. Restart the bot on the new image: `docker compose up -d`. It now uses the database and posts the leaderboards from it on startup. `/refreshboards` reposts them any time.
+1. Keep the Google variables and add `DATABASE_URL` to `Tanglebot/.env`, then restart: `docker compose up -d --build`. The schema is created. While the database is still empty and the sheets are still set up, the bot does not repost the leaderboards on startup, so the live boards are not replaced by empty ones. `/donationhighscore` and `/pethighscore` already write to the database, so ask staff to hold off using them until the import is done.
+2. `/migration dbconnection` checks the bot can reach the database and shows its applied migrations.
+3. `/migration sheets` checks the bot can read the sheets and shows what they hold, including any pet keys the import would skip.
+4. `/migration dryrun` runs the whole import and check, then undoes it. Compare its numbers (members, total GP, total pets owned, catalog size) with the sheets.
+5. `/migration import confirm:True` runs the import, checks it against the sheets member by member, and reposts both leaderboards from the database.
+6. `/migration verify` repeats the member-by-member check whenever you like. It lists each difference, for example `Snow (123...): sheet has 150,000,000 GP donated, database has 140,000,000.` Members changed by a command since the import, pets added since, and pet keys the import skipped are shown as notes, not differences. `/migration status` shows what the database holds.
 
-`--dry-run` does the whole import and verification inside a transaction that is rolled back, leaving the database unchanged. It needs the migrations already applied (by a first import or a bot start), so it suits a later re-import.
+`/migration` only exists while `DATABASE_URL`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `DONATIONS_SHEET_ID`, `PET_HIGHSCORES_SHEET_ID` and `OWNER_ROLE_ID` are all set. When the month of fallback is over, remove the Google variables to retire it.
+
+The same steps are available from a terminal with `docker compose run --rm tanglebot node scripts/import-sheets.js [--dry-run | --verify]` (needs the same variables).
 
 The import is safe to run again: it updates totals and the catalog, adds an `import` row to `donation_log` only when a member's total changed, and keeps the names already in the database. A member whose total was changed by a command since the first import is left alone, with a warning.
 

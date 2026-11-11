@@ -24,6 +24,8 @@ const { refreshLeaderboard: refreshDonationLeaderboard } = require('../commands/
 const { handleStaleMembersButton, handleStaleMembersSelect, start: startStaleMembers } = require('../commands/stalemembers');
 const { handleSuggestButton, handleSuggestModalSubmit } = require('../utils/lfgSuggestion');
 const { logCommand } = require('../utils/commandLog');
+const { databaseConfigured } = require('../utils/commandAvailability');
+const migrationTools = require('../utils/migrationTools');
 const { registerMemberHistory, syncMemberRoster } = require('../utils/memberHistory');
 const { startCompEndingReminder } = require('../utils/compEndingReminder');
 const { handleWeeklyAnnounceButton, handleWeeklyAnnounceSelect, handleWeeklyAnnounceModal } = require('../commands/weeklyannounce');
@@ -117,16 +119,20 @@ function loadEvents(client) {
     // Before the leaderboards, so a first sync stores everyone before names are refreshed.
     await syncMemberRoster(client);
 
-    try {
-      await refreshPetLeaderboard(client);
-    } catch (err) {
-      console.error('[PetHighscore] Failed to refresh pet leaderboard on startup:', err);
-    }
+    if (await boardsWaitForImport()) {
+      console.log('[Database] The high score tables are empty and the sheets are still set up: leaderboards not reposted. Run /migration import.');
+    } else {
+      try {
+        await refreshPetLeaderboard(client);
+      } catch (err) {
+        console.error('[PetHighscore] Failed to refresh pet leaderboard on startup:', err);
+      }
 
-    try {
-      await refreshDonationLeaderboard(client);
-    } catch (err) {
-      console.error('[DonationHighscore] Failed to refresh donation leaderboard on startup:', err);
+      try {
+        await refreshDonationLeaderboard(client);
+      } catch (err) {
+        console.error('[DonationHighscore] Failed to refresh donation leaderboard on startup:', err);
+      }
     }
 
     if (process.env.CLAN_ID) {
@@ -233,6 +239,19 @@ function loadEvents(client) {
   });
 }
 
+// True while the database is empty but the sheets are still configured, i.e. the import has not
+// happened yet. Reposting then would replace the live leaderboards with empty ones.
+async function boardsWaitForImport() {
+  if (!databaseConfigured()) return false;
+  if (!process.env.GOOGLE_SERVICE_ACCOUNT_JSON?.trim() || !process.env.DONATIONS_SHEET_ID?.trim()) return false;
+  try {
+    return await migrationTools.waitingForImport();
+  } catch (err) {
+    console.error('[Database] Could not check whether the import has happened:', err.message);
+    return false;
+  }
+}
+
 // Runs a slash command and records who ran it, what it was, and whether it threw.
 async function runCommand(interaction, command) {
   const startedAt = Date.now();
@@ -257,4 +276,4 @@ async function replyOrFollowUp(interaction, content) {
   }
 }
 
-module.exports = { loadEvents, runCommand };
+module.exports = { loadEvents, runCommand, boardsWaitForImport };

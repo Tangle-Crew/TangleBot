@@ -10,7 +10,7 @@ require.cache[canvasPath] = { id: canvasPath, filename: canvasPath, loaded: true
 const load = name => require(`../src/commands/${name}.js`);
 
 const STAFF = [
-  'donationhighscore', 'pethighscore', 'refreshboards', 'stalemembers',
+  'donationhighscore', 'pethighscore', 'refreshboards', 'migration', 'stalemembers',
   'weeklyannounce', 'weeklycomp', 'honeypot', 'spinwheel', 'submission',
 ];
 const PUBLIC = ['lfg-post', 'lfg-roles', 'link', 'linkalt', 'weeklycompstats'];

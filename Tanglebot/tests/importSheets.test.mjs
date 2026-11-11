@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { mockPg } from './helpers/mockPg.mjs';
 
 const require = createRequire(import.meta.url);
-const { parseSheets, importData } = require('../scripts/import-sheets.js');
+const { parseSheets, importData } = require('../src/utils/migrationTools.js');
 
 const catalog = [
   { key: 'heron', name: 'Heron', emojiId: '1' },
