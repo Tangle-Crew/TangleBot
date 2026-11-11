@@ -18,6 +18,7 @@ How TangleBot stores its information in PostgreSQL, the rules for changing it, a
 | `src/utils/memberHistory.js` | Records Discord joins, leaves and name changes; the startup roster sync |
 | `src/utils/commandLog.js` | Writes, reads and prunes the command log |
 | `src/utils/milestones.js` | Finds and rebuilds milestones (donation tier changes, Pet Master) from the logs |
+| `src/utils/competitionSync.js` | Reads finished WOM competitions and saves them and their results |
 | `src/utils/profile.js` | Reads one person or one account (read only) and builds the `/profile` embeds |
 | `src/utils/memberSync.js` | Reads the Wise Old Man group and saves `accounts` and clan events (used by `/memberdata` and a timer) |
 | `src/utils/migrationTools.js` | The sheets import and its checks (used only by `/migration`; retired with the sheets) |
@@ -45,15 +46,16 @@ How TangleBot stores its information in PostgreSQL, the rules for changing it, a
 | `accounts` | An OSRS account, from WOM | `wom_player_id` (unique), `username` (WOM's lower-case form), `rsn`, `member_id` (empty until accounts are linked to people), `is_main` (reserved), `wom_role`, `status` (`active`, `left`), `wom_joined_at`, `client_joined_at`, `first_joined_at`, `left_at`, `wom_data` (jsonb copy of WOM's last payload), `synced_at` | `memberSync.js` (`/memberdata`, hourly timer) |
 | `member_events` | One change in someone's history | `member_id` **or** `account_id` (exactly one), `kind`, `old_value`, `new_value`, `data` (jsonb), `source` (`wom`, `discord`, `import`, `bot`), `occurred_at`, `recorded_at`. Account events from WOM: `joined`, `left`, `rank_changed`, `name_changed`. Person events from Discord: `display_name_changed`, `server_joined`, `server_left` | `memberSync.js` (accounts), `highScoresDb.js`, `memberHistory.js` and `milestones.js` (people); append-only, a unique key stops duplicates |
 | `member_overview` (a view) | One row per person | `discord_id`, `display_name`, `donated_gp`, `pets`, `in_server`, `first_joined_server_at`, `accounts`, `main_rsn`, `main_role` | Read only |
+| `competitions` | A finished WOM competition | `wom_competition_id` (PK), `title`, `metric`, `metrics`, `starts_at`, `ends_at`, `participant_count`, `total_gained` | `competitionSync.js` (`/memberdata competitions`, then the automatic sync) |
+| `competition_results` | One player's result in a competition | `(wom_competition_id, wom_player_id)` (PK), `account_id` (empty if the account was not saved yet), `rsn`, `rank`, `gained`. Only players who gained | `competitionSync.js` |
 | `schema_migrations` | An applied migration file | `name` (PK), `applied_at` | The migration runner |
 
-How they connect: `accounts.member_id` (empty for now) points at `members`, and `member_events` points at an account or a member. `donations`, `donation_log`, `member_pets` and `pet_log` all point at `members.discord_id`. `member_pets` and `pet_log` also point at `pets.key`. `command_log` deliberately points at nothing: anyone who runs a command is logged, member or not.
+How they connect: `accounts.member_id` (empty for now) points at `members`, `member_events` points at an account or a member, and `competition_results` points at `competitions` and (when known) an account. `donations`, `donation_log`, `member_pets` and `pet_log` all point at `members.discord_id`. `member_pets` and `pet_log` also point at `pets.key`. `command_log` deliberately points at nothing: anyone who runs a command is logged, member or not.
 
 ### Planned
 
 | Table | Purpose | Notes |
 |---|---|---|
-| `competition_results` | Weekly competition standings | Per account, saved when `/weeklyannounce` sends, and back-filled from WOM |
 | `honeypot_incidents` | Honeypot timeouts and bans | Metadata only, never message content. No foreign key, like `command_log` |
 | `bot_state` | Small key and JSON values, replacing the `data/*.json` files | Staged: simple files first, LFG and weekly announcements last |
 
@@ -105,7 +107,7 @@ Milestones (donation tiers, Pet Master) are event kinds, not a table.
 | B2. Discord history in events | Server joins, leaves and name changes are person events; `006` copies the old history into `member_events` and adds `member_overview`; `002` no longer creates the old tables | Built. The old tables stay until you drop them |
 | C. `/profile` | By member or by RSN, for Coordinator and above | Built |
 | D. Milestones | Donation tier and Pet Master as events, recorded as they happen and rebuilt from the logs by `/memberdata milestones` | Built |
-| E. Competition results | `competition_results`, saved on announce, back-filled from WOM | Planned |
+| E. Competition results | `competitions` and `competition_results`: every finished clan competition, read from WOM by `/memberdata competitions` and then the automatic sync | Built |
 | F. Honeypot incidents | `honeypot_incidents` | Planned |
 | G. State files | `bot_state`, moving the `data/*.json` files, simple ones first | Planned |
 | Link | Joining accounts to members. Not decided; `/link` does nothing today. `accounts.member_id` is reserved for it | Parked |
@@ -118,6 +120,7 @@ Milestones (donation tiers, Pet Master) are event kinds, not a table.
 - **Manual first:** data moves (the sheets, the WOM sync) are Owner commands with a preview and a verify step, run by hand the first time. Nothing imports on startup, and the timer does nothing until the first manual WOM sync has happened.
 - **`command_log` has no foreign key:** staff attempts by people not in `members` should still be logged.
 - **Donation total cap:** 10 trillion GP per member, as a typo guard and to stay inside safe Number range.
+- **Competitions are saved by the sync, not when `/weeklyannounce` sends:** that covers every competition, announced or not, and needs no hook into the announcement code.
 - **Milestones are events:** they are history with a reached time, not a separate kind of record. Live milestones and the rebuilt ones are told apart from each other by time (within 5 seconds is the same event), so a rebuild after going live adds no duplicates.
 
 ## Known gaps
@@ -125,6 +128,7 @@ Milestones (donation tiers, Pet Master) are event kinds, not a table.
 - A command that catches its own error and replies normally is logged as `ok`, unless it sets `interaction.commandError` (done for `/donationhighscore`, `/pethighscore`, `/migration` and `/commandlog`).
 - A member who left and rejoined the Discord server entirely while the bot was down shows as one stay (no leave is recorded).
 - A leave noticed by the startup sync is dated when the bot noticed it.
+- A competition is only saved once it has ended; a player who gained nothing has no result row; the first history run reads at most 120 competitions at a time.
 - A donation tier already held at the sheets import is dated to the import (`data.basis = 'import'`), and a member who was already a Pet Master before their first logged pet change has no milestone date.
 - Until accounts are linked to members, `/profile member` can only show the Discord side, donations and pets; use `/profile rsn` for the clan side.
 - WOM's history only goes back to when the group started being tracked. An account with only a leave event and no join date has no `first_joined_at`.

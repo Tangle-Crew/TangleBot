@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const memberSync = require('../utils/memberSync');
 const milestones = require('../utils/milestones');
+const competitionSync = require('../utils/competitionSync');
 const donationHighscore = require('./donationhighscore');
 const petHighscore = require('./pethighscore');
 const { codeBlock } = require('../utils/discordText');
@@ -29,12 +30,14 @@ function countLines(result) {
 const SUBCOMMANDS = {
   async status() {
     const { accounts, events } = await memberSync.memberDataStatus();
+    const competitions = await competitionSync.competitionStatus();
     return [
       `Accounts: ${fmt(accounts.total)} (${fmt(accounts.active)} in the group, ${fmt(accounts.left)} left, ${fmt(accounts.linked)} linked to a person)`,
       `Last synced: ${accounts.syncedAt ? accounts.syncedAt.toISOString() : 'never'}`,
       ...(events.length
         ? events.map(e => `  ${fmt(e.count)} ${EVENT_LABELS[e.kind] ?? e.kind}, newest ${e.newest ? e.newest.toISOString().slice(0, 10) : 'none'}`)
         : ['  No events yet.']),
+      `Competitions: ${fmt(competitions.competitions)} saved, ${fmt(competitions.results)} results${competitions.newest ? `, newest ended ${competitions.newest.toISOString().slice(0, 10)}` : ''}`,
       `Automatic sync: ${memberSync.syncIntervalMinutes() === 0 ? 'off' : `every ${memberSync.syncIntervalMinutes()} minutes, once the first sync has been run`}`,
     ];
   },
@@ -56,6 +59,24 @@ const SUBCOMMANDS = {
       'Synced:',
       ...countLines(result),
       check.differences.length ? `${check.differences.length} difference(s) from WOM afterwards (see /memberdata verify).` : 'Checked against WOM: no differences.',
+    ];
+  },
+
+  async competitions(interaction, groupId) {
+    if (!interaction.options.getBoolean('confirm')) {
+      const preview = await competitionSync.previewCompetitions({ groupId });
+      return [
+        'Preview (nothing was saved):',
+        `  ${fmt(preview.pending)} finished competitions are not saved yet`,
+        `  A sync would read ${fmt(preview.toRead)} of them (newest first), one WOM call each: about ${fmt(preview.minutes)} minute(s)`,
+        'Run again with confirm set to True to save them. Run it again for the rest if some remain.',
+      ];
+    }
+    await interaction.editReply('Reading the finished competitions from Wise Old Man (this can take a few minutes)...');
+    const result = await competitionSync.syncCompetitions({ groupId });
+    return [
+      `Saved ${fmt(result.competitions)} competitions and ${fmt(result.results)} results.`,
+      result.remaining ? `${fmt(result.remaining)} more are not saved yet: run it again.` : 'Every finished competition is saved.',
     ];
   },
 
@@ -102,6 +123,12 @@ module.exports = {
         .setName('sync')
         .setDescription('Read Wise Old Man and save the accounts and history, then check them')
         .addBooleanOption(o => o.setName('confirm').setDescription('Set to True to save').setRequired(true))
+    )
+    .addSubcommand(sub =>
+      sub
+        .setName('competitions')
+        .setDescription('Save the clan\'s finished WOM competitions and results (a preview unless confirmed)')
+        .addBooleanOption(o => o.setName('confirm').setDescription('Set to True to save them'))
     )
     .addSubcommand(sub =>
       sub

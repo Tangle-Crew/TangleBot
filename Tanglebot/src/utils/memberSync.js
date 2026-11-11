@@ -1,6 +1,7 @@
 const database = require('./database');
 const wiseOldMan = require('./wiseOldMan');
 const { databaseConfigured } = require('./commandAvailability');
+const competitionSync = require('./competitionSync');
 const { intEnv } = require('./db');
 
 // Copies the clan's Wise Old Man (WOM) group into the accounts and member_events tables: who is in
@@ -308,6 +309,11 @@ function startMemberSync() {
       const { counts, truncated } = await syncMembers({ apply: true, groupId });
       const events = Object.values(counts.events).reduce((a, b) => a + b, 0);
       console.log(`[MemberSync] Synced: ${counts.accountsNew} new and ${counts.accountsChanged} changed accounts, ${events} new events${truncated ? ' (stopped at the page limit)' : ''}`);
+      // Newly finished competitions too, but only after the first full read has been done by hand.
+      if ((await competitionSync.competitionStatus()).competitions > 0) {
+        const saved = await competitionSync.syncCompetitions({ groupId, limit: 5 });
+        if (saved.competitions) console.log(`[MemberSync] Saved ${saved.competitions} finished competition(s)`);
+      }
     } catch (err) {
       console.error('[MemberSync] Automatic sync failed:', err.message);
     }

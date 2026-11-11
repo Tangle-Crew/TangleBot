@@ -107,6 +107,8 @@ const accountData = (over = {}) => ({
     { kind: 'name_changed', old_value: 'Old Name', new_value: 'Some Name', occurred_at: d('2024-03-01T00:00:00Z') },
   ],
   member: null,
+  competitions: { entered: 12, wins: 2, podiums: 5 },
+  recentCompetitions: [{ title: 'BOTW T1: Zulrah', rank: 1, gained: 160702, ends_at: d('2026-11-07T16:00:00Z') }],
   ...over,
 });
 
@@ -119,6 +121,8 @@ test('an account embed shows rank, dates, history and that it is not linked', ()
   assert.match(fields['Name history'], /Old Name → Some Name/);
   assert.match(fields['Joins and leaves'], /Joined <t:\d+:D>/);
   assert.equal(fields.Discord, 'Not linked to a Discord member yet.');
+  assert.match(fields.Competitions, /Entered 12, won 2, top 3 5/);
+  assert.match(fields.Competitions, /BOTW T1: Zulrah: place 1, 160,702 gained \(<t:\d+:D>\)/);
   assert.equal(profile.accountEmbed(accountData()).toJSON().footer.text, 'WOM player 77');
 });
 
@@ -133,6 +137,7 @@ test('a former member shows when they left, a linked account shows the person, e
   assert.equal(left['Name history'], 'No name changes.');
   assert.equal(left['Joins and leaves'], 'None recorded.');
   assert.equal(left.Discord, '<@111> (Snow)');
+  assert.equal(text(profile.accountEmbed(accountData({ competitions: { entered: 0, wins: 0, podiums: 0 }, recentCompetitions: [] }))).Competitions, 'No competitions recorded.');
 });
 
 test('findAccounts tries the exact name first, reads _ as a space, and treats % as plain text', async () => {
