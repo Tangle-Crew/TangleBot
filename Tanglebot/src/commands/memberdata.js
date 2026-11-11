@@ -1,5 +1,8 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const memberSync = require('../utils/memberSync');
+const milestones = require('../utils/milestones');
+const donationHighscore = require('./donationhighscore');
+const petHighscore = require('./pethighscore');
 const { codeBlock } = require('../utils/discordText');
 
 const OWNER_ROLE_ID = process.env.OWNER_ROLE_ID;
@@ -56,6 +59,25 @@ const SUBCOMMANDS = {
     ];
   },
 
+  async milestones(interaction) {
+    const apply = Boolean(interaction.options.getBoolean('confirm'));
+    const result = await milestones.backfillMilestones({
+      tiers: donationHighscore.DONATION_TIERS,
+      masterThreshold: petHighscore.PET_MASTER_THRESHOLD,
+      apply,
+    });
+    const { counts, notes } = result;
+    const lines = [
+      apply ? 'Milestones saved from the donation and pet logs:' : 'Preview (nothing was saved). Milestones the donation and pet logs show:',
+      `  ${fmt(counts.tierChanges)} donation tier changes`,
+      `  ${fmt(counts.masterReached)} Pet Master reached, ${fmt(counts.masterLost)} Pet Master lost`,
+    ];
+    if (notes.importedBasis) lines.push(`${fmt(notes.importedBasis)} tier(s) were held at the sheets import: dated to the import, not to when they were reached.`);
+    if (notes.alreadyMasterBeforeLog) lines.push(`${fmt(notes.alreadyMasterBeforeLog)} member(s) were already Pet Masters before their logged changes: no date is known for that.`);
+    if (!apply) lines.push('Run again with confirm set to True to save them. Already saved milestones are never added twice.');
+    return lines;
+  },
+
   async verify(interaction, groupId) {
     const { differences, members } = await memberSync.verifyMembers({ groupId });
     if (!differences.length) return [`Verified: the ${fmt(members)} members in the WOM group match the saved accounts.`];
@@ -80,6 +102,12 @@ module.exports = {
         .setName('sync')
         .setDescription('Read Wise Old Man and save the accounts and history, then check them')
         .addBooleanOption(o => o.setName('confirm').setDescription('Set to True to save').setRequired(true))
+    )
+    .addSubcommand(sub =>
+      sub
+        .setName('milestones')
+        .setDescription('Rebuild donation tier and Pet Master milestones from the logs (a preview unless confirmed)')
+        .addBooleanOption(o => o.setName('confirm').setDescription('Set to True to save them'))
     )
     .addSubcommand(sub => sub.setName('verify').setDescription('Compare the saved accounts with the WOM group; writes nothing')),
 

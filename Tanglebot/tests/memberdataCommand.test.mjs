@@ -9,11 +9,13 @@ delete process.env.MEMBER_SYNC_INTERVAL_MINUTES;
 
 const { commandDisabledReason } = require('../src/utils/commandAvailability.js');
 const memberSync = require('../src/utils/memberSync.js');
+const milestones = require('../src/utils/milestones.js');
 const command = require('../src/commands/memberdata.js');
 
 let saved;
-beforeEach(() => { saved = { ...memberSync }; });
-afterEach(() => { Object.assign(memberSync, saved); });
+let savedMilestones;
+beforeEach(() => { saved = { ...memberSync }; savedMilestones = { ...milestones }; });
+afterEach(() => { Object.assign(memberSync, saved); Object.assign(milestones, savedMilestones); });
 
 function run(subcommand, { owner = true, confirm } = {}) {
   const replies = [];
@@ -39,9 +41,9 @@ test('/memberdata needs the database, the WOM group and the Owner role', () => {
   for (const key of Object.keys(env)) assert.match(commandDisabledReason(command, { ...env, [key]: '' }), new RegExp(key));
 });
 
-test('it offers status, preview, sync and verify, and sync needs a confirm', () => {
+test('it offers status, preview, sync, milestones and verify, and sync needs a confirm', () => {
   const options = command.data.toJSON().options;
-  assert.deepEqual(options.map(o => o.name), ['status', 'preview', 'sync', 'verify']);
+  assert.deepEqual(options.map(o => o.name), ['status', 'preview', 'sync', 'milestones', 'verify']);
   const confirm = options.find(o => o.name === 'sync').options[0];
   assert.equal(confirm.name, 'confirm');
   assert.equal(confirm.required, true);
@@ -121,4 +123,25 @@ test('a WOM or database failure is shown and logged as an error', async () => {
   const { replies, interaction } = await run('preview');
   assert.match(replies.at(-1), /memberdata preview failed: WOM is down/);
   assert.equal(interaction.commandError.message, 'WOM is down');
+});
+
+test('milestones previews unless confirmed, then saves, and explains what cannot be dated', async () => {
+  const calls = [];
+  milestones.backfillMilestones = async args => {
+    calls.push(args.apply);
+    return { counts: { tierChanges: 12, masterReached: 4, masterLost: 1 }, notes: { importedBasis: 9, alreadyMasterBeforeLog: 2 }, applied: args.apply };
+  };
+  const preview = await run('milestones');
+  assert.deepEqual(calls, [false]);
+  assert.match(preview.replies.at(-1), /Preview \(nothing was saved\)/);
+  assert.match(preview.replies.at(-1), /12 donation tier changes/);
+  assert.match(preview.replies.at(-1), /4 Pet Master reached, 1 Pet Master lost/);
+  assert.match(preview.replies.at(-1), /9 tier\(s\) were held at the sheets import/);
+  assert.match(preview.replies.at(-1), /2 member\(s\) were already Pet Masters/);
+  assert.match(preview.replies.at(-1), /Run again with confirm set to True/);
+
+  const saved = await run('milestones', { confirm: true });
+  assert.deepEqual(calls, [false, true]);
+  assert.match(saved.replies.at(-1), /Milestones saved from the donation and pet logs/);
+  assert.doesNotMatch(saved.replies.at(-1), /Run again/);
 });

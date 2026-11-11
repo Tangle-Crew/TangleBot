@@ -5,6 +5,7 @@ const { mentionOrName, postLeaderboard: postLeaderboardShared } = require('../ut
 const { notifyAdminLog } = require('../utils/roleMenu');
 const { withFileLock, intEnv } = require('../utils/db');
 const highScoresDb = require('../utils/highScoresDb');
+const milestones = require('../utils/milestones');
 
 const TEMPLAR_ROLE_ID = process.env.TEMPLAR_ROLE_ID;
 const OWNER_ROLE_ID = process.env.OWNER_ROLE_ID;
@@ -310,6 +311,16 @@ async function refreshLeaderboard(client) {
     await postLeaderboard(guild, channelId, sortedForDisplay(entries), client.user.id);
   });
   return true;
+}
+
+// Records becoming or ceasing to be a Pet Master as a milestone. A failure is logged, never shown.
+async function recordMasterMilestone(discordId, before, after, byDiscordId) {
+  try {
+    const milestone = milestones.masterMilestone(PET_MASTER_THRESHOLD, before, after);
+    if (milestone) await highScoresDb.recordMilestones(discordId, [milestone], byDiscordId);
+  } catch (err) {
+    console.error(`[PetHighscore] Failed to record the Pet Master milestone for ${discordId}:`, err.message);
+  }
 }
 
 async function syncMasterRole(guild, discordId, count) {
@@ -650,6 +661,10 @@ module.exports = {
         );
       }
 
+      if (usingDb()) {
+        const before = subcommand === 'add' ? newKeys.length - toApply.length : newKeys.length + toApply.length;
+        await recordMasterMilestone(targetUser.id, before, newKeys.length, interaction.user.id);
+      }
       const roleChange = await syncMasterRole(guild, targetUser.id, newKeys.length);
 
       const verb = subcommand === 'add' ? 'Added' : 'Removed';

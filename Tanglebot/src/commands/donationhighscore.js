@@ -5,6 +5,7 @@ const { withFileLock, intEnv } = require('../utils/db');
 const { mentionOrName, postLeaderboard: postLeaderboardShared } = require('../utils/leaderboard');
 const { notifyAdminLog } = require('../utils/roleMenu');
 const highScoresDb = require('../utils/highScoresDb');
+const milestones = require('../utils/milestones');
 
 const TEMPLAR_ROLE_ID = process.env.TEMPLAR_ROLE_ID;
 
@@ -247,6 +248,16 @@ async function refreshLeaderboard(client) {
   return true;
 }
 
+// Records a change of highest donation tier as a milestone. A failure is logged, never shown.
+async function recordTierMilestone(discordId, before, after, byDiscordId) {
+  try {
+    const milestone = milestones.tierMilestone(DONATION_TIERS, before, after);
+    if (milestone) await highScoresDb.recordMilestones(discordId, [milestone], byDiscordId);
+  } catch (err) {
+    console.error(`[DonationHighscore] Failed to record the tier milestone for ${discordId}:`, err.message);
+  }
+}
+
 // Grants the tier roles the new total qualifies for and removes the rest. Returns { tier } if the
 // highest tier changed (tier null if none now), otherwise null.
 async function syncDonationRoles(guild, discordId, previousDonated, newDonated) {
@@ -439,6 +450,7 @@ module.exports = {
         );
       }
 
+      if (usingDb()) await recordTierMilestone(targetUser.id, currentAmount, newAmount, interaction.user.id);
       const tierChange = await syncDonationRoles(guild, targetUser.id, currentAmount, newAmount);
 
       const verb = subcommand === 'add' ? 'Added' : 'Removed';

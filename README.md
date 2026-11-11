@@ -232,6 +232,7 @@ Owner-only. Keeps the database's list of the clan's OSRS accounts, and their his
 | `status` | Shows how many accounts are saved (in the group, left, linked to a person), the history counts and newest dates, when it last synced, and the automatic sync setting. | Nothing |
 | `preview` | Reads WOM and shows what a sync would add or change, then undoes it. The first read takes the whole group history (about a minute for a clan this size). | Nothing (rolled back) |
 | `sync` | Reads WOM and saves the accounts and history, then checks them against WOM. `confirm` must be True, or nothing happens. | Database only |
+| `milestones` | Rebuilds donation tier and Pet Master [milestones](#database) from `donation_log` and `pet_log`. A preview unless `confirm` is True. Safe to run again: milestones already saved are never added twice. | Database only, when confirmed |
 | `verify` | Compares the saved accounts with the WOM group: missing, wrongly ranked, renamed, or no longer in the group. | Nothing |
 
 WOM is only read, one call every 3.5 seconds (0.7 with `WOM_API_KEY`) to stay inside its rate limit. Only one sync runs at a time. Running `sync` again is safe: events already saved are not added twice.
@@ -244,7 +245,7 @@ Shows what the database stores about a clan member or an OSRS account, in one pr
 
 | Option | What it shows |
 |---|---|
-| `member` | **Discord:** whether they are in the server, when they first joined, and their previous display names. **Clan accounts:** the OSRS accounts linked to them (none yet, see below). **Donations:** their total, tier, how far the next tier is, and when it last changed. **Pets:** how many, whether they are a Pet Master, and which. |
+| `member` | **Discord:** whether they are in the server, when they first joined, and their previous display names. **Clan accounts:** the OSRS accounts linked to them (none yet, see below). **Donations:** their total, tier, how far the next tier is, and when it last changed. **Pets:** how many, whether they are a Pet Master, and which. **Milestones:** their latest donation tier changes and Pet Master changes. |
 | `rsn` | **Clan:** rank, whether they are in the clan or left, first join, when WOM added them and when the RuneLite plugin reported the join, and the leave date. **History:** joins and leaves, rank changes, name changes. **Discord:** the linked member, if any. |
 
 Account names are read the way Wise Old Man stores them: any case, with `_` or `-` as spaces. The `rsn` option autocompletes as you type from the saved accounts: names containing what you typed (names starting with it first), each with its rank or "left" beside it, current members before former ones. Click into the field to see current members straight away. Typing part of a name works if only one account matches; otherwise it lists the matches.
@@ -770,6 +771,7 @@ On startup, before any command loads, the bot applies every `Tanglebot/migration
 - `003_command_log.sql`: `command_log`.
 - `004_command_log_name_and_denied.sql`: the `discord_name` column on `command_log`, and the `denied` status.
 - `005_accounts_and_events.sql`: `accounts` (OSRS accounts from Wise Old Man) and `member_events` (clan history).
+- `007_milestone_source.sql`: allows the `bot` source on `member_events`, for milestones.
 - `006_discord_history_in_events.sql`: copies the Discord name and server history from `member_names` and `member_stays` into `member_events`, and adds the `member_overview` view. The two old tables are left in place; see [DATABASE.md](DATABASE.md) for dropping them once the copy is checked.
 
 </details>
@@ -859,6 +861,27 @@ select rsn, wom_role, left_at from accounts where status = 'left' and left_at > 
 -- the latest name changes
 select a.rsn, e.old_value, e.new_value, e.occurred_at from member_events e join accounts a on a.id = e.account_id
   where e.kind = 'name_changed' order by e.occurred_at desc limit 20;
+```
+
+</details>
+
+<details>
+<summary><strong>Milestones</strong></summary>
+
+When a donation changes someone's highest tier, or a pet change makes them a Pet Master (or stops them being one), the bot records it as a person event in `member_events` (source `bot`):
+
+- **`donation_tier_changed`:** the highest tier before and after (empty means no tier), with the new total.
+- **`pet_master_reached`** and **`pet_master_lost`:** with the pet count at the time.
+
+`/profile member` shows the latest ones. Milestones from before this existed are rebuilt from the logs with `/memberdata milestones` (a preview first, then `confirm:True`). Two limits: a tier already held when the sheets were imported is dated to the import, not to when it was reached (marked `"basis": "import"` in the event's `data`), and a member who was already a Pet Master before their first logged pet change has no known date.
+
+```sql
+-- a person's milestones
+select occurred_at, kind, old_value, new_value from member_events
+  where member_id = '<id>' and kind in ('donation_tier_changed', 'pet_master_reached', 'pet_master_lost') order by occurred_at;
+-- who became a Pet Master recently
+select m.display_name, e.occurred_at from member_events e join members m on m.discord_id = e.member_id
+  where e.kind = 'pet_master_reached' order by e.occurred_at desc limit 10;
 ```
 
 </details>

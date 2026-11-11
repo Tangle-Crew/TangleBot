@@ -17,6 +17,7 @@ How TangleBot stores its information in PostgreSQL, the rules for changing it, a
 | `src/utils/highScoresDb.js` | Donations, pets and member storage; the only place those tables are written |
 | `src/utils/memberHistory.js` | Records Discord joins, leaves and name changes; the startup roster sync |
 | `src/utils/commandLog.js` | Writes, reads and prunes the command log |
+| `src/utils/milestones.js` | Finds and rebuilds milestones (donation tier changes, Pet Master) from the logs |
 | `src/utils/profile.js` | Reads one person or one account (read only) and builds the `/profile` embeds |
 | `src/utils/memberSync.js` | Reads the Wise Old Man group and saves `accounts` and clan events (used by `/memberdata` and a timer) |
 | `src/utils/migrationTools.js` | The sheets import and its checks (used only by `/migration`; retired with the sheets) |
@@ -42,7 +43,7 @@ How TangleBot stores its information in PostgreSQL, the rules for changing it, a
 | `pet_log` | A pet added or removed | `discord_id`, `pet_key`, `action` (`add`, `remove`), `by_discord_id`, `created_at` | `/pethighscore`, append-only |
 | `command_log` | A slash command run | `discord_id` (no foreign key), `discord_name`, `command`, `options` (jsonb), `status` (`ok`, `error`, `denied`), `error`, `duration_ms`, `channel_id`, `created_at` | Every command, from `runCommand` in `eventHandler.js`; pruned daily |
 | `accounts` | An OSRS account, from WOM | `wom_player_id` (unique), `username` (WOM's lower-case form), `rsn`, `member_id` (empty until accounts are linked to people), `is_main` (reserved), `wom_role`, `status` (`active`, `left`), `wom_joined_at`, `client_joined_at`, `first_joined_at`, `left_at`, `wom_data` (jsonb copy of WOM's last payload), `synced_at` | `memberSync.js` (`/memberdata`, hourly timer) |
-| `member_events` | One change in someone's history | `member_id` **or** `account_id` (exactly one), `kind`, `old_value`, `new_value`, `data` (jsonb), `source` (`wom`, `discord`, `import`), `occurred_at`, `recorded_at`. Account events from WOM: `joined`, `left`, `rank_changed`, `name_changed`. Person events from Discord: `display_name_changed`, `server_joined`, `server_left` | `memberSync.js` (accounts), `highScoresDb.js` and `memberHistory.js` (people); append-only, a unique key stops duplicates |
+| `member_events` | One change in someone's history | `member_id` **or** `account_id` (exactly one), `kind`, `old_value`, `new_value`, `data` (jsonb), `source` (`wom`, `discord`, `import`, `bot`), `occurred_at`, `recorded_at`. Account events from WOM: `joined`, `left`, `rank_changed`, `name_changed`. Person events from Discord: `display_name_changed`, `server_joined`, `server_left` | `memberSync.js` (accounts), `highScoresDb.js`, `memberHistory.js` and `milestones.js` (people); append-only, a unique key stops duplicates |
 | `member_overview` (a view) | One row per person | `discord_id`, `display_name`, `donated_gp`, `pets`, `in_server`, `first_joined_server_at`, `accounts`, `main_rsn`, `main_role` | Read only |
 | `schema_migrations` | An applied migration file | `name` (PK), `applied_at` | The migration runner |
 
@@ -67,7 +68,7 @@ Milestones (donation tiers, Pet Master) are event kinds, not a table.
 - **Logs are append-only** (`donation_log`, `pet_log`, `command_log`, events). Corrections are new rows. The one exception is the command log's age-based prune.
 - **Every history row records where it came from** (`source`, or `by_discord_id`).
 - **Constrained text** uses `text` plus a `check (... in (...))`, not Postgres enums, so adding a value is a small migration.
-- **Event `kind` is not constrained** (no `check`): a new kind of history is a new value. Account kinds are `joined`, `left`, `rank_changed` and `name_changed` (the clan, from WOM); person kinds are `display_name_changed`, `server_joined` and `server_left` (Discord). A rejoin is a join after a leave. Clan and server events have different kinds because leaving the clan and leaving the server are different things. Milestones will be person kinds.
+- **Event `kind` is not constrained** (no `check`): a new kind of history is a new value. Account kinds are `joined`, `left`, `rank_changed` and `name_changed` (the clan, from WOM); Person kinds are `display_name_changed`, `server_joined` and `server_left` (Discord), and the milestones `donation_tier_changed`, `pet_master_reached` and `pet_master_lost` (the bot).. A rejoin is a join after a leave. Clan and server events have different kinds because leaving the clan and leaving the server are different things. Milestones are person kinds written by the bot's own commands (source `bot`).
 - **"In the server" is the latest event.** A person is in the server when their latest `server_joined`/`server_left` event (by `occurred_at`) is `server_joined`. A join is never dated before the leave it follows.
 - **jsonb** is for data you will not join or filter on (options, copies of WOM payloads). If you filter on it, make it a column.
 - **Primary keys:** `members` uses the Discord ID. New tables use `bigint generated always as identity`.
@@ -103,7 +104,7 @@ Milestones (donation tiers, Pet Master) are event kinds, not a table.
 | B. Member data, WOM side | `accounts`, `member_events`, `/memberdata` (Owner only: `status`, `preview`, `sync`, `verify`), automatic sync every `MEMBER_SYNC_INTERVAL_MINUTES` after the first manual one | Built |
 | B2. Discord history in events | Server joins, leaves and name changes are person events; `006` copies the old history into `member_events` and adds `member_overview`; `002` no longer creates the old tables | Built. The old tables stay until you drop them |
 | C. `/profile` | By member or by RSN, for Coordinator and above | Built |
-| D. Milestones | Donation tier and Pet Master as events, back-filled from the logs | Planned |
+| D. Milestones | Donation tier and Pet Master as events, recorded as they happen and rebuilt from the logs by `/memberdata milestones` | Built |
 | E. Competition results | `competition_results`, saved on announce, back-filled from WOM | Planned |
 | F. Honeypot incidents | `honeypot_incidents` | Planned |
 | G. State files | `bot_state`, moving the `data/*.json` files, simple ones first | Planned |
@@ -117,13 +118,14 @@ Milestones (donation tiers, Pet Master) are event kinds, not a table.
 - **Manual first:** data moves (the sheets, the WOM sync) are Owner commands with a preview and a verify step, run by hand the first time. Nothing imports on startup, and the timer does nothing until the first manual WOM sync has happened.
 - **`command_log` has no foreign key:** staff attempts by people not in `members` should still be logged.
 - **Donation total cap:** 10 trillion GP per member, as a typo guard and to stay inside safe Number range.
-- **Milestones are events:** they are history with a reached time, not a separate kind of record.
+- **Milestones are events:** they are history with a reached time, not a separate kind of record. Live milestones and the rebuilt ones are told apart from each other by time (within 5 seconds is the same event), so a rebuild after going live adds no duplicates.
 
 ## Known gaps
 
 - A command that catches its own error and replies normally is logged as `ok`, unless it sets `interaction.commandError` (done for `/donationhighscore`, `/pethighscore`, `/migration` and `/commandlog`).
 - A member who left and rejoined the Discord server entirely while the bot was down shows as one stay (no leave is recorded).
 - A leave noticed by the startup sync is dated when the bot noticed it.
+- A donation tier already held at the sheets import is dated to the import (`data.basis = 'import'`), and a member who was already a Pet Master before their first logged pet change has no milestone date.
 - Until accounts are linked to members, `/profile member` can only show the Discord side, donations and pets; use `/profile rsn` for the clan side.
 - WOM's history only goes back to when the group started being tracked. An account with only a leave event and no join date has no `first_joined_at`.
 - An account's `left_at` is its latest leave event, or when the bot noticed it had gone if WOM has no leave event.
