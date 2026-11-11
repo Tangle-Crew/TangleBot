@@ -19,6 +19,7 @@ How TangleBot stores its information in PostgreSQL, the rules for changing it, a
 | `src/utils/commandLog.js` | Writes, reads and prunes the command log |
 | `src/utils/milestones.js` | Finds and rebuilds milestones (donation tier changes, Pet Master) from the logs |
 | `src/utils/competitionSync.js` | Reads finished WOM competitions and saves them and their results |
+| `src/utils/honeypotLog.js` | Records honeypot incidents (never throws, does nothing without the database) |
 | `src/utils/profile.js` | Reads one person or one account (read only) and builds the `/profile` embeds |
 | `src/utils/memberSync.js` | Reads the Wise Old Man group and saves `accounts` and clan events (used by `/memberdata` and a timer) |
 | `src/utils/migrationTools.js` | The sheets import and its checks (used only by `/migration`; retired with the sheets) |
@@ -48,15 +49,15 @@ How TangleBot stores its information in PostgreSQL, the rules for changing it, a
 | `member_overview` (a view) | One row per person | `discord_id`, `display_name`, `donated_gp`, `pets`, `in_server`, `first_joined_server_at`, `accounts`, `main_rsn`, `main_role` | Read only |
 | `competitions` | A finished WOM competition | `wom_competition_id` (PK), `title`, `metric`, `metrics`, `starts_at`, `ends_at`, `participant_count`, `total_gained` | `competitionSync.js` (`/memberdata competitions`, then the automatic sync) |
 | `competition_results` | One player's result in a competition | `(wom_competition_id, wom_player_id)` (PK), `account_id` (empty if the account was not saved yet), `rsn`, `rank`, `gained`. Only players who gained | `competitionSync.js` |
+| `honeypot_incidents` | One honeypot event | `discord_id` and `discord_name` (no foreign key), `action` (`timeout`, `ban`, `false_positive`), `outcome` (`done`, `failed`, `skipped`, `test`), `test_mode`, `channel_id`, `by_discord_id`, `by_discord_name`, `details` (jsonb, never message content), `created_at` | `honeypot.js`, through `honeypotLog.js`; append-only |
 | `schema_migrations` | An applied migration file | `name` (PK), `applied_at` | The migration runner |
 
-How they connect: `accounts.member_id` (empty for now) points at `members`, `member_events` points at an account or a member, and `competition_results` points at `competitions` and (when known) an account. `donations`, `donation_log`, `member_pets` and `pet_log` all point at `members.discord_id`. `member_pets` and `pet_log` also point at `pets.key`. `command_log` deliberately points at nothing: anyone who runs a command is logged, member or not.
+How they connect: `accounts.member_id` (empty for now) points at `members`, `member_events` points at an account or a member, and `competition_results` points at `competitions` and (when known) an account. `donations`, `donation_log`, `member_pets` and `pet_log` all point at `members.discord_id`. `member_pets` and `pet_log` also point at `pets.key`. `command_log` and `honeypot_incidents` deliberately point at nothing: anyone who runs a command or trips the trap is logged, member or not.
 
 ### Planned
 
 | Table | Purpose | Notes |
 |---|---|---|
-| `honeypot_incidents` | Honeypot timeouts and bans | Metadata only, never message content. No foreign key, like `command_log` |
 | `bot_state` | Small key and JSON values, replacing the `data/*.json` files | Staged: simple files first, LFG and weekly announcements last |
 
 Milestones (donation tiers, Pet Master) are event kinds, not a table.
@@ -108,7 +109,7 @@ Milestones (donation tiers, Pet Master) are event kinds, not a table.
 | C. `/profile` | By member or by RSN, for Coordinator and above | Built |
 | D. Milestones | Donation tier and Pet Master as events, recorded as they happen and rebuilt from the logs by `/memberdata milestones` | Built |
 | E. Competition results | `competitions` and `competition_results`: every finished clan competition, read from WOM by `/memberdata competitions` and then the automatic sync | Built |
-| F. Honeypot incidents | `honeypot_incidents` | Planned |
+| F. Honeypot incidents | `honeypot_incidents`: the automatic timeout and the admin buttons, metadata only | Built |
 | G. State files | `bot_state`, moving the `data/*.json` files, simple ones first | Planned |
 | Link | Joining accounts to members. Not decided; `/link` does nothing today. `accounts.member_id` is reserved for it | Parked |
 | Retire the sheets | After the one-month fallback: remove the Sheets code paths and `/migration` | Planned |

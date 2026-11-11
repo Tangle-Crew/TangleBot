@@ -42,6 +42,9 @@ async function getMemberProfile(discordId, db = database.getPool()) {
     milestones: await rows(`select kind, old_value, new_value, occurred_at from member_events
       where member_id = $1 and kind in ('donation_tier_changed', 'pet_master_reached', 'pet_master_lost')
       order by occurred_at desc, id desc limit 6`),
+    honeypot: await rows(`select action, outcome, test_mode, created_at from honeypot_incidents
+      where discord_id = $1 and not test_mode order by id desc limit 3`),
+    honeypotCount: Number((await rows('select count(*) as n from honeypot_incidents where discord_id = $1 and not test_mode'))[0].n),
     accounts: await rows(`select rsn, wom_role, status, is_main, first_joined_at, left_at from accounts
       where member_id = $1 order by is_main desc, first_joined_at`),
     petNames: (await rows(`select p.name from member_pets mp join pets p on p.key = mp.pet_key
@@ -121,12 +124,14 @@ const milestoneLine = e => {
   if (e.kind === 'pet_master_lost') return `No longer a Pet Master (${when})`;
   return `Donation tier: ${e.old_value ?? 'none'} → ${e.new_value ?? 'none'} (${when})`;
 };
+const HONEYPOT_LABELS = { timeout: 'Timed out', ban: 'Banned', false_positive: 'Cleared as a false positive' };
+const honeypotLine = i => `${HONEYPOT_LABELS[i.action] ?? i.action}${i.outcome === 'failed' ? ' (failed)' : i.outcome === 'skipped' ? ' (not applied)' : ''} (${day(i.created_at)})`;
 const nameLine = e => `${e.old_value ?? 'first seen as'} → ${e.new_value} (${day(e.occurred_at)})`;
 
 // tiers: the donation tiers, highest first, each { name, threshold, emoji }; masterThreshold: pets
 // needed for Pet Master.
 function memberEmbed(profile, { tiers, masterThreshold }) {
-  const { overview, nameChanges, stays, accounts, petNames, lastDonation, milestones = [] } = profile;
+  const { overview, nameChanges, stays, accounts, petNames, lastDonation, milestones = [], honeypot = [], honeypotCount = 0 } = profile;
 
   const discord = [
     overview.inServer === false
@@ -159,16 +164,22 @@ function memberEmbed(profile, { tiers, masterThreshold }) {
       ]
     : ['No pets logged.'];
 
+  const fields = [
+    field('Discord', discord),
+    field('Clan accounts', clan),
+    field('Donations', donations),
+    field('Pets', pets),
+    field('Milestones', milestones.length ? milestones.map(milestoneLine) : ['None recorded.']),
+  ];
+  // Only shown when there is something to see.
+  if (honeypotCount > 0) {
+    fields.push(field('Honeypot', [`${honeypotCount} incident${honeypotCount === 1 ? '' : 's'}, latest first:`, ...honeypot.map(honeypotLine)]));
+  }
+
   return new EmbedBuilder()
     .setTitle(`Profile: ${overview.displayName}`)
     .setDescription(`<@${overview.discordId}>`)
-    .addFields(
-      field('Discord', discord),
-      field('Clan accounts', clan),
-      field('Donations', donations),
-      field('Pets', pets),
-      field('Milestones', milestones.length ? milestones.map(milestoneLine) : ['None recorded.'])
-    )
+    .addFields(fields)
     .setFooter({ text: `Discord ID ${overview.discordId}` })
     .setColor(DEFAULT_EMBED_COLOR);
 }

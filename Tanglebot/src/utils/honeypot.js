@@ -10,6 +10,7 @@ const {
 } = require('discord.js');
 const axios = require('axios');
 const { readJson, writeJson, truncate, hasAnyRole } = require('./db');
+const honeypotLog = require('./honeypotLog');
 
 const RUNTIME_CONFIG_FILE = 'honeypot-runtime-config.json';
 const TIMEOUT_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
@@ -207,15 +208,21 @@ async function handleHoneypotMessage(message, config, client) {
   const testMode = isTestModeEnabled();
   console.log(`[Honeypot] Triggered by ${message.author.tag} (${message.author.id}) in ${message.channelId}${testMode ? ' (test mode)' : ''}.`);
 
+  // How the timeout went, for the incident log.
+  let outcome = testMode ? 'test' : 'skipped';
+  let timeoutError = null;
   if (!testMode) {
     try {
       if (message.member) {
         await message.member.timeout(TIMEOUT_MS, 'Posted in honeypot channel');
+        outcome = 'done';
         console.log(`[Honeypot] Timed out ${message.author.tag} for 1 week.`);
       } else {
         console.warn(`[Honeypot] ${message.author.tag} isn't a known server member, so they weren't timed out.`);
       }
     } catch (err) {
+      outcome = 'failed';
+      timeoutError = err.message;
       console.error('[Honeypot] Failed to timeout user:', err);
     }
   }
@@ -224,11 +231,23 @@ async function handleHoneypotMessage(message, config, client) {
   const imageAttachments = findImageAttachments(message);
   const imageFiles = imageAttachments.length ? await downloadImageAttachments(imageAttachments) : [];
 
+  let messageDeleted = false;
   try {
     await message.delete();
+    messageDeleted = true;
   } catch (err) {
     console.error('[Honeypot] Failed to delete trap message:', err);
   }
+
+  await honeypotLog.recordIncident({
+    discordId: message.author.id,
+    discordName: message.member?.displayName ?? message.author.username,
+    action: 'timeout',
+    outcome,
+    testMode,
+    channelId: message.channelId,
+    details: { attachments: imageAttachments.length, messageDeleted, error: timeoutError },
+  });
 
   const adminLogChannelId = process.env.ADMIN_LOG_CHANNEL_ID;
   if (!adminLogChannelId) return;
@@ -321,6 +340,9 @@ async function handleHoneypotButtonInteraction(interaction) {
   await interaction.deferUpdate();
 
   let resultText;
+  // What happened, for the incident log.
+  let outcome = testMode ? 'test' : 'done';
+  const details = {};
 
   if (action === 'bandelete') {
     if (testMode) {
@@ -336,10 +358,13 @@ async function handleHoneypotButtonInteraction(interaction) {
         outcomes.push(`Banned <@${userId}> and deleted their messages from the last 7 days.`);
       } catch (err) {
         console.error('[Honeypot] Failed to ban user:', err);
+        outcome = 'failed';
+        details.error = err.message;
         outcomes.push(`Failed to ban <@${userId}>: ${err.message.replace(/\.?$/, '.')}`);
         // The ban didn't delete anything, so clean up what we can by scanning channels.
         try {
           const count = await deleteAllUserMessages(interaction.guild, userId);
+          details.fallbackDeleted = count;
           outcomes.push(`Deleted ${count} recent message(s) by scanning channels instead.`);
         } catch (scanErr) {
           console.error('[Honeypot] Failed to delete user messages:', scanErr);
@@ -358,6 +383,8 @@ async function handleHoneypotButtonInteraction(interaction) {
         resultText = `Removed the timeout for <@${userId}>.`;
       } catch (err) {
         console.error('[Honeypot] Failed to remove timeout:', err);
+        outcome = 'failed';
+        details.error = err.message;
         resultText = `Failed to remove the timeout for <@${userId}>: ${err.message}`;
       }
     }
@@ -366,6 +393,18 @@ async function handleHoneypotButtonInteraction(interaction) {
   }
 
   console.log(`[Honeypot] ${interaction.user.tag} clicked ${ACTION_LABELS[action]} for ${userId}: ${resultText}`);
+
+  await honeypotLog.recordIncident({
+    discordId: userId,
+    discordName: interaction.guild?.members?.cache?.get(userId)?.displayName ?? null,
+    action: action === 'bandelete' ? 'ban' : 'false_positive',
+    outcome,
+    testMode,
+    channelId: interaction.channelId ?? null,
+    byDiscordId: interaction.user.id,
+    byDiscordName: interaction.member?.displayName ?? interaction.user.username,
+    details,
+  });
 
   const resolvedAtSeconds = Math.floor(Date.now() / 1000);
   const actionField = {
