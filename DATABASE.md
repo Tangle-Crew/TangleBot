@@ -17,6 +17,7 @@ How TangleBot stores its information in PostgreSQL, the rules for changing it, a
 | `src/utils/highScoresDb.js` | Donations, pets and member storage; the only place those tables are written |
 | `src/utils/memberHistory.js` | Records Discord joins, leaves and name changes; the startup roster sync |
 | `src/utils/commandLog.js` | Writes, reads and prunes the command log |
+| `src/utils/profile.js` | Reads one person or one account (read only) and builds the `/profile` embeds |
 | `src/utils/memberSync.js` | Reads the Wise Old Man group and saves `accounts` and clan events (used by `/memberdata` and a timer) |
 | `src/utils/migrationTools.js` | The sheets import and its checks (used only by `/migration`; retired with the sheets) |
 
@@ -101,7 +102,7 @@ Milestones (donation tiers, Pet Master) are event kinds, not a table.
 | A. Command log | `discord_name`, `denied`, `/commandlog`, daily prune, this file, backup example | Built |
 | B. Member data, WOM side | `accounts`, `member_events`, `/memberdata` (Owner only: `status`, `preview`, `sync`, `verify`), automatic sync every `MEMBER_SYNC_INTERVAL_MINUTES` after the first manual one | Built |
 | B2. Discord history in events | Server joins, leaves and name changes are person events; `006` copies the old history into `member_events` and adds `member_overview`; `002` no longer creates the old tables | Built. The old tables stay until you drop them |
-| C. `/profile` | By member or by RSN, for Coordinator and above | Planned |
+| C. `/profile` | By member or by RSN, for Coordinator and above | Built |
 | D. Milestones | Donation tier and Pet Master as events, back-filled from the logs | Planned |
 | E. Competition results | `competition_results`, saved on announce, back-filled from WOM | Planned |
 | F. Honeypot incidents | `honeypot_incidents` | Planned |
@@ -123,7 +124,7 @@ Milestones (donation tiers, Pet Master) are event kinds, not a table.
 - A command that catches its own error and replies normally is logged as `ok`, unless it sets `interaction.commandError` (done for `/donationhighscore`, `/pethighscore`, `/migration` and `/commandlog`).
 - A member who left and rejoined the Discord server entirely while the bot was down shows as one stay (no leave is recorded).
 - A leave noticed by the startup sync is dated when the bot noticed it.
-- Until accounts are linked to members, `/profile @member` can only show the Discord side.
+- Until accounts are linked to members, `/profile member` can only show the Discord side, donations and pets; use `/profile rsn` for the clan side.
 - WOM's history only goes back to when the group started being tracked. An account with only a leave event and no join date has no `first_joined_at`.
 - An account's `left_at` is its latest leave event, or when the bot noticed it had gone if WOM has no leave event.
 - Name changes are read back 30 days on each automatic sync (WOM lists them by when they were asked for, not approved), so one approved after more than 30 days is only picked up by a fresh full read.
