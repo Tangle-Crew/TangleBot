@@ -11,7 +11,9 @@ const { databaseConfigured } = require('./commandAvailability');
 //   - readState then reads from memory, writeState writes the file as before and the table too.
 // The file is still written on every change, so removing DATABASE_URL (the rollback) finds current
 // files. Without DATABASE_URL both functions are exactly readJson and writeJson.
-// Not for state that several bot instances share through the files (see DATABASE.md).
+// Files that two bot instances share while one replaces the other (a deploy) are DISK_FIRST: they are
+// always read from the file, as before, so each instance sees the other's changes, and the table is
+// only a copy to restore from (see DATABASE.md).
 
 const STATE_FILES = [
   'pethighscores_message.json',
@@ -21,7 +23,12 @@ const STATE_FILES = [
   'honeypot-runtime-config.json',
   'submission-runtime-config.json',
   'last-submission.json',
+  'lfg-groups.json',
+  'weeklyannounce.json',
 ];
+
+// Always read from disk, never from memory.
+const DISK_FIRST_FILES = new Set(['weeklyannounce.json']);
 
 const cache = new Map();
 const pending = new Set();
@@ -67,7 +74,7 @@ async function hydrateState({ pool = null, files = STATE_FILES } = {}) {
 
 // The saved state for a file ({} if there is none), like readJson.
 function readState(file) {
-  return hydrated && cache.has(file) ? clone(cache.get(file)) : db.readJson(file);
+  return hydrated && cache.has(file) && !DISK_FIRST_FILES.has(file) ? clone(cache.get(file)) : db.readJson(file);
 }
 
 // Saves state for a file, like writeJson, and also to the table. A table failure is logged only:
@@ -94,4 +101,4 @@ function resetState() {
   hydrated = false;
 }
 
-module.exports = { hydrateState, readState, writeState, flushState, resetState, STATE_FILES };
+module.exports = { hydrateState, readState, writeState, flushState, resetState, STATE_FILES, DISK_FIRST_FILES };
