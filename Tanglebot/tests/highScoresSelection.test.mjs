@@ -45,7 +45,8 @@ beforeEach(() => {
   delete process.env.TEMPLAR_ROLE_ID;
 });
 afterEach(() => {
-  process.env = savedEnv;
+  for (const key of Object.keys(process.env)) if (!(key in savedEnv)) delete process.env[key];
+  Object.assign(process.env, savedEnv);
   Object.assign(highScoresDb, savedStore);
   delete require.cache[sheetsPath];
   for (const p of commandPaths) delete require.cache[p];

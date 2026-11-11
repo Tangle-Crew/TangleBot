@@ -80,3 +80,10 @@ test('the startup sync sends every non-bot member, and a database failure does n
   highScoresDb.syncRoster = async () => { throw new Error('db down'); };
   await syncMemberRoster(client);
 });
+
+test('a partial member fetch does not run the sync', async () => {
+  const members = new Map([['1', member({ id: '1', displayName: 'A' })]]);
+  const client = { guilds: { fetch: async () => ({ memberCount: 100, members: { fetch: async () => members } }) } };
+  await syncMemberRoster(client);
+  assert.deepEqual(recorded, []);
+});

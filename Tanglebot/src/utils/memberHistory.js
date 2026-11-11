@@ -15,6 +15,11 @@ async function syncMemberRoster(client) {
   try {
     const guild = await client.guilds.fetch(process.env.CLAN_ID);
     const members = await guild.members.fetch();
+    // A partial fetch would wrongly mark everyone missing as having left.
+    if (guild.memberCount && members.size < guild.memberCount * 0.9) {
+      console.warn(`[MemberHistory] Roster sync skipped: fetched ${members.size} of ${guild.memberCount} members`);
+      return;
+    }
     const roster = [...members.values()].filter(m => !m.user.bot).map(toRow);
     const { members: count, left } = await highScoresDb.syncRoster(roster);
     console.log(`[MemberHistory] Synced ${count} server member(s); ${left} stay(s) closed for members who left`);

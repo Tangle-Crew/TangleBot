@@ -50,4 +50,7 @@ async function main() {
   });
 }
 
-main();
+main().catch((err) => {
+  console.error('[Bot] Startup failed:', err);
+  process.exit(1);
+});

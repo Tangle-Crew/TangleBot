@@ -9,6 +9,9 @@ const MAX_VALUE_CHARS = 200;
 const MAX_ERROR_CHARS = 500;
 const LOG_FILE = 'command-log.jsonl';
 
+// Options that may hold a secret are not stored.
+const SECRET_OPTION = /url|token|secret|key|password/i;
+
 const cut = (text, max) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 
 // Collects a command's subcommand names and option values from interaction.options.data.
@@ -21,7 +24,8 @@ function readOptions(data = [], names = [], values = {}) {
       names.push(option.name);
       readOptions(option.options, names, values);
     } else if (option.value !== undefined) {
-      values[option.name] = typeof option.value === 'string' ? cut(option.value, MAX_VALUE_CHARS) : option.value;
+      if (SECRET_OPTION.test(option.name)) values[option.name] = '[not stored]';
+      else values[option.name] = typeof option.value === 'string' ? cut(option.value, MAX_VALUE_CHARS) : option.value;
     }
   }
   return { names, values };

@@ -284,6 +284,7 @@ function sortedForDisplay(entries) {
 function postFromDatabase(guild, channelId, botUserId) {
   return withFileLock(PET_LOCK_KEY, async () => {
     const entries = await fetchEntries();
+    entriesLoadPromise = Promise.resolve(entries); // keeps autocomplete current
     await postLeaderboard(guild, channelId, sortedForDisplay(entries), botUserId);
   });
 }

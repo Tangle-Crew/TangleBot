@@ -14,7 +14,8 @@ let pool = null;
 function getPool() {
   if (!pool) {
     if (!databaseConfigured()) throw new Error('DATABASE_URL is not set');
-    pool = new Pool({ connectionString: process.env.DATABASE_URL });
+    // Timeouts so an unreachable database fails a command instead of hanging it.
+    pool = new Pool({ connectionString: process.env.DATABASE_URL, connectionTimeoutMillis: 10_000, idleTimeoutMillis: 30_000 });
     pool.on('error', err => console.error('[Database] Idle client error:', err.message));
   }
   return pool;
@@ -46,9 +47,14 @@ async function withTransaction(fn, db = getPool()) {
 // Applies every migrations/NNN_name.sql not yet in schema_migrations, in name order, each in its
 // own transaction. Throws (naming the file) if one fails; later files are not run.
 async function runMigrations({ db = getPool(), dir = MIGRATIONS_DIR, log = console.log } = {}) {
-  await db.query(
-    'create table if not exists schema_migrations (name text primary key, applied_at timestamptz not null default now())'
-  );
+  try {
+    await db.query(
+      'create table if not exists schema_migrations (name text primary key, applied_at timestamptz not null default now())'
+    );
+  } catch (err) {
+    // Two bots starting together can both try to create it; the other one won.
+    if (err.code !== '23505' && err.code !== '42P07') throw err;
+  }
   const applied = new Set((await db.query('select name from schema_migrations')).rows.map(r => r.name));
   const files = fs.readdirSync(dir).filter(f => MIGRATION_FILE.test(f)).sort();
 

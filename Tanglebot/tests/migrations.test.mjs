@@ -94,3 +94,12 @@ test('the repo migrations are numbered in order and 001 has the high score table
     assert.match(first, new RegExp(`create table ${table} \\(`));
   }
 });
+
+test('losing the race to create schema_migrations is not an error', async () => {
+  const dir = migrationDir({ '001_first.sql': 'create table first ();' });
+  const db = mockPg(sql => {
+    if (/create table if not exists schema_migrations/.test(sql)) throw Object.assign(new Error('duplicate key'), { code: '23505' });
+  });
+  assert.deepEqual(await runMigrations({ db: db.pool, dir, log: () => {} }), ['001_first.sql']);
+  fs.rmSync(dir, { recursive: true });
+});

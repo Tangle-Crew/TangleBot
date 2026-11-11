@@ -104,3 +104,10 @@ test('runCommand logs a command that ran, one that threw, and one that reported 
   assert.equal(replies.length, 1);
   assert.match(replies[0].content, /Something went wrong/);
 });
+
+test('options that may hold a secret are not stored', () => {
+  const entry = buildEntry(interaction({
+    options: { data: [{ name: 'setintakeurl', type: 1, options: [{ name: 'url', type: 3, value: 'https://x.example/f?token=abc' }] }] },
+  }), { startedAt: Date.now() });
+  assert.deepEqual(entry.options, { url: '[not stored]' });
+});
