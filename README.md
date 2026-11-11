@@ -240,6 +240,19 @@ WOM is only read, one call every 3.5 seconds (0.7 with `WOM_API_KEY`) to stay in
 
 ---
 
+### 📈 `/history` — Donation History and Pet Timeline
+
+Shows how donations and pets changed over time, from the donation and pet logs. For Coordinator, Templar and Owner. Private replies, newest first, 10 a page. Only loads with `DATABASE_URL`.
+
+| Subcommand | What it shows |
+|---|---|
+| `donations` | Every donation change: the date, the amount added or removed, the new total, who made the change (and `imported at` for the sheets import, `(manual)` for hand edits). With a `member` it is their history and total; without, the whole clan's, with the total and number of donors. Below it, the last six months of additions and removals made by commands. |
+| `pets` | Every pet added or removed: the date, the pet, and who made the change. With a `member` it is their timeline and pet count; without, the clan's latest changes, like a recent drops feed. Below it, pets added per month. |
+
+Both take an optional `member` and `page`. Pets a member owned before the sheets were imported, and donations before the import, have no individual dates: they appear as the import's starting total and are not part of the timeline.
+
+---
+
 ### 🪪 `/profile` — Member and Account Profile
 
 Shows what the database stores about a clan member or an OSRS account, in one private embed. For Coordinator, Templar and Owner. Only loads with `DATABASE_URL`. Give either a `member` or an `rsn`, not both.
@@ -738,7 +751,7 @@ Add these overrides once:
 
 - **Templar:** `/donationhighscore`, `/pethighscore`, `/refreshboards`, `/stalemembers`, `/weeklyannounce`, `/weeklycomp`, `/honeypot`, `/submission`
 - **Owner:** `/migration`, `/memberdata`
-- **Coordinator:** `/spinwheel`, `/commandlog`, `/profile`
+- **Coordinator:** `/spinwheel`, `/commandlog`, `/profile`, `/history`
 
 Owner also holds Templar, so it needs no separate override for the Templar commands. A renamed or new staff command needs its override added once. Admins always see every command.
 
