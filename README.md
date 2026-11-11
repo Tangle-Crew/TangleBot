@@ -86,8 +86,8 @@ Both take a `player` and an `amount`: a raw number or shorthand like `10k`, `10m
 |---|---|---|
 | `DONATIONS_CHANNEL_ID` | Yes | Channel for the leaderboard. The command isn't loaded without it. |
 | `DATABASE_URL` | Recommended | PostgreSQL connection string. See [Database](#database). |
-| `DONATIONS_SHEET_ID` | Without `DATABASE_URL` | The Google Sheet's ID. Only needed for the Sheets fallback and the import. |
-| `GOOGLE_SERVICE_ACCOUNT_JSON` | Without `DATABASE_URL` | See [Google service account](#google-service-account). Only needed for the Sheets fallback and the import. |
+| `DONATIONS_SHEET_ID` | Without `DATABASE_URL` | The Google Sheet's ID. Only needed for the Sheets fallback and `/migration`. |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | Without `DATABASE_URL` | See [Google service account](#google-service-account). Only needed for the Sheets fallback and `/migration`. |
 | `TEMPLAR_ROLE_ID` | Recommended | Restricts the command to Templars (fails open). |
 | `DONATION_<TIER>_THRESHOLD` | No | GP needed per tier. Defaults: Zenyte 1B, Onyx 600M, Dragonstone 300M, Diamond 150M, Ruby 75M. |
 | `DONATION_<TIER>_ROLE_ID` | No | Role granted at each tier. Leave blank to skip that tier's role. |
@@ -145,8 +145,8 @@ Pet slots autocomplete and skip pets picked in another slot. Once `user` is set,
 |---|---|---|
 | `PET_HIGHSCORES_CHANNEL_ID` | Yes | Channel for the leaderboard. The command isn't loaded without it. |
 | `DATABASE_URL` | Recommended | PostgreSQL connection string. See [Database](#database). |
-| `PET_HIGHSCORES_SHEET_ID` | Without `DATABASE_URL` | The Google Sheet's ID. Only needed for the Sheets fallback and the import. |
-| `GOOGLE_SERVICE_ACCOUNT_JSON` | Without `DATABASE_URL` | See [Google service account](#google-service-account). Only needed for the Sheets fallback and the import. |
+| `PET_HIGHSCORES_SHEET_ID` | Without `DATABASE_URL` | The Google Sheet's ID. Only needed for the Sheets fallback and `/migration`. |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | Without `DATABASE_URL` | See [Google service account](#google-service-account). Only needed for the Sheets fallback and `/migration`. |
 | `TEMPLAR_ROLE_ID` | Recommended | Restricts `add`/`remove` to Templars (fails open). |
 | `OWNER_ROLE_ID` | Recommended | Restricts `new` to Owners (fails open). |
 | `PET_MASTER_ROLE_ID` | No | Role granted at `PET_MASTER_THRESHOLD` pets. Leave blank to skip. |
@@ -827,7 +827,7 @@ To run with Docker instead, use `docker compose up -d --build` from the repo roo
 - [discord.js](https://discord.js.org/) v14
 - [@napi-rs/canvas](https://github.com/Brooooooklyn/canvas) and [gif-encoder-2](https://github.com/benjaminadk/gif-encoder-2) — the `/spinwheel` GIF
 - [pg](https://node-postgres.com/) — PostgreSQL for the high score commands and member history
-- [googleapis](https://github.com/googleapis/google-api-nodejs-client) — Google Sheets for the high score commands' fallback and the import
+- [googleapis](https://github.com/googleapis/google-api-nodejs-client) — Google Sheets for the high score commands' fallback and `/migration`
 - [axios](https://axios-http.com/) — Supabase
 - [@wise-old-man/utils](https://github.com/wise-old-man/wise-old-man) — Wise Old Man API client
 - [Claude by Anthropic](https://claude.ai/) — AI-assisted development

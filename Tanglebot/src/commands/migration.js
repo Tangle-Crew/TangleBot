@@ -53,7 +53,7 @@ function statusLines(s) {
   ];
 }
 
-// Runs fn(log) and returns what it logged plus its result.
+// A log function that keeps its lines, so warnings can be shown in the reply.
 function collect() {
   const warnings = [];
   return { warnings, log: message => warnings.push(String(message)) };
@@ -70,7 +70,7 @@ function warningLines(warnings) {
 function importLines({ summary, verification }, warnings) {
   const lines = [];
   tools.printSummary(summary, m => lines.push(m));
-  lines.push(...warningLines(warnings));
+  lines.push(...warningLines(warnings), '');
   tools.printVerification(verification, m => lines.push(m));
   return lines.filter((line, i) => line !== '' || lines[i - 1] !== '');
 }

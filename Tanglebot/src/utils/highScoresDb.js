@@ -238,7 +238,6 @@ function createStore(getDb) {
   }
 
   return {
-    touchMember,
     getDonations,
     changeDonation,
     getPetCatalog,

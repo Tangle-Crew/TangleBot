@@ -81,10 +81,9 @@ test('a logging failure is swallowed', async () => {
 });
 
 test('runCommand logs a command that ran, one that threw, and one that reported its own error', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cmdlog-'));
   const saved = process.env.DATABASE_URL;
   delete process.env.DATABASE_URL;
-  // The file goes to data/ by default, so point logCommand's file writes at the temp dir.
+  // Without DATABASE_URL the entry goes to data/command-log.jsonl; capture it instead of writing the file.
   const original = fs.appendFileSync;
   const lines = [];
   fs.appendFileSync = (file, text) => { if (String(file).endsWith('command-log.jsonl')) lines.push(JSON.parse(text)); else original(file, text); };
@@ -98,7 +97,6 @@ test('runCommand logs a command that ran, one that threw, and one that reported 
   } finally {
     fs.appendFileSync = original;
     if (saved !== undefined) process.env.DATABASE_URL = saved;
-    fs.rmSync(dir, { recursive: true });
   }
   assert.deepEqual(lines.map(l => [l.status, l.error]), [['ok', null], ['error', 'exploded'], ['error', 'sheet unreachable']]);
   assert.equal(replies.length, 1);

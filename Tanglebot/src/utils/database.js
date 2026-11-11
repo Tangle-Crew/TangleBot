@@ -21,13 +21,6 @@ function getPool() {
   return pool;
 }
 
-async function closePool() {
-  if (!pool) return;
-  const old = pool;
-  pool = null;
-  await old.end();
-}
-
 // Runs fn(client) in a transaction; rolls back and rethrows if it throws.
 async function withTransaction(fn, db = getPool()) {
   const client = await db.connect();
@@ -84,4 +77,4 @@ async function runMigrations({ db = getPool(), dir = MIGRATIONS_DIR, log = conso
   return ran;
 }
 
-module.exports = { getPool, closePool, withTransaction, runMigrations, MIGRATIONS_DIR };
+module.exports = { getPool, withTransaction, runMigrations, MIGRATIONS_DIR, MIGRATION_FILE };

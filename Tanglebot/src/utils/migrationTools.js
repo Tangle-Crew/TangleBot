@@ -33,7 +33,7 @@ function parseSheets({ donationRows, highscoreRows, catalogRows }) {
 
 // Writes parsed sheet data using one pg client (call it inside a transaction). Returns the
 // numbers to compare with the sheets.
-async function importData(client, { donations, highscores, catalog }, log = console.log) {
+async function importData(client, { donations, highscores, catalog }, log) {
   const names = new Map();
   for (const e of [...donations, ...highscores]) {
     if (e.displayName && !names.has(e.discordId)) names.set(e.discordId, e.displayName);
@@ -146,16 +146,21 @@ async function importData(client, { donations, highscores, catalog }, log = cons
   };
 }
 
-function printSummary({ sheets, database: db }, log = console.log) {
+// The sheets' numbers next to the database's, in aligned columns.
+function printSummary({ sheets, database: db }, log) {
   const fmt = n => n.toLocaleString('en-US');
-  log('');
-  log('                          Sheets      Database');
-  log(`Members                   ${fmt(sheets.members).padEnd(11)} ${fmt(db.members)} (with donations or pets)`);
-  log(`Total GP donated          ${fmt(sheets.gp).padEnd(11)} ${fmt(db.gp)}`);
-  log(`Total pets owned          ${fmt(sheets.pets).padEnd(11)} ${fmt(db.pets)}`);
-  log(`Pets in the catalog       ${fmt(sheets.catalog).padEnd(11)} ${fmt(db.catalog)}`);
-  log('');
-  log('Differences are explained by the warnings above (skipped pet keys or members).');
+  const rows = [
+    ['Members', fmt(sheets.members), `${fmt(db.members)} (with donations or pets)`],
+    ['Total GP donated', fmt(sheets.gp), fmt(db.gp)],
+    ['Total pets owned', fmt(sheets.pets), fmt(db.pets)],
+    ['Pets in the catalog', fmt(sheets.catalog), fmt(db.catalog)],
+  ];
+  const labelWidth = Math.max(...rows.map(r => r[0].length));
+  const sheetsWidth = Math.max('Sheets'.length, ...rows.map(r => r[1].length));
+  log(`${''.padEnd(labelWidth)}  ${'Sheets'.padEnd(sheetsWidth)}  Database`);
+  for (const [label, fromSheets, fromDb] of rows) {
+    log(`${label.padEnd(labelWidth)}  ${fromSheets.padEnd(sheetsWidth)}  ${fromDb}`);
+  }
 }
 
 // Compares the parsed sheet data with the database, member by member. Read only.
@@ -236,8 +241,7 @@ async function verifyData(client, { donations, highscores, catalog }) {
   return { differences, notes };
 }
 
-function printVerification({ differences, notes }, log = console.log) {
-  log('');
+function printVerification({ differences, notes }, log) {
   for (const n of notes) log(`Note: ${n}`);
   if (!differences.length) {
     log('Verified: every donation total, member pet list and the pet catalog match the sheets.');
@@ -255,7 +259,7 @@ class DryRunComplete extends Error {
   }
 }
 
-async function readSheets(log = console.log) {
+async function readSheets(log) {
   // Loaded here because googleapis is slow to load and the tests do not need it.
   const { getRows } = require('./googleSheets');
   log('Reading the sheets (read only)...');
@@ -292,7 +296,7 @@ async function testConnection(db = database.getPool()) {
   } catch (err) {
     if (err.code !== '42P01') throw err; // no schema_migrations table yet
   }
-  const files = fs.readdirSync(database.MIGRATIONS_DIR).filter(f => /^\d{3}_.+\.sql$/.test(f)).sort();
+  const files = fs.readdirSync(database.MIGRATIONS_DIR).filter(f => database.MIGRATION_FILE.test(f)).sort();
   return {
     server: /PostgreSQL [\d.]+/.exec(rows[0].version)?.[0] ?? rows[0].version,
     user: rows[0].user_name,
@@ -338,7 +342,7 @@ let importRunning = false;
 // Imports the sheets, then checks the result against them. With dryRun everything happens in a
 // transaction that is rolled back and nothing is applied (the migrations must already be applied).
 // Returns { summary, verification }. Only one import runs at a time.
-async function runImport({ dryRun = false, db = database.getPool(), data = null, log = console.log } = {}) {
+async function runImport({ dryRun = false, db = database.getPool(), data = null, log } = {}) {
   if (importRunning) throw new Error('An import is already running');
   importRunning = true;
   try {
@@ -363,7 +367,7 @@ async function runImport({ dryRun = false, db = database.getPool(), data = null,
 }
 
 // Compares the sheets with the database without writing anything.
-async function runVerify({ db = database.getPool(), data = null, log = console.log } = {}) {
+async function runVerify({ db = database.getPool(), data = null, log } = {}) {
   data ??= await readSheets(log);
   return verifyData(db, data);
 }
