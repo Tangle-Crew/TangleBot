@@ -751,21 +751,23 @@ select joined_at, left_at from member_stays where discord_id = '<id>' order by j
 <details>
 <summary><strong>Moving from the sheets</strong></summary>
 
-1. Set `DATABASE_URL` in `Tanglebot/.env` and restart the bot. It applies the migrations and the commands now use the database, which is still empty.
-2. Run the one-off import straight away, before anyone uses `/donationhighscore` or `/pethighscore`:
+Import before you restart the bot. A bot started with `DATABASE_URL` set reposts both leaderboards from the database on startup, so starting it before the import would show empty leaderboards in Discord until the import finished.
+
+1. Add `DATABASE_URL` to `Tanglebot/.env`. The running bot only reads `.env` when it is recreated, so it keeps using the sheets for now.
+2. Build the new image without restarting: `docker compose build`.
+3. Ask staff to stop using `/donationhighscore` and `/pethighscore`, then run the one-off import:
    ```bash
    docker compose run --rm tanglebot node scripts/import-sheets.js
    ```
-   (Without Docker: `cd Tanglebot && node scripts/import-sheets.js`.) It needs `DATABASE_URL`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `DONATIONS_SHEET_ID` and `PET_HIGHSCORES_SHEET_ID`, reads the `Donations`, `Highscores` and `Pets` tabs, and never writes to the sheets. Everything is written in one transaction, so a failure writes nothing.
-3. Compare the numbers it prints (members, total GP, total pets owned, catalog size) with the sheets. A pet key missing from the `Pets` tab is skipped with a warning.
+   (Without Docker: `cd Tanglebot && node scripts/import-sheets.js`.) It applies the migrations, reads the `Donations`, `Highscores` and `Pets` tabs, and writes everything in one transaction, so a failure writes nothing. It never writes to the sheets. It needs `DATABASE_URL`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `DONATIONS_SHEET_ID` and `PET_HIGHSCORES_SHEET_ID`. Compare the numbers it prints (members, total GP, total pets owned, catalog size) with the sheets. A pet key missing from the `Pets` tab is skipped with a warning.
 4. Check every member, not just the totals:
    ```bash
    docker compose run --rm tanglebot node scripts/import-sheets.js --verify
    ```
-   It re-reads the sheets and compares them with the database: each member's donation total and pet list, and the pet catalog (names, emoji IDs and order). It lists each difference, for example `Snow (123…): sheet has 150,000,000 GP donated, database has 140,000,000.`, and exits with an error if there are any. Members changed by a command since the import, pets added since, and pet keys the import skipped are shown as notes, not differences. It writes nothing, so you can run it again later.
-5. Run `/refreshboards` to repost the leaderboards from the database.
+   It re-reads the sheets and compares them with the database: each member's donation total and pet list, and the pet catalog (names, emoji IDs and order). It lists each difference, for example `Snow (123...): sheet has 150,000,000 GP donated, database has 140,000,000.`, and exits with an error if there are any. Members changed by a command since the import, pets added since, and pet keys the import skipped are shown as notes, not differences. It writes nothing, so you can run it again later.
+5. Restart the bot on the new image: `docker compose up -d`. It now uses the database and posts the leaderboards from it on startup. `/refreshboards` reposts them any time.
 
-To preview first, run the import with `--dry-run` once the migrations have been applied (start the bot once with `DATABASE_URL` set). It does the whole import and verification inside a transaction that is rolled back, so the database is left unchanged.
+`--dry-run` does the whole import and verification inside a transaction that is rolled back, leaving the database unchanged. It needs the migrations already applied (by a first import or a bot start), so it suits a later re-import.
 
 The import is safe to run again: it updates totals and the catalog, adds an `import` row to `donation_log` only when a member's total changed, and keeps the names already in the database. A member whose total was changed by a command since the first import is left alone, with a warning.
 
