@@ -8,7 +8,8 @@ const {
   competitionUrl,
 } = require('./wiseOldMan');
 const { metricName, shortMetricName, metricCategory, metricUnit, formatNumber, competitionMetrics } = require('./womMetrics');
-const { readJson, writeJson, withTimeout, truncate } = require('./db');
+const { withTimeout, truncate } = require('./db');
+const { readState, writeState } = require('./state');
 const { renderProgressChart, chartFileName } = require('./weeklyAnnounceChart');
 const { metricPet, findPetEmoji } = require('./bossPets');
 
@@ -409,7 +410,7 @@ async function loadChartData(list, { fresh = false, now = Date.now() } = {}) {
 }
 
 function readStore() {
-  const store = readJson(DATA_FILE);
+  const store = readState(DATA_FILE);
   return { ...store, drafts: store.drafts ?? {}, jobs: store.jobs ?? {} };
 }
 
@@ -422,7 +423,7 @@ function saveStore(store) {
   for (const [id, job] of Object.entries(store.jobs)) {
     if ((job.status === 'sent' || job.status === 'failed') && new Date(job.sendAt).getTime() < jobCutoff) delete store.jobs[id];
   }
-  writeJson(DATA_FILE, store);
+  writeState(DATA_FILE, store);
 }
 
 function getJob(id) {

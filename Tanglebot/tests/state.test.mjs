@@ -108,12 +108,45 @@ test('before the state is loaded, or if loading failed, the files are used', asy
   assert.deepEqual(JSON.parse(fs.readFileSync(file(A), 'utf8')), { from: 'file', again: true });
 });
 
-test('the files that are mirrored are the simple ones', () => {
-  assert.deepEqual(state.STATE_FILES.sort(), [
-    'donationhighscores_message.json', 'honeypot-runtime-config.json', 'last-submission.json', 'lfg-start-post.json',
-    'pethighscores_message.json', 'stalemembers.json', 'submission-runtime-config.json',
+test('a disk-first file is always read from disk, so a change by another instance is seen, while the table still has a copy', async () => {
+  state.DISK_FIRST_FILES.add(A);
+  try {
+    fs.writeFileSync(file(A), JSON.stringify({ jobs: { one: 'scheduled' } }));
+    const pg = rowsFor([{ key: A, value: { jobs: { one: 'old copy' } } }]);
+    database.getPool = () => pg.pool;
+    const result = await state.hydrateState({ pool: pg.pool, files: [A] });
+    assert.deepEqual(result, { loaded: 1, imported: 0, restored: 0 });
+    assert.deepEqual(state.readState(A), { jobs: { one: 'scheduled' } }, 'the file, not the copy');
+
+    // Another bot instance claims the job by changing the file; this one sees it at once.
+    fs.writeFileSync(file(A), JSON.stringify({ jobs: { one: 'sending' } }));
+    assert.deepEqual(state.readState(A), { jobs: { one: 'sending' } });
+
+    // Writes still reach the file and the table.
+    state.writeState(A, { jobs: { one: 'sent' } });
+    await state.flushState();
+    assert.deepEqual(JSON.parse(fs.readFileSync(file(A), 'utf8')), { jobs: { one: 'sent' } });
+    assert.deepEqual(pg.find(/insert into bot_state/).at(-1).params, [A, JSON.stringify({ jobs: { one: 'sent' } })]);
+  } finally {
+    state.DISK_FIRST_FILES.delete(A);
+  }
+});
+
+test('a disk-first file that is missing is restored from the table, like any other', async () => {
+  state.DISK_FIRST_FILES.add(B);
+  try {
+    const pg = rowsFor([{ key: B, value: { jobs: {} } }]);
+    assert.deepEqual(await state.hydrateState({ pool: pg.pool, files: [B] }), { loaded: 1, imported: 0, restored: 1 });
+    assert.deepEqual(JSON.parse(fs.readFileSync(file(B), 'utf8')), { jobs: {} });
+  } finally {
+    state.DISK_FIRST_FILES.delete(B);
+  }
+});
+
+test('the mirrored files include the LFG groups and the weekly announcements, the latter read from disk', () => {
+  assert.deepEqual([...state.STATE_FILES].sort(), [
+    'donationhighscores_message.json', 'honeypot-runtime-config.json', 'last-submission.json', 'lfg-groups.json', 'lfg-start-post.json',
+    'pethighscores_message.json', 'stalemembers.json', 'submission-runtime-config.json', 'weeklyannounce.json',
   ]);
-  // The ones whose "claim once" logic relies on the files stay out.
-  assert.ok(!state.STATE_FILES.includes('weeklyannounce.json'));
-  assert.ok(!state.STATE_FILES.includes('lfg-groups.json'));
+  assert.deepEqual([...state.DISK_FIRST_FILES], ['weeklyannounce.json']);
 });

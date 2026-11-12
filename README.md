@@ -889,11 +889,11 @@ select a.rsn, e.old_value, e.new_value, e.occurred_at from member_events e join 
 
 Some of the bot's small state lives in files in `Tanglebot/data/`. With `DATABASE_URL` set, these files are also kept in the `bot_state` table (the key is the file name, the value is its JSON), so a lost or wiped `data/` folder doesn't lose them:
 
-- the leaderboard message IDs (`pethighscores_message.json`, `donationhighscores_message.json`), the `/stalemembers` list message IDs, the LFG start post ID, the honeypot test mode, the intake URL override and the last accepted submission.
+- the leaderboard message IDs (`pethighscores_message.json`, `donationhighscores_message.json`), the `/stalemembers` list message IDs, the LFG start post ID, the open LFG groups (`lfg-groups.json`), the scheduled weekly announcements (`weeklyannounce.json`), the honeypot test mode, the intake URL override and the last accepted submission.
 
 How it works: at startup the bot loads the table. A file that has no row yet is copied into it, and a row whose file is missing is written back to disk (the log says how many). While running, every change is written to the file as before and to the table. The files stay current, so removing `DATABASE_URL` (the rollback) works without any step, and without `DATABASE_URL` nothing changes at all. If the table can't be read at startup, the bot logs it and uses the files.
 
-**Not covered:** the open LFG groups (`lfg-groups.json`) and the scheduled weekly announcements (`weeklyannounce.json`) stay file-only. The announcements' "send once" check relies on the file being shared between a running bot and a new one during a deploy, so moving it needs its own care.
+**The weekly announcements are always read from the file**, not from memory: their "send once" check relies on a running bot and a new one (during a deploy) seeing each other's changes through the shared file. The table is only a copy of them to restore from, so a lost `data/` folder doesn't lose the scheduled posts. Every other mirrored file is read from memory once loaded.
 
 ```sql
 select key, updated_at, value from bot_state order by key;

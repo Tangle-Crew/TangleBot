@@ -13,7 +13,8 @@ const {
 } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
-const { DATA_DIR, readJson, writeJson, truncate, hasAnyRole } = require('./db');
+const { DATA_DIR, truncate, hasAnyRole } = require('./db');
+const { readState, writeState } = require('./state');
 const {
   CATEGORY_OPTIONS,
   findCategoryOption,
@@ -107,7 +108,7 @@ function scheduleSave() {
     saveTimeoutId = null;
     const groups = [...activeGroups.values()].filter((g) => g.threadId).map(serializeGroup);
     try {
-      writeJson(GROUPS_DATA_FILE, { groups });
+      writeState(GROUPS_DATA_FILE, { groups });
     } catch (err) {
       console.error('[LFG] Could not save groups:', err.message);
     }
@@ -1288,7 +1289,7 @@ async function resumeGroup(client, channel, group) {
 async function restoreLfgGroups(client) {
   if (!FORUM_CHANNEL_ID) return;
 
-  const saved = readJson(GROUPS_DATA_FILE).groups;
+  const saved = readState(GROUPS_DATA_FILE).groups;
   const failed = [];
   let restored = 0;
   for (const fields of Array.isArray(saved) ? saved : []) {
