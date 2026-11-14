@@ -5,3 +5,4 @@
 - Tests in `tests/adminCommands.test.mjs` check that help can't drift from the commands, the role grouping, the embed size limits and the message syncing.
 - Reworked the admin commands post: a start page (overview plus one message per role, listing commands by category with links) followed by one message per command, with the role and category in its footer. `syncStaticMessages` gained an optional `refresh` so the start page links can use the real message ids.
 - A command several roles can use is posted once, under its lowest role. Removed the unused `categories`/`filter` options and exports from `commandDocs.js`.
+- The admin commands start page is now one message with only command names (links); a subcommand needing a higher role than its listing (`/pethighscore new`) is marked "Access: Owner only". The sync logs when it finds the post unchanged.

@@ -27,7 +27,10 @@ async function syncStaticMessages(client, { key, channelId, payloads, label = ke
   const storedIds = Array.isArray(stored.messageIds) ? stored.messageIds : [];
   const sameChannel = stored.channelId === channelId;
 
-  if (sameChannel && stored.hash === hash && storedIds.length === payloads.length) return 'unchanged';
+  if (sameChannel && stored.hash === hash && storedIds.length === payloads.length) {
+    console.log(`[StaticMessages] ${label}: unchanged.`);
+    return 'unchanged';
+  }
 
   let sent = [];
   try {

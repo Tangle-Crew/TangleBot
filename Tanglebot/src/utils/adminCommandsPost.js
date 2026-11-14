@@ -1,6 +1,6 @@
 const { EmbedBuilder } = require('discord.js');
 const { DEFAULT_EMBED_COLOR } = require('./embedColor');
-const { describeCommands, buildCommandEmbeds, packEmbeds, shorten, BLANK, MAX_FIELD_VALUE } = require('./commandDocs');
+const { describeCommands, buildCommandEmbeds, packEmbeds, BLANK, MAX_FIELD_VALUE } = require('./commandDocs');
 const { syncStaticMessages } = require('./staticMessages');
 const { notifyAdminLog } = require('./roleMenu');
 
@@ -45,7 +45,7 @@ function commandNames(entries) {
 function buildOverviewEmbed(byRole) {
   const counts = ROLES.map(r => `**${r.name}** ${commandNames(byRole[r.key]).size}`).join(' · ');
   const lines = [
-    'Staff commands the bot has loaded. Each command has its own message below, listed under the lowest role that can use it.',
+    'Staff commands the bot has loaded. Click a command to jump to its message. Each command is listed under the lowest role that can use it.',
     '',
     counts,
     'Owner also holds Templar, and each role above can use the commands of the roles below it. Server admins see every command.',
@@ -53,40 +53,33 @@ function buildOverviewEmbed(byRole) {
   return new EmbedBuilder().setTitle('📋 Admin commands').setDescription(lines.join('\n')).setColor(DEFAULT_EMBED_COLOR);
 }
 
-// A one-line summary of a command for the start page.
-function blurb(group) {
-  if (group.length === 1) return shorten(group[0].description, 60);
-  const subs = group.map(e => e.path.slice(e.name.length).trim());
-  return shorten(subs.join(', '), 60);
-}
-
-// Lines grouped into field values that stay under Discord's limit.
-function chunkLines(lines) {
+// Links joined into field values that stay under Discord's limit.
+function chunkLinks(links) {
   const chunks = [];
   let current = '';
-  for (const line of lines) {
-    if (current && current.length + line.length + 1 > MAX_FIELD_VALUE) {
+  for (const link of links) {
+    if (current && current.length + link.length + 3 > MAX_FIELD_VALUE) {
       chunks.push(current);
       current = '';
     }
-    current += (current ? '\n' : '') + line;
+    current += (current ? ' · ' : '') + link;
   }
   if (current) chunks.push(current);
   return chunks;
 }
 
-// One start page message for a role: its commands by category, each linking to its message.
-function buildTierMessage(tier, urlOf) {
+// The start page embed for a role: its command names by category, each linking to its message.
+function buildTierEmbed(tier, urlOf) {
   const embed = new EmbedBuilder().setTitle(tier.role.title).setDescription(roleLabel(tier.role)).setColor(tier.color);
   const byCategory = new Map();
   for (const item of tier.items) {
     if (!byCategory.has(item.category)) byCategory.set(item.category, []);
-    byCategory.get(item.category).push(`[/${item.name}](${urlOf(item.messageIndex)}) ${blurb(item.group)}`);
+    byCategory.get(item.category).push(`[/${item.name}](${urlOf(item.messageIndex)})`);
   }
-  for (const [category, lines] of byCategory) {
-    chunkLines(lines).forEach((value, i) => embed.addFields({ name: i === 0 ? category : BLANK, value }));
+  for (const [category, links] of byCategory) {
+    chunkLinks(links).forEach((value, i) => embed.addFields({ name: i === 0 ? category : BLANK, value }));
   }
-  return { embeds: [embed], allowedMentions: NO_PINGS };
+  return embed;
 }
 
 const placeholderUrl = index => `https://discord.com/channels/0/0/${index}`;
@@ -100,13 +93,17 @@ function buildAdmin(client) {
     const rank = ROLES.findIndex(r => r.key === e.role);
     if (rank > (lowest.get(e.name) ?? -1)) lowest.set(e.name, rank);
   }
-  const entries = all.map(e => ({ ...e, role: ROLES[lowest.get(e.name)].key }));
+  // A subcommand that needs a higher role than the one it is listed under says so.
+  const entries = all.map(e => {
+    const tier = ROLES[lowest.get(e.name)];
+    return { ...e, role: tier.key, only: e.role === tier.key ? null : e.access };
+  });
   const byRole = Object.fromEntries(ROLES.map(r => [r.key, entries.filter(e => e.role === r.key)]));
   const guild = getGuild(client);
 
-  // The start page is the overview plus one message per role, so command messages follow it.
+  // The start page is one message, so command messages follow it.
   const roles = ROLES.filter(r => byRole[r.key].length);
-  const startCount = 1 + roles.length;
+  const startCount = 1;
   const tiers = [];
   const commandPayloads = [];
   for (const role of roles) {
@@ -127,10 +124,10 @@ function buildAdmin(client) {
     tiers.push(tier);
   }
 
-  const startFor = urlOf => [
-    { embeds: [buildOverviewEmbed(byRole)], allowedMentions: NO_PINGS },
-    ...tiers.map(tier => buildTierMessage(tier, urlOf)),
-  ];
+  const startFor = urlOf => [{
+    embeds: [buildOverviewEmbed(byRole), ...tiers.map(tier => buildTierEmbed(tier, urlOf))],
+    allowedMentions: NO_PINGS,
+  }];
   // Links need the real message ids, so the saved payloads carry placeholder links.
   const payloads = [...startFor(placeholderUrl), ...commandPayloads];
   return { payloads, startFor };

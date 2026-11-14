@@ -113,9 +113,10 @@ test('the post leaves out everyone commands and groups the rest by role', () => 
   assert.deepEqual(titles, [
     '📋 Admin commands', '📋 Owner commands', '📋 Templar commands', '📋 Coordinator commands', '📋 Server admin commands',
   ]);
-  const ownerStart = messageText(payloads[1]);
+  const embedsOf = payloads[0].embeds.map(e => JSON.stringify(e.toJSON()));
+  const ownerStart = embedsOf[1];
   assert.ok(ownerStart.includes('[/migration]') && !ownerStart.includes('[/pethighscore]'));
-  assert.ok(messageText(payloads[2]).includes('[/pethighscore]'));
+  assert.ok(embedsOf[2].includes('[/pethighscore]'));
   const pet = payloads.filter(p => messageText(p).includes('**/pethighscore '));
   assert.equal(pet.length, 1);
   assert.ok(messageText(pet[0]).includes('**/pethighscore new') && messageText(pet[0]).includes('**/pethighscore add'));
@@ -127,11 +128,22 @@ test('every command has its own message, after one start message per role', () =
   const order = ['owner', 'templar', 'coordinator', 'admin'];
   const lowest = new Map();
   for (const e of staffEntries) lowest.set(e.name, Math.max(lowest.get(e.name) ?? 0, order.indexOf(e.role)));
-  const roleCount = new Set(lowest.values()).size;
-  const commandMessages = payloads.slice(1 + roleCount);
+  const commandMessages = payloads.slice(1);
   assert.equal(commandMessages.length, lowest.size);
   for (const p of commandMessages) assert.match(p.embeds.at(-1).toJSON().footer.text, / · /);
   assert.ok(messageText(commandMessages[0]).includes('**/'));
+});
+
+test('the start page is one message with command names only, and a higher-role subcommand is marked', () => {
+  const payloads = post.buildAdminPayloads(fakeClient(real));
+  const [start] = payloads;
+  assert.ok(start.embeds.length <= 10 && start.embeds.reduce((n, e) => n + docs.embedLength(e), 0) <= 6000);
+  const text = messageText(start);
+  assert.ok(text.includes('[/commandlog]'));
+  assert.ok(!text.includes('Who ran what'));
+  const pet = messageText(payloads.find(p => messageText(p).includes('**/pethighscore ')));
+  assert.ok(/\*\*\/pethighscore new\*\*[^]*?Access:\*\* Owner only/.test(pet));
+  assert.equal((pet.match(/Access:\*\*/g) ?? []).length, 1);
 });
 
 test('the start page links to the real message ids after posting', async () => {
@@ -141,7 +153,7 @@ test('the start page links to the real message ids after posting', async () => {
   client.commands = real;
   client.guilds = { cache: { get: () => null } };
   await post.ensureAdminCommandsPost(client);
-  const start = messageText(messages.get('m2'));
+  const start = messageText(messages.get('m1'));
   const match = start.match(/https:\/\/discord\.com\/channels\/@me\/c1\/(m\d+)/);
   assert.ok(match, start);
   const target = messages.get(match[1]);
@@ -153,12 +165,12 @@ test('the start page links to the real message ids after posting', async () => {
 test('role headers mention the role and use its colour; nothing pings', () => {
   const roles = new Map([['333', { color: 0x00aa88 }], ['222', { color: 0 }]]);
   const payloads = post.buildAdminPayloads(fakeClient(real, roles));
-  const coordinator = payloads.find(p => p.embeds[0].toJSON().title === '📋 Coordinator commands');
+  const coordinator = { embeds: payloads[0].embeds.filter(e => e.toJSON().title === '📋 Coordinator commands') };
   assert.equal(coordinator.embeds[0].toJSON().description, '<@&333>');
   assert.equal(coordinator.embeds[0].toJSON().color, 0x00aa88);
   const coordinatorCommand = payloads.find(p => p.embeds.at(-1).toJSON().footer?.text.startsWith('Coordinator'));
   for (const e of coordinatorCommand.embeds) assert.equal(e.toJSON().color, 0x00aa88);
-  const templar = payloads.find(p => p.embeds[0].toJSON().title === '📋 Templar commands');
+  const templar = { embeds: payloads[0].embeds.filter(e => e.toJSON().title === '📋 Templar commands') };
   assert.equal(templar.embeds[0].toJSON().description, '<@&222>');
   assert.equal(templar.embeds[0].toJSON().color, require('../src/utils/embedColor.js').DEFAULT_EMBED_COLOR);
   for (const p of payloads) assert.deepEqual(p.allowedMentions, { parse: [] });
@@ -205,8 +217,8 @@ test('a block follows the mockup layout', () => {
 });
 
 test('the start page groups each role by category', () => {
-  const owner = post.buildAdminPayloads(fakeClient(real))[1];
-  assert.ok(owner.embeds[0].toJSON().fields.some(f => ['Bot admin', 'Leaderboards', 'Members'].includes(f.name)));
+  const owner = post.buildAdminPayloads(fakeClient(real))[0].embeds[1];
+  assert.ok(owner.toJSON().fields.some(f => ['Bot admin', 'Leaderboards', 'Members'].includes(f.name)));
 });
 
 test('a block without options has no Options line', () => {

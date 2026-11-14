@@ -143,6 +143,7 @@ function formatBlock(entry) {
     `**/${entry.path}** ${entry.description}`,
     `**Example:** \`${entry.example}\``,
   ];
+  if (entry.only) lines.push(`**Access:** ${entry.only} only`);
   if (entry.options.length) {
     lines.push('**Options:**');
     for (const o of entry.options) lines.push(`\`${o.name}\`${o.required ? '' : ' [optional]'} ${o.text}`);
