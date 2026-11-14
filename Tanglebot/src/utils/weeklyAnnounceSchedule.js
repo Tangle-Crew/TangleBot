@@ -1,4 +1,4 @@
-const { AttachmentBuilder, escapeMarkdown } = require('discord.js');
+const { AttachmentBuilder, ChannelType, escapeMarkdown } = require('discord.js');
 const { getJob, listPendingJobs, updateJob, buildPost } = require('./weeklyAnnounce');
 const { notifyAdminLog } = require('./roleMenu');
 const { discordTimestamp, truncate } = require('./db');
@@ -87,6 +87,17 @@ async function sendJob(client, id) {
   }
 
   let channel = null;
+  const publishProblems = [];
+  // In an announcement channel, publishes the message to the servers following it.
+  const publish = async (message, label) => {
+    if (channel.type !== ChannelType.GuildAnnouncement) return;
+    try {
+      await message.crosspost();
+    } catch (err) {
+      console.error(`[WeeklyAnnounce] Job ${id}: could not publish the ${label}:`, err.message);
+      publishProblems.push(`⚠️ Posted but couldn't publish the ${label}: ${err.message}. Press Publish on it by hand.`);
+    }
+  };
   try {
     channel = await client.channels.fetch(job.channelId);
     const post = await buildPostWithRetries(job, channel.guild);
@@ -99,10 +110,12 @@ async function sendJob(client, id) {
         allowedMentions: POST_MENTIONS,
       });
       job = updateJob(id, j => { j.sent.winners = message.id; });
+      await publish(message, 'winners message');
     }
     for (let i = job.sent.announcements.length; i < post.announcementParts.length; i++) {
       const message = await channel.send({ content: post.announcementParts[i], allowedMentions: POST_MENTIONS });
       job = updateJob(id, j => { j.sent.announcements.push(message.id); });
+      await publish(message, 'announcements message');
     }
     job = updateJob(id, j => {
       j.status = 'sent';
@@ -110,7 +123,7 @@ async function sendJob(client, id) {
     });
     console.log(`[WeeklyAnnounce] Sent job ${id} to #${channel.name}`);
 
-    const problems = [];
+    const problems = [...publishProblems];
     if (post.winnersError) problems.push(`⚠️ The winners couldn't be loaded from Wise Old Man, so no winners message was sent: ${post.winnersError}`);
     else if (!post.winnersText) problems.push('⚠️ No competition had ended by the send time, so no winners message was sent.');
     for (const problem of post.chartProblems) problems.push(`⚠️ No chart for ${problem}`);
@@ -176,9 +189,15 @@ function restoreWeeklyAnnouncements(client) {
   console.log(`[WeeklyAnnounce] Restored ${jobs.length} scheduled post(s).`);
 }
 
+// Stops a job's timer, for a job that was cancelled or reopened for editing.
+function unscheduleJob(id) {
+  clearTimeout(timers.get(id));
+  timers.delete(id);
+}
+
 function stopWeeklyAnnouncements() {
   for (const timer of timers.values()) clearTimeout(timer);
   timers.clear();
 }
 
-module.exports = { scheduleJob, restoreWeeklyAnnouncements, stopWeeklyAnnouncements };
+module.exports = { scheduleJob, unscheduleJob, restoreWeeklyAnnouncements, stopWeeklyAnnouncements };

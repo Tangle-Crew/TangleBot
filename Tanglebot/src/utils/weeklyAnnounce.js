@@ -508,6 +508,30 @@ function acceptDraft(id, acceptedBy) {
   return job;
 }
 
+// Removes a job that hasn't started sending. Null if it's gone or already sending, sent or failed.
+function cancelJob(id) {
+  const store = readStore();
+  const job = store.jobs[id];
+  if (!job || job.status !== 'scheduled') return null;
+  delete store.jobs[id];
+  saveStore(store);
+  return job;
+}
+
+// Moves a job that hasn't started sending back to a draft under the same ID. Null if it's gone or
+// already sending, sent or failed.
+function reopenJob(id) {
+  const store = readStore();
+  const job = store.jobs[id];
+  if (!job || job.status !== 'scheduled') return null;
+  delete store.jobs[id];
+  const draft = { ...job, updatedAt: new Date().toISOString() };
+  for (const field of ['status', 'acceptedBy', 'acceptedAt', 'claimedAt', 'resumed', 'sent']) delete draft[field];
+  store.drafts[id] = draft;
+  saveStore(store);
+  return draft;
+}
+
 // The announcements as they're sent in message 2.
 function joinAnnouncements(announcements) {
   return announcements.join(ANNOUNCEMENT_SEPARATOR);
@@ -652,6 +676,8 @@ module.exports = {
   updateDraft,
   deleteDraft,
   acceptDraft,
+  cancelJob,
+  reopenJob,
   getJob,
   listPendingJobs,
   updateJob,
