@@ -29,6 +29,9 @@ const {
   updateDraft,
   deleteDraft,
   acceptDraft,
+  cancelJob,
+  reopenJob,
+  getJob,
   joinAnnouncements,
   announcementParts,
   buildPost,
@@ -36,7 +39,7 @@ const {
 const { discordTimestamp, truncate } = require('../utils/db');
 const { DEFAULT_EMBED_COLOR } = require('../utils/embedColor');
 const { notifyAdminLog } = require('../utils/roleMenu');
-const { scheduleJob } = require('../utils/weeklyAnnounceSchedule');
+const { scheduleJob, unscheduleJob } = require('../utils/weeklyAnnounceSchedule');
 
 const TEMPLAR_ROLE_ID = process.env.TEMPLAR_ROLE_ID;
 const WOM_GROUP_ID = Number(process.env.WOM_GROUP_ID);
@@ -260,7 +263,8 @@ function describePings(text, channel) {
 
 // The checks under the preview, with Accept / Edit / Cancel. Accept is disabled when the
 // announcements don't fit in two messages, the send time has passed, or there's nothing to send.
-function buildChecklist(draft, post, channel) {
+// withButtons is false for a scheduled post's preview, which has no buttons.
+function buildChecklist(draft, post, channel, { withButtons = true } = {}) {
   const sendAt = new Date(draft.sendAt);
   const parts = post.announcementParts;
   const joined = joinAnnouncements(post.announcements);
@@ -322,12 +326,14 @@ function buildChecklist(draft, post, channel) {
   const acceptLabel = parts?.length === 2 ? 'Accept and send announcements as 2 messages' : 'Accept';
   const container = new ContainerBuilder()
     .setAccentColor(blocked ? BLOCKED_COLOR : parts?.length === 2 ? OVER_LIMIT_COLOR : DEFAULT_EMBED_COLOR)
-    .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
-    .addActionRowComponents(new ActionRowBuilder().addComponents(
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')));
+  if (withButtons) {
+    container.addActionRowComponents(new ActionRowBuilder().addComponents(
       button('accept', draft.id, acceptLabel, ButtonStyle.Success, { disabled: blocked }),
       button('back', draft.id, 'Edit', ButtonStyle.Secondary),
       button('cancel', draft.id, 'Cancel', ButtonStyle.Danger)
     ));
+  }
   return { components: [container], flags: MessageFlags.IsComponentsV2, allowedMentions: { parse: [] } };
 }
 
@@ -387,6 +393,80 @@ async function showPreview(interaction, draft) {
   }
 }
 
+// The scheduled confirmation with Preview, Edit and Cancel, which work until the post starts sending.
+function scheduledMessage(job, content) {
+  const container = new ContainerBuilder()
+    .setAccentColor(DEFAULT_EMBED_COLOR)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(content))
+    .addActionRowComponents(new ActionRowBuilder().addComponents(
+      button('jobpreview', job.id, 'Preview', ButtonStyle.Success),
+      button('jobedit', job.id, 'Edit', ButtonStyle.Secondary),
+      button('jobcancel', job.id, 'Cancel', ButtonStyle.Danger)
+    ));
+  return { components: [container], flags: MessageFlags.IsComponentsV2, allowedMentions: { parse: [] } };
+}
+
+// Previews a scheduled post privately, leaving the scheduled message as it is.
+async function showJobPreview(interaction, job) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  try {
+    const channel = await fetchTargetChannel(interaction.client, job.channelId);
+    const post = await buildPost(job, channel?.guild ?? interaction.guild);
+    const send = options => interaction.followUp({ ...options, flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
+    if (post.winnersText) {
+      await send({
+        content: post.winnersText,
+        files: post.charts.map(c => new AttachmentBuilder(c.attachment, { name: c.name })),
+      });
+    }
+    for (const part of post.announcementParts ?? []) await send({ content: part });
+    await interaction.followUp({ ...buildChecklist(job, post, channel, { withButtons: false }), flags: MessageFlags.Ephemeral | MessageFlags.IsComponentsV2 });
+    await interaction.editReply({ content: '👇 Preview of the scheduled post below.' });
+  } catch (err) {
+    await interaction.editReply({ content: 'Could not build the preview. Try again.' }).catch(() => {});
+    throw err;
+  }
+}
+
+// Handles Preview, Edit and Cancel on the scheduled message. Edit moves the post back to a draft
+// panel and Accept schedules it again.
+async function handleJobAction(interaction, action, id) {
+  const job = getJob(id);
+  if (!job) return interaction.update(closedMessage('This scheduled post no longer exists. Run `/weeklyannounce setup` to start a new one.'));
+  if (action === 'jobpreview') return showJobPreview(interaction, job);
+
+  const scheduleTime = discordTimestamp(job.sendAt, 'F');
+  // The job may have started sending since the message was shown, which the store checks.
+  const refuse = verb => {
+    const state = { sent: 'already been sent', sending: 'started sending', failed: 'failed' }[getJob(id)?.status] ?? 'been removed';
+    return interaction.reply({ content: `This post has ${state}, so it can't be ${verb}.`, flags: MessageFlags.Ephemeral });
+  };
+  if (action === 'jobcancel') {
+    if (!cancelJob(id)) return refuse('cancelled');
+    unscheduleJob(id);
+    await interaction.update(closedMessage(`Cancelled. The post for ${scheduleTime} will not be sent.`));
+    return notifyAdminLog(
+      interaction.client,
+      '📣 Weekly announcement cancelled',
+      `${interaction.user} cancelled the weekly post in <#${job.channelId}> that was due ${scheduleTime}.`,
+      [],
+      DEFAULT_EMBED_COLOR
+    );
+  }
+  // jobedit
+  const draft = reopenJob(id);
+  if (!draft) return refuse('edited');
+  unscheduleJob(id);
+  await interaction.update(panelMessage(draft));
+  return notifyAdminLog(
+    interaction.client,
+    '📣 Weekly announcement reopened',
+    `${interaction.user} reopened the weekly post in <#${job.channelId}> due ${scheduleTime} for editing. It isn't scheduled until it's accepted again.`,
+    [],
+    DEFAULT_EMBED_COLOR
+  );
+}
+
 async function acceptPreview(interaction, draft) {
   if (new Date(draft.sendAt) <= new Date()) {
     return interaction.reply({ content: 'The send time has passed. Cancel and run `/weeklyannounce setup` again.', flags: MessageFlags.Ephemeral });
@@ -406,7 +486,7 @@ async function acceptPreview(interaction, draft) {
   console.log(`[WeeklyAnnounce] ${interaction.user.tag} scheduled job ${job.id} for ${job.sendAt} in channel ${job.channelId}`);
 
   const when = `${discordTimestamp(job.sendAt, 'F')} (${discordTimestamp(job.sendAt, 'R')})`;
-  await interaction.update(closedMessage(`✅ Scheduled for ${when} in <#${job.channelId}>. The admin log has the details.`));
+  await interaction.update(scheduledMessage(job, `✅ Scheduled for ${when} in <#${job.channelId}>. The admin log has the details.`));
 
   const winners = job.competitions.length
     ? `Winners from ${job.competitions.map(c => `**${escapeMarkdown(c.title)}**`).join(', ')}`
@@ -431,6 +511,11 @@ function rejectNonTemplar(interaction) {
 async function handleWeeklyAnnounceButton(interaction) {
   const [, action, draftId, indexRaw] = interaction.customId.split(':');
   if (!isTemplar(interaction.member)) return rejectNonTemplar(interaction);
+
+  if (action === 'jobpreview' || action === 'jobedit' || action === 'jobcancel') {
+    console.log(`[WeeklyAnnounce] ${interaction.user.tag} pressed ${action} on job ${draftId}`);
+    return handleJobAction(interaction, action, draftId);
+  }
 
   const draft = getDraft(draftId);
   if (!draft) {
