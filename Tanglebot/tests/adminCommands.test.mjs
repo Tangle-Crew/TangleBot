@@ -113,9 +113,41 @@ test('the post leaves out everyone commands and groups the rest by role', () => 
   assert.deepEqual(titles, [
     '📋 Admin commands', '📋 Owner commands', '📋 Templar commands', '📋 Coordinator commands', '📋 Server admin commands',
   ]);
-  const owner = messageText(payloads[1]);
-  assert.ok(owner.includes('**/migration') && owner.includes('**/pethighscore new'));
-  assert.ok(!owner.includes('**/pethighscore add'));
+  const ownerStart = messageText(payloads[1]);
+  assert.ok(ownerStart.includes('[/migration]') && !ownerStart.includes('[/pethighscore]'));
+  assert.ok(messageText(payloads[2]).includes('[/pethighscore]'));
+  const pet = payloads.filter(p => messageText(p).includes('**/pethighscore '));
+  assert.equal(pet.length, 1);
+  assert.ok(messageText(pet[0]).includes('**/pethighscore new') && messageText(pet[0]).includes('**/pethighscore add'));
+});
+
+test('every command has its own message, after one start message per role', () => {
+  const payloads = post.buildAdminPayloads(fakeClient(real));
+  const staffEntries = entries.filter(e => e.role !== 'everyone');
+  const order = ['owner', 'templar', 'coordinator', 'admin'];
+  const lowest = new Map();
+  for (const e of staffEntries) lowest.set(e.name, Math.max(lowest.get(e.name) ?? 0, order.indexOf(e.role)));
+  const roleCount = new Set(lowest.values()).size;
+  const commandMessages = payloads.slice(1 + roleCount);
+  assert.equal(commandMessages.length, lowest.size);
+  for (const p of commandMessages) assert.match(p.embeds.at(-1).toJSON().footer.text, / · /);
+  assert.ok(messageText(commandMessages[0]).includes('**/'));
+});
+
+test('the start page links to the real message ids after posting', async () => {
+  process.env.ADMIN_COMMANDS_CHANNEL_ID = 'c1';
+  files.delete('admin-commands-post.json');
+  const { client, messages } = mockChannel();
+  client.commands = real;
+  client.guilds = { cache: { get: () => null } };
+  await post.ensureAdminCommandsPost(client);
+  const start = messageText(messages.get('m2'));
+  const match = start.match(/https:\/\/discord\.com\/channels\/@me\/c1\/(m\d+)/);
+  assert.ok(match, start);
+  const target = messages.get(match[1]);
+  assert.ok(messageText(target).includes('**/'));
+  assert.ok(!start.includes('/channels/0/0/'));
+  delete process.env.ADMIN_COMMANDS_CHANNEL_ID;
 });
 
 test('role headers mention the role and use its colour; nothing pings', () => {
@@ -123,7 +155,9 @@ test('role headers mention the role and use its colour; nothing pings', () => {
   const payloads = post.buildAdminPayloads(fakeClient(real, roles));
   const coordinator = payloads.find(p => p.embeds[0].toJSON().title === '📋 Coordinator commands');
   assert.equal(coordinator.embeds[0].toJSON().description, '<@&333>');
-  for (const e of coordinator.embeds) assert.equal(e.toJSON().color, 0x00aa88);
+  assert.equal(coordinator.embeds[0].toJSON().color, 0x00aa88);
+  const coordinatorCommand = payloads.find(p => p.embeds.at(-1).toJSON().footer?.text.startsWith('Coordinator'));
+  for (const e of coordinatorCommand.embeds) assert.equal(e.toJSON().color, 0x00aa88);
   const templar = payloads.find(p => p.embeds[0].toJSON().title === '📋 Templar commands');
   assert.equal(templar.embeds[0].toJSON().description, '<@&222>');
   assert.equal(templar.embeds[0].toJSON().color, require('../src/utils/embedColor.js').DEFAULT_EMBED_COLOR);
@@ -170,16 +204,9 @@ test('a block follows the mockup layout', () => {
     '**/profile** What is stored.\n**Example:** `/profile rsn:Zezima`\n**Options:**\n`member` [optional] a member\n`rsn` a name');
 });
 
-test('categories title the first embed of each category', () => {
-  const e = (name, category) => ({ name, path: name, category, description: 'd', example: `/${name}`, options: [] });
-  const embeds = docs.buildCommandEmbeds([e('a', 'One'), e('b', 'One'), e('c', 'Two')], { categories: true });
-  assert.deepEqual(embeds.map(x => x.toJSON().title), ['One', undefined, 'Two']);
-  assert.equal(docs.buildCommandEmbeds([e('a', 'One')])[0].toJSON().title, undefined);
-});
-
-test('the role messages show categories', () => {
+test('the start page groups each role by category', () => {
   const owner = post.buildAdminPayloads(fakeClient(real))[1];
-  assert.ok(owner.embeds.some(x => ['Bot admin', 'Leaderboards', 'Members'].includes(x.toJSON().title)));
+  assert.ok(owner.embeds[0].toJSON().fields.some(f => ['Bot admin', 'Leaderboards', 'Members'].includes(f.name)));
 });
 
 test('a block without options has no Options line', () => {
@@ -283,6 +310,7 @@ test('ensureAdminCommandsPost does nothing without a channel', async () => {
 
 test('ensureAdminCommandsPost posts once and is quiet on a second run', async () => {
   process.env.ADMIN_COMMANDS_CHANNEL_ID = 'c1';
+  files.delete('admin-commands-post.json');
   const { client, log } = mockChannel();
   client.commands = real;
   client.guilds = { cache: { get: () => null } };

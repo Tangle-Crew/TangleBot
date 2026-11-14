@@ -19,8 +19,9 @@ async function deleteMessages(channel, ids) {
 
 // Keeps a fixed set of bot messages in a channel in step with payloads (message options, in order).
 // State in the file for key: { channelId, messageIds, hash }. Does nothing when the hash is
-// unchanged. Returns 'unchanged', 'updated', 'reposted' or 'failed'.
-async function syncStaticMessages(client, { key, channelId, payloads, label = key }) {
+// unchanged. After a change, refresh({ ids, channel }) may return new payloads for the first
+// messages (for links that need the final message ids). Returns 'unchanged', 'updated', 'reposted' or 'failed'.
+async function syncStaticMessages(client, { key, channelId, payloads, label = key, refresh = null }) {
   const hash = hashOf(payloads);
   const stored = state.readState(key);
   const storedIds = Array.isArray(stored.messageIds) ? stored.messageIds : [];
@@ -61,6 +62,11 @@ async function syncStaticMessages(client, { key, channelId, payloads, label = ke
         await deleteMessages(channel, ids.slice(payloads.length));
         ids.length = payloads.length;
       }
+    }
+
+    if (refresh) {
+      const updates = refresh({ ids, channel });
+      for (let i = 0; i < updates.length; i++) await channel.messages.edit(ids[i], updates[i]);
     }
 
     state.writeState(key, { channelId, messageIds: ids, hash });

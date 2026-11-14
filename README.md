@@ -757,7 +757,7 @@ Owner also holds Templar, so it needs no separate override for the Templar comma
 
 ### Admin commands post
 
-The bot keeps a static post in a staff channel that lists every staff command it loaded, with an example and short option descriptions, grouped by role (Owner, Templar, Coordinator, server admins). Commands everyone can use are not listed. It is rebuilt on startup and only edits the messages when something changed; each role's header mentions the role (without pinging) and uses the role's colour.
+The bot keeps a static post in a staff channel that lists every staff command it loaded. It opens with a start page: an overview, then one message per role (Owner, Templar, Coordinator, server admins) listing that role's commands by category, each linking to its own message. After the start page, every command has its own message (so it can be forwarded on its own) with an example and short option descriptions; its footer names the role and category. A command that several roles can use (such as `/pethighscore`) is listed once, under the lowest of them. Commands everyone can use are not listed. It is rebuilt on startup and only edits the messages when something changed; each role's start message mentions the role (without pinging) and the role's colour is used throughout.
 
 Setup:
 

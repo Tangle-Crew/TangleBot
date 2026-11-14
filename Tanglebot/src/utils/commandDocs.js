@@ -151,21 +151,16 @@ function formatBlock(entry) {
   return text.length <= MAX_FIELD_VALUE ? text : `${text.slice(0, MAX_FIELD_VALUE - 1)}…`;
 }
 
-// A command's blocks go in one embed; a long command continues in a "(cont.)" embed. With
-// categories, the first embed of each category (entries in category order) is titled with it.
-function buildCommandEmbeds(entries, { filter, color, categories = false } = {}) {
-  const chosen = filter ? entries.filter(filter) : entries;
+// A command's blocks go in one embed; a long command continues in a "(cont.)" embed.
+function buildCommandEmbeds(entries, { color } = {}) {
   const byCommand = new Map();
-  for (const entry of chosen) {
+  for (const entry of entries) {
     if (!byCommand.has(entry.name)) byCommand.set(entry.name, []);
     byCommand.get(entry.name).push(entry);
   }
 
   const embeds = [];
-  let lastCategory = null;
   for (const [name, group] of byCommand) {
-    const category = categories && group[0].category !== lastCategory ? group[0].category : null;
-    if (categories) lastCategory = group[0].category;
     let embed = null;
     let used = 0;
     let first = true;
@@ -174,7 +169,6 @@ function buildCommandEmbeds(entries, { filter, color, categories = false } = {})
       if (!embed || embed.data.fields.length >= MAX_FIELDS || used + value.length > MAX_EMBED_CHARS) {
         embed = new EmbedBuilder().setFields([]);
         if (!first) embed.setTitle(`/${name} (cont.)`);
-        else if (category) embed.setTitle(category);
         if (color != null) embed.setColor(color);
         embeds.push(embed);
         first = false;
@@ -218,11 +212,11 @@ function packEmbeds(embeds) {
 
 module.exports = {
   describeCommands,
+  shorten,
+  BLANK,
+  MAX_FIELD_VALUE,
   buildCommandEmbeds,
   packEmbeds,
   embedLength,
-  roleOf,
   fallbackAccess,
-  MAX_EMBEDS_PER_MESSAGE,
-  MAX_MESSAGE_CHARS,
 };
