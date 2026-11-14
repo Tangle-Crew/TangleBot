@@ -34,6 +34,8 @@ const CHART_PLAYERS = 5;
 // { drafts: { <id>: draft }, jobs: { <id>: accepted draft } }. Read from disk on every call, so
 // both survive restarts.
 const DATA_FILE = 'weeklyannounce.json';
+// Two posts to one channel closer together than this count as duplicates.
+const DUPLICATE_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MAX_ANNOUNCEMENTS = 5;
 // Discord's limit of options in one select menu.
 const MAX_CHOICES = 25;
@@ -508,6 +510,19 @@ function acceptDraft(id, acceptedBy) {
   return job;
 }
 
+// A scheduled post another draft would duplicate: same channel, and the same competition or a send
+// time within DUPLICATE_WINDOW_MS. Null if there is none.
+function findDuplicateJob(draft) {
+  const at = new Date(draft.sendAt).getTime();
+  const ids = new Set(draft.competitions.map(c => c.id));
+  return Object.values(readStore().jobs).find(job =>
+    job.status === 'scheduled' &&
+    job.id !== draft.id &&
+    job.channelId === draft.channelId &&
+    (Math.abs(new Date(job.sendAt).getTime() - at) < DUPLICATE_WINDOW_MS || job.competitions.some(c => ids.has(c.id)))
+  ) ?? null;
+}
+
 // Removes a job that hasn't started sending. Null if it's gone or already sending, sent or failed.
 function cancelJob(id) {
   const store = readStore();
@@ -676,6 +691,7 @@ module.exports = {
   updateDraft,
   deleteDraft,
   acceptDraft,
+  findDuplicateJob,
   cancelJob,
   reopenJob,
   getJob,
