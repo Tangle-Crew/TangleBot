@@ -547,6 +547,16 @@ async function handleWeeklyAnnounceModal(interaction) {
 }
 
 module.exports = {
+  // Shown in the admin commands post.
+  help: {
+    category: 'Competitions',
+    access: 'Templar',
+    examples: { setup: '/weeklyannounce setup start:2026-11-15 8pm' },
+    options: {
+      start: 'send time, Eastern (default: 5 min after the comp ends)',
+      channel: null,
+    },
+  },
   requiredEnv: ['TEMPLAR_ROLE_ID', 'WOM_GROUP_ID', 'ADMIN_LOG_CHANNEL_ID'],
 
   data: buildCommandData(),

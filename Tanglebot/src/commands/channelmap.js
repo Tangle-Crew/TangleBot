@@ -1,6 +1,12 @@
 const { ChannelType, MessageFlags, PermissionFlagsBits, SlashCommandBuilder } = require('discord.js');
 
 module.exports = {
+  // Shown in the admin commands post.
+  help: {
+    category: 'Bot admin',
+    access: 'Manage Server',
+    examples: { '': '/channelmap channel:#clan-chat' },
+  },
   data: new SlashCommandBuilder()
     .setName('channelmap')
     .setDescription('Show the Discord channel ID to copy into the web panel')

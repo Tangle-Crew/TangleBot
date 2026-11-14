@@ -25,6 +25,7 @@ const STATE_FILES = [
   'last-submission.json',
   'lfg-groups.json',
   'weeklyannounce.json',
+  'admin-commands-post.json',
 ];
 
 // Always read from disk, never from memory.

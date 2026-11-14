@@ -417,6 +417,24 @@ async function handleNewPet(interaction) {
 }
 
 module.exports = {
+  // Shown in the admin commands post.
+  help: {
+    category: 'Leaderboards',
+    access: { '': 'Templar', new: 'Owner' },
+    examples: {
+      add: '/pethighscore add user:@Zezima pet:Abyssal orphan',
+      remove: '/pethighscore remove user:@Zezima pet:Abyssal orphan',
+      new: '/pethighscore new name:Abyssal orphan emoji:<:abyssal_orphan:123456789012345678>',
+    },
+    options: {
+      pet: 'pet name (autocompletes)',
+      pet2: 'another pet',
+      pet3: 'another pet',
+      pet4: 'another pet',
+      pet5: 'another pet',
+      emoji: 'the custom emoji, or its numeric ID',
+    },
+  },
   requiredEnv: ['PET_HIGHSCORES_CHANNEL_ID'],
   requiredEnvWithoutDatabase: ['PET_HIGHSCORES_SHEET_ID', 'GOOGLE_SERVICE_ACCOUNT_JSON'],
   refreshLeaderboard,

@@ -755,6 +755,22 @@ Add these overrides once:
 
 Owner also holds Templar, so it needs no separate override for the Templar commands. A renamed or new staff command needs its override added once. Admins always see every command.
 
+### Admin commands post
+
+The bot keeps a static post in a staff channel that lists every staff command it loaded, with an example and short option descriptions, grouped by role (Owner, Templar, Coordinator, server admins). Commands everyone can use are not listed. It is rebuilt on startup and only edits the messages when something changed; each role's header mentions the role (without pinging) and uses the role's colour.
+
+Setup:
+
+1. Create a staff channel only the bot can post in.
+2. Give the bot **View Channel**, **Send Messages**, **Embed Links** and **Read Message History** there.
+3. Set `ADMIN_COMMANDS_CHANNEL_ID` to the channel's ID. Leave it unset to turn the post off.
+
+The roles are named by `OWNER_ROLE_ID`, `TEMPLAR_ROLE_ID` and `COORDINATOR_ROLE_ID`. If the channel changes or a message is deleted, the bot reposts the whole post. The message IDs are kept in `data/admin-commands-post.json`.
+
+### Adding a new command
+
+Fill in the command's optional `help` export so it appears in the admin commands post: `category`, `access` (a role name, or a map by subcommand path such as `{ '': 'Templar', new: 'Owner' }`), `examples` (by subcommand path, `''` for a command without subcommands) and `options` (short text for options whose Discord description is over about 60 characters). A test fails if a staff command has no `access`, or if a key no longer matches a subcommand or option after a rename. New staff commands are hidden by default (`setDefaultMemberPermissions(0)`) and must check the role when they run.
+
 ### Environment variables
 
 Each feature's variables are listed in its section above. These are the base ones:

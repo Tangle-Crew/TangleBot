@@ -19,6 +19,7 @@ const {
   restoreLfgGroups,
 } = require('../utils/lfgPost');
 const { ensureLfgStartPost } = require('../utils/lfgStartPage');
+const { ensureAdminCommandsPost } = require('../utils/adminCommandsPost');
 const { refreshLeaderboard: refreshPetLeaderboard } = require('../commands/pethighscore');
 const { refreshLeaderboard: refreshDonationLeaderboard } = require('../commands/donationhighscore');
 const { handleStaleMembersButton, handleStaleMembersSelect, start: startStaleMembers } = require('../commands/stalemembers');
@@ -119,6 +120,13 @@ function loadEvents(client) {
       await ensureLfgStartPost(client);
     } catch (err) {
       console.error('[LFG] Failed to ensure LFG start post:', err);
+    }
+
+    // After the steps people wait on (LFG buttons, scheduled posts).
+    try {
+      await ensureAdminCommandsPost(client);
+    } catch (err) {
+      console.error('[AdminCommands] Failed to update the admin commands post:', err);
     }
 
     // Before the leaderboards, so a first sync stores everyone before names are refreshed.

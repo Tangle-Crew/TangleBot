@@ -4,6 +4,12 @@ const { reconcileGimRoles } = require('../utils/gimRoleSync');
 const { logClanError, clanErrorMessage } = require('../utils/clanErrors');
 
 module.exports = {
+  // Shown in the admin commands post.
+  help: {
+    category: 'Members',
+    access: 'Manage Roles',
+    examples: { '': '/gimrolesync' },
+  },
   requiredFeature: 'CLAN_ROSTER_COMMANDS_ENABLED',
   requiredEnv: ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'],
 
