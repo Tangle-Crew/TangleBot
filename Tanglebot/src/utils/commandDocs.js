@@ -77,10 +77,17 @@ function buildExample(path, options) {
 // An environment variable name, e.g. WOM_GROUP_ID.
 const ENV_NAME = /\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/;
 
-// Options whose Discord description names an environment variable are left out, unless help
-// gives them their own text.
+// Options are left out when help sets their text to null (options that only exist while a setting
+// is unset), or when their Discord description names an environment variable and help gives no text.
+function visibleOptions(options, help) {
+  return options.filter(o => {
+    const text = help?.options?.[o.name];
+    return text === null ? false : Boolean(text) || !ENV_NAME.test(o.description);
+  });
+}
+
 function describeOptions(options, help) {
-  return options.filter(o => help?.options?.[o.name] || !ENV_NAME.test(o.description)).map(o => ({
+  return options.map(o => ({
     name: o.name,
     required: Boolean(o.required),
     text: help?.options?.[o.name] ?? shorten(o.description, OPTION_TEXT_MAX),
@@ -97,7 +104,8 @@ function describeCommands(commands) {
     const help = command.help ?? {};
     const defaultPermissions = json.default_member_permissions;
 
-    const add = (subPath, node, options) => {
+    const add = (subPath, node, allOptions) => {
+      const options = visibleOptions(allOptions, help);
       const path = subPath ? `${json.name} ${subPath}` : json.name;
       const access = resolveAccess(help, subPath, defaultPermissions);
       entries.push({
@@ -143,8 +151,9 @@ function formatBlock(entry) {
   return text.length <= MAX_FIELD_VALUE ? text : `${text.slice(0, MAX_FIELD_VALUE - 1)}…`;
 }
 
-// A command's blocks go in one embed; a long command continues in a "(cont.)" embed.
-function buildCommandEmbeds(entries, { filter, color } = {}) {
+// A command's blocks go in one embed; a long command continues in a "(cont.)" embed. With
+// categories, the first embed of each category (entries in category order) is titled with it.
+function buildCommandEmbeds(entries, { filter, color, categories = false } = {}) {
   const chosen = filter ? entries.filter(filter) : entries;
   const byCommand = new Map();
   for (const entry of chosen) {
@@ -153,7 +162,10 @@ function buildCommandEmbeds(entries, { filter, color } = {}) {
   }
 
   const embeds = [];
+  let lastCategory = null;
   for (const [name, group] of byCommand) {
+    const category = categories && group[0].category !== lastCategory ? group[0].category : null;
+    if (categories) lastCategory = group[0].category;
     let embed = null;
     let used = 0;
     let first = true;
@@ -162,6 +174,7 @@ function buildCommandEmbeds(entries, { filter, color } = {}) {
       if (!embed || embed.data.fields.length >= MAX_FIELDS || used + value.length > MAX_EMBED_CHARS) {
         embed = new EmbedBuilder().setFields([]);
         if (!first) embed.setTitle(`/${name} (cont.)`);
+        else if (category) embed.setTitle(category);
         if (color != null) embed.setColor(color);
         embeds.push(embed);
         first = false;

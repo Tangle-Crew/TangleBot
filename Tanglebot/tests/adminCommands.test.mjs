@@ -34,6 +34,27 @@ const entries = docs.describeCommands(real);
 const staff = [...real.values()].filter(c => c.data.toJSON().default_member_permissions != null);
 const subPathOf = e => e.path.slice(e.name.length).trim();
 
+const KNOWN_ACCESS = ['Everyone', 'Owner', 'Templar', 'Coordinator', 'Manage Server', 'Manage Roles'];
+
+test('help.access only uses known role names', () => {
+  for (const c of real.values()) {
+    if (!c.help?.access) continue;
+    const values = typeof c.help.access === 'string' ? [c.help.access] : Object.values(c.help.access);
+    for (const v of values) assert.ok(KNOWN_ACCESS.includes(v), `/${c.data.name} access "${v}"`);
+  }
+});
+
+test('an option with null help text is hidden', () => {
+  const data = new SlashCommandBuilder().setName('x').setDescription('X').addStringOption(o => o.setName('a').setDescription('A')).addStringOption(o => o.setName('b').setDescription('B'));
+  const [entry] = docs.describeCommands([{ data, help: { options: { b: null } } }]);
+  assert.deepEqual(entry.options.map(o => o.name), ['a']);
+});
+
+test('no block of the real commands is cut short', () => {
+  const embeds = docs.buildCommandEmbeds(entries.filter(e => e.role !== 'everyone'));
+  for (const e of embeds) for (const f of e.toJSON().fields) assert.ok(!f.value.endsWith('…') && f.value.length < 1024, f.value);
+});
+
 test('every staff command has a help.access', () => {
   assert.ok(staff.length >= 12);
   for (const c of staff) assert.ok(c.help?.access, `/${c.data.name} has no help.access`);
@@ -49,7 +70,7 @@ test('every help example, access and option key matches the command', () => {
       for (const key of Object.keys(c.help.access)) assert.ok(key === '' || subPaths.includes(key), `/${c.data.name} access "${key}"`);
     }
     const optionNames = new Set(mine.flatMap(e => e.options.map(o => o.name)));
-    for (const key of Object.keys(c.help.options ?? {})) assert.ok(optionNames.has(key), `/${c.data.name} option "${key}"`);
+    for (const [key, text] of Object.entries(c.help.options ?? {})) assert.ok(text === null || optionNames.has(key), `/${c.data.name} option "${key}"`);
   }
 });
 
@@ -149,6 +170,18 @@ test('a block follows the mockup layout', () => {
     '**/profile** What is stored.\n**Example:** `/profile rsn:Zezima`\n**Options:**\n`member` [optional] a member\n`rsn` a name');
 });
 
+test('categories title the first embed of each category', () => {
+  const e = (name, category) => ({ name, path: name, category, description: 'd', example: `/${name}`, options: [] });
+  const embeds = docs.buildCommandEmbeds([e('a', 'One'), e('b', 'One'), e('c', 'Two')], { categories: true });
+  assert.deepEqual(embeds.map(x => x.toJSON().title), ['One', undefined, 'Two']);
+  assert.equal(docs.buildCommandEmbeds([e('a', 'One')])[0].toJSON().title, undefined);
+});
+
+test('the role messages show categories', () => {
+  const owner = post.buildAdminPayloads(fakeClient(real))[1];
+  assert.ok(owner.embeds.some(x => ['Bot admin', 'Leaderboards', 'Members'].includes(x.toJSON().title)));
+});
+
 test('a block without options has no Options line', () => {
   const [embed] = docs.buildCommandEmbeds([{ name: 'a', path: 'a', description: 'd', example: '/a', options: [] }]);
   assert.ok(!embed.toJSON().fields[0].value.includes('Options'));
@@ -241,16 +274,6 @@ test('syncStaticMessages reposts when the channel changed', async () => {
   assert.equal(await syncStaticMessages(client, { key, channelId: 'c2', payloads: [payload('a')] }), 'reposted');
   assert.deepEqual(log, ['delete m1', 'send m2']);
   assert.equal(db.readState(key).channelId, 'c2');
-});
-
-test('syncStaticMessages ignores a part of the payload left out of hashPayloads', async () => {
-  const key = 'sync-e.json';
-  const { client, log } = mockChannel();
-  const hashPayloads = [payload('same')];
-  await syncStaticMessages(client, { key, channelId: 'c1', payloads: [payload('time 1')], hashPayloads });
-  log.length = 0;
-  assert.equal(await syncStaticMessages(client, { key, channelId: 'c1', payloads: [payload('time 2')], hashPayloads }), 'unchanged');
-  assert.deepEqual(log, []);
 });
 
 test('ensureAdminCommandsPost does nothing without a channel', async () => {

@@ -173,6 +173,8 @@ module.exports = {
       metric2: 'another of the same type',
       metric3: 'another of the same type',
       metric4: 'another of the same type',
+      group_id: null,
+      verification_code: null,
     },
   },
   data: buildCommandData(),

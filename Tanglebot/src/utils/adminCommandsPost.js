@@ -56,7 +56,7 @@ function buildOverviewEmbed(byRole) {
 // The messages for each role: a header embed with the role mention, then its commands.
 function buildRolePayloads(role, entries, color) {
   const header = new EmbedBuilder().setTitle(role.title).setDescription(roleLabel(role)).setColor(color);
-  const embeds = [header, ...buildCommandEmbeds(sortByCategory(entries), { color })];
+  const embeds = [header, ...buildCommandEmbeds(sortByCategory(entries), { color, categories: true })];
   return packEmbeds(embeds).map(group => ({ embeds: group, allowedMentions: NO_PINGS }));
 }
 

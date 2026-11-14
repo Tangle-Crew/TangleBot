@@ -90,11 +90,6 @@ function loadEvents(client) {
     } catch (err) {
       console.error('[Commands] Failed to sync slash commands:', err);
     }
-    try {
-      await ensureAdminCommandsPost(client);
-    } catch (err) {
-      console.error('[AdminCommands] Failed to update the admin commands post:', err);
-    }
     // Preloads ranks in the background and listens for update all; never throws.
     if (client.commands.has('stalemembers')) startStaleMembers(client);
     // Early, so buttons on existing LFG posts work again as soon as possible.
@@ -125,6 +120,13 @@ function loadEvents(client) {
       await ensureLfgStartPost(client);
     } catch (err) {
       console.error('[LFG] Failed to ensure LFG start post:', err);
+    }
+
+    // After the steps people wait on (LFG buttons, scheduled posts).
+    try {
+      await ensureAdminCommandsPost(client);
+    } catch (err) {
+      console.error('[AdminCommands] Failed to update the admin commands post:', err);
     }
 
     // Before the leaderboards, so a first sync stores everyone before names are refreshed.

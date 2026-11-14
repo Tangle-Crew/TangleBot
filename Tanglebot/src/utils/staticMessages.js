@@ -19,10 +19,9 @@ async function deleteMessages(channel, ids) {
 
 // Keeps a fixed set of bot messages in a channel in step with payloads (message options, in order).
 // State in the file for key: { channelId, messageIds, hash }. Does nothing when the hash is
-// unchanged. hashPayloads is what the hash is made from, when part of a payload (e.g. a time)
-// should not count as a change. Returns 'unchanged', 'updated', 'reposted' or 'failed'.
-async function syncStaticMessages(client, { key, channelId, payloads, hashPayloads = payloads, label = key }) {
-  const hash = hashOf(hashPayloads);
+// unchanged. Returns 'unchanged', 'updated', 'reposted' or 'failed'.
+async function syncStaticMessages(client, { key, channelId, payloads, label = key }) {
+  const hash = hashOf(payloads);
   const stored = state.readState(key);
   const storedIds = Array.isArray(stored.messageIds) ? stored.messageIds : [];
   const sameChannel = stored.channelId === channelId;
