@@ -12,6 +12,7 @@ const {
   TextInputBuilder,
   TextInputStyle,
   AttachmentBuilder,
+  EmbedBuilder,
   StringSelectMenuBuilder,
   escapeMarkdown,
 } = require('discord.js');
@@ -393,17 +394,19 @@ async function showPreview(interaction, draft) {
   }
 }
 
-// The scheduled confirmation with Preview, Edit and Cancel, which work until the post starts sending.
-function scheduledMessage(job, content) {
-  const container = new ContainerBuilder()
-    .setAccentColor(DEFAULT_EMBED_COLOR)
-    .addTextDisplayComponents(new TextDisplayBuilder().setContent(content))
-    .addActionRowComponents(new ActionRowBuilder().addComponents(
-      button('jobpreview', job.id, 'Preview', ButtonStyle.Success),
-      button('jobedit', job.id, 'Edit', ButtonStyle.Secondary),
-      button('jobcancel', job.id, 'Cancel', ButtonStyle.Danger)
-    ));
-  return { components: [container], flags: MessageFlags.IsComponentsV2, allowedMentions: { parse: [] } };
+// Preview, Edit and Cancel for the scheduled post's admin log entry, which work until it starts sending.
+function jobButtons(job) {
+  return new ActionRowBuilder().addComponents(
+    button('jobpreview', job.id, 'Preview', ButtonStyle.Success),
+    button('jobedit', job.id, 'Edit', ButtonStyle.Secondary),
+    button('jobcancel', job.id, 'Cancel', ButtonStyle.Danger)
+  );
+}
+
+// The admin log entry the button was pressed on, with a new title and description and no buttons.
+function closedLogEntry(interaction, title, description) {
+  const embed = EmbedBuilder.from(interaction.message.embeds[0]).setTitle(title).setDescription(description);
+  return { embeds: [embed], components: [] };
 }
 
 // Previews a scheduled post privately, leaving the scheduled message as it is.
@@ -428,15 +431,15 @@ async function showJobPreview(interaction, job) {
   }
 }
 
-// Handles Preview, Edit and Cancel on the scheduled message. Edit moves the post back to a draft
-// panel and Accept schedules it again.
+// Handles Preview, Edit and Cancel on the scheduled post's admin log entry. Any Templar can use
+// them. Edit gives the presser the draft panel privately, and Accept schedules the post again.
 async function handleJobAction(interaction, action, id) {
   const job = getJob(id);
-  if (!job) return interaction.update(closedMessage('This scheduled post no longer exists. Run `/weeklyannounce setup` to start a new one.'));
+  if (!job) return interaction.update(closedLogEntry(interaction, '📣 Weekly announcement no longer exists', 'This scheduled post was already removed.'));
   if (action === 'jobpreview') return showJobPreview(interaction, job);
 
   const scheduleTime = discordTimestamp(job.sendAt, 'F');
-  // The job may have started sending since the message was shown, which the store checks.
+  // The job may have started sending since the entry was posted, which the store checks.
   const refuse = verb => {
     const state = { sent: 'already been sent', sending: 'started sending', failed: 'failed' }[getJob(id)?.status] ?? 'been removed';
     return interaction.reply({ content: `This post has ${state}, so it can't be ${verb}.`, flags: MessageFlags.Ephemeral });
@@ -444,27 +447,22 @@ async function handleJobAction(interaction, action, id) {
   if (action === 'jobcancel') {
     if (!cancelJob(id)) return refuse('cancelled');
     unscheduleJob(id);
-    await interaction.update(closedMessage(`Cancelled. The post for ${scheduleTime} will not be sent.`));
-    return notifyAdminLog(
-      interaction.client,
+    return interaction.update(closedLogEntry(
+      interaction,
       '📣 Weekly announcement cancelled',
-      `${interaction.user} cancelled the weekly post in <#${job.channelId}> that was due ${scheduleTime}.`,
-      [],
-      DEFAULT_EMBED_COLOR
-    );
+      `${interaction.user} cancelled the weekly post in <#${job.channelId}> that was due ${scheduleTime}.`
+    ));
   }
   // jobedit
   const draft = reopenJob(id);
   if (!draft) return refuse('edited');
   unscheduleJob(id);
-  await interaction.update(panelMessage(draft));
-  return notifyAdminLog(
-    interaction.client,
+  await interaction.reply({ ...panelMessage(draft), flags: MessageFlags.Ephemeral | MessageFlags.IsComponentsV2 });
+  await interaction.message.edit(closedLogEntry(
+    interaction,
     '📣 Weekly announcement reopened',
-    `${interaction.user} reopened the weekly post in <#${job.channelId}> due ${scheduleTime} for editing. It isn't scheduled until it's accepted again.`,
-    [],
-    DEFAULT_EMBED_COLOR
-  );
+    `${interaction.user} reopened the weekly post in <#${job.channelId}> due ${scheduleTime} for editing. It isn't scheduled until it's accepted again.`
+  )).catch(err => console.error('[WeeklyAnnounce] Could not update the admin log entry:', err.message));
 }
 
 async function acceptPreview(interaction, draft) {
@@ -486,7 +484,7 @@ async function acceptPreview(interaction, draft) {
   console.log(`[WeeklyAnnounce] ${interaction.user.tag} scheduled job ${job.id} for ${job.sendAt} in channel ${job.channelId}`);
 
   const when = `${discordTimestamp(job.sendAt, 'F')} (${discordTimestamp(job.sendAt, 'R')})`;
-  await interaction.update(scheduledMessage(job, `✅ Scheduled for ${when} in <#${job.channelId}>. The admin log has the details.`));
+  await interaction.update(closedMessage(`✅ Scheduled for ${when} in <#${job.channelId}>. The admin log has the details and the Preview, Edit and Cancel buttons.`));
 
   const winners = job.competitions.length
     ? `Winners from ${job.competitions.map(c => `**${escapeMarkdown(c.title)}**`).join(', ')}`
@@ -499,7 +497,8 @@ async function acceptPreview(interaction, draft) {
     '📣 Weekly announcement scheduled',
     `${interaction.user} scheduled the weekly post in <#${job.channelId}> for ${when}.\n${winners}, ${announcements}.`,
     [],
-    DEFAULT_EMBED_COLOR
+    DEFAULT_EMBED_COLOR,
+    [jobButtons(job)]
   );
 }
 
