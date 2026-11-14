@@ -118,6 +118,22 @@ const SUBCOMMANDS = {
 };
 
 module.exports = {
+  // Shown in the admin commands post.
+  help: {
+    category: 'Bot admin',
+    access: 'Owner',
+    examples: {
+      dbconnection: '/migration dbconnection',
+      sheets: '/migration sheets',
+      status: '/migration status',
+      dryrun: '/migration dryrun',
+      import: '/migration import confirm:true',
+      verify: '/migration verify',
+    },
+    options: {
+      confirm: 'true to run the import',
+    },
+  },
   requiredEnv: REQUIRED_ENV,
 
   data: new SlashCommandBuilder()

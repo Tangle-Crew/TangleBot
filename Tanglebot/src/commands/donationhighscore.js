@@ -298,6 +298,18 @@ async function syncDonationRoles(guild, discordId, previousDonated, newDonated) 
 }
 
 module.exports = {
+  // Shown in the admin commands post.
+  help: {
+    category: 'Leaderboards',
+    access: 'Templar',
+    examples: {
+      add: '/donationhighscore add player:@Zezima amount:10m',
+      remove: '/donationhighscore remove player:@Zezima amount:2.5m',
+    },
+    options: {
+      amount: 'e.g. 10m, 250k, 1b or a raw number',
+    },
+  },
   requiredEnv: ['DONATIONS_CHANNEL_ID'],
   requiredEnvWithoutDatabase: ['DONATIONS_SHEET_ID', 'GOOGLE_SERVICE_ACCOUNT_JSON'],
   refreshLeaderboard,

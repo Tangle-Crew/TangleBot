@@ -8,6 +8,16 @@ const petHighscore = require('./pethighscore');
 const allowedRoles = () => [process.env.COORDINATOR_ROLE_ID, process.env.TEMPLAR_ROLE_ID, process.env.OWNER_ROLE_ID];
 
 module.exports = {
+  // Shown in the admin commands post.
+  help: {
+    category: 'Members',
+    access: 'Coordinator',
+    examples: { '': '/profile rsn:Zezima' },
+    options: {
+      member: 'a Discord member',
+      rsn: 'an OSRS name (autocompletes)',
+    },
+  },
   requiredEnv: ['DATABASE_URL'],
   requiredEnvAny: ['COORDINATOR_ROLE_ID', 'TEMPLAR_ROLE_ID', 'OWNER_ROLE_ID'],
 

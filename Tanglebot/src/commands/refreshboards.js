@@ -11,6 +11,12 @@ const BOARDS = [
 ];
 
 module.exports = {
+  // Shown in the admin commands post.
+  help: {
+    category: 'Leaderboards',
+    access: 'Templar',
+    examples: { '': '/refreshboards' },
+  },
   requiredEnvWithoutDatabase: ['GOOGLE_SERVICE_ACCOUNT_JSON'],
 
   data: new SlashCommandBuilder()

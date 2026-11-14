@@ -118,6 +118,22 @@ const SUBCOMMANDS = {
 };
 
 module.exports = {
+  // Shown in the admin commands post.
+  help: {
+    category: 'Members',
+    access: 'Owner',
+    examples: {
+      status: '/memberdata status',
+      preview: '/memberdata preview',
+      sync: '/memberdata sync confirm:true',
+      verify: '/memberdata verify',
+      competitions: '/memberdata competitions confirm:true',
+      milestones: '/memberdata milestones confirm:true',
+    },
+    options: {
+      confirm: 'true to save the sync',
+    },
+  },
   requiredEnv: ['DATABASE_URL', 'WOM_GROUP_ID', 'OWNER_ROLE_ID'],
 
   data: new SlashCommandBuilder()

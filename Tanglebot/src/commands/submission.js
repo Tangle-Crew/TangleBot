@@ -10,6 +10,21 @@ const DISCORD_GREEN = 0x1a5c2e;
 const DISCORD_PURPLE = 0x4a235a;
 
 module.exports = {
+  // Shown in the admin commands post.
+  help: {
+    category: 'Proof submissions',
+    access: { '': 'Templar', showintakeurl: 'Manage Server', setintakeurl: 'Manage Server' },
+    examples: {
+      format: '/submission format private:true',
+      last: '/submission last',
+      showintakeurl: '/submission showintakeurl',
+      setintakeurl: '/submission setintakeurl url:https://example.com/intake',
+    },
+    options: {
+      private: 'only show the reply to you',
+      url: 'the full intake URL',
+    },
+  },
   data: new SlashCommandBuilder()
     .setName('submission')
     .setDefaultMemberPermissions(0)

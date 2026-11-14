@@ -19,6 +19,7 @@ const {
   restoreLfgGroups,
 } = require('../utils/lfgPost');
 const { ensureLfgStartPost } = require('../utils/lfgStartPage');
+const { ensureAdminCommandsPost } = require('../utils/adminCommandsPost');
 const { refreshLeaderboard: refreshPetLeaderboard } = require('../commands/pethighscore');
 const { refreshLeaderboard: refreshDonationLeaderboard } = require('../commands/donationhighscore');
 const { handleStaleMembersButton, handleStaleMembersSelect, start: startStaleMembers } = require('../commands/stalemembers');
@@ -88,6 +89,11 @@ function loadEvents(client) {
       await syncCommands(client);
     } catch (err) {
       console.error('[Commands] Failed to sync slash commands:', err);
+    }
+    try {
+      await ensureAdminCommandsPost(client);
+    } catch (err) {
+      console.error('[AdminCommands] Failed to update the admin commands post:', err);
     }
     // Preloads ranks in the background and listens for update all; never throws.
     if (client.commands.has('stalemembers')) startStaleMembers(client);

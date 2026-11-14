@@ -1279,6 +1279,16 @@ async function handleStaleMembersButton(button) {
 }
 
 module.exports = {
+  // Shown in the admin commands post.
+  help: {
+    category: 'Members',
+    access: 'Templar',
+    examples: { '': '/stalemembers time:3 minxp:250k ignore:None' },
+    options: {
+      minxp: 'least XP gained, e.g. 250k or 1.5m',
+      ignore: 'ranks to leave out, comma separated, or None',
+    },
+  },
   // Fails closed: not loaded without the Templar role or the admin log channel.
   requiredEnv: ['WOM_GROUP_ID', 'TEMPLAR_ROLE_ID', 'ADMIN_LOG_CHANNEL_ID'],
 

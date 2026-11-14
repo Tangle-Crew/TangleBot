@@ -22,6 +22,18 @@ function formatRow(row) {
 }
 
 module.exports = {
+  // Shown in the admin commands post.
+  help: {
+    category: 'Bot admin',
+    access: 'Coordinator',
+    examples: { '': '/commandlog command:donationhighscore add status:error' },
+    options: {
+      user: 'only this person',
+      command: 'only this command, e.g. migration',
+      status: 'ok, error or denied',
+      page: 'page number (10 a page)',
+    },
+  },
   requiredEnv: ['DATABASE_URL'],
   requiredEnvAny: ['COORDINATOR_ROLE_ID', 'TEMPLAR_ROLE_ID', 'OWNER_ROLE_ID'],
 

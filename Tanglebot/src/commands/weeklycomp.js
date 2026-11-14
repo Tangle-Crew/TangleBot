@@ -161,6 +161,20 @@ function buildCommandData() {
 }
 
 module.exports = {
+  // Shown in the admin commands post.
+  help: {
+    category: 'Competitions',
+    access: 'Templar',
+    examples: { '': '/weeklycomp prefix:BOTW T3 start:2026-11-15 8pm metric:Zulrah duration:7' },
+    options: {
+      prefix: 'name prefix, e.g. BOTW T3',
+      start: 'start date, Eastern, e.g. 2026-11-15 8pm',
+      metric: 'boss or skill (autocompletes)',
+      metric2: 'another of the same type',
+      metric3: 'another of the same type',
+      metric4: 'another of the same type',
+    },
+  },
   data: buildCommandData(),
   parseDateInput,
   hasMixedTypes,

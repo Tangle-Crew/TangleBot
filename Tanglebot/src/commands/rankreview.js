@@ -9,6 +9,15 @@ const CATEGORY_LABELS = {
 };
 
 module.exports = {
+  // Shown in the admin commands post.
+  help: {
+    category: 'Members',
+    access: 'Manage Server',
+    examples: { '': '/rankreview private:true' },
+    options: {
+      private: 'only show the summary to you',
+    },
+  },
   requiredFeature: 'CLAN_ROSTER_COMMANDS_ENABLED',
   requiredEnv: ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'],
 

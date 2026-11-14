@@ -9,6 +9,19 @@ const memberOption = o => o.setName('member').setDescription('Only this member (
 const pageOption = o => o.setName('page').setDescription('Page number (10 a page, newest first)').setMinValue(1);
 
 module.exports = {
+  // Shown in the admin commands post.
+  help: {
+    category: 'Leaderboards',
+    access: 'Coordinator',
+    examples: {
+      donations: '/history donations member:@Zezima',
+      pets: '/history pets page:2',
+    },
+    options: {
+      member: 'only this member (empty: whole clan)',
+      page: 'page number (10 a page)',
+    },
+  },
   requiredEnv: ['DATABASE_URL'],
   requiredEnvAny: ['COORDINATOR_ROLE_ID', 'TEMPLAR_ROLE_ID', 'OWNER_ROLE_ID'],
 

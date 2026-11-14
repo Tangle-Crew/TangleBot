@@ -2,6 +2,18 @@ const { MessageFlags, SlashCommandBuilder } = require('discord.js');
 const { hasHoneypotAdminAccess, isTestModeEnabled, setTestModeEnabled } = require('../utils/honeypot');
 
 module.exports = {
+  // Shown in the admin commands post.
+  help: {
+    category: 'Moderation',
+    access: 'Templar',
+    examples: {
+      testmode: '/honeypot testmode enabled:true',
+      status: '/honeypot status',
+    },
+    options: {
+      enabled: 'true for testing mode',
+    },
+  },
   data: new SlashCommandBuilder()
     .setName('honeypot')
     .setDefaultMemberPermissions(0)

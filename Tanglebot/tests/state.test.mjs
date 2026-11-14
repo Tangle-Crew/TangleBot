@@ -145,7 +145,7 @@ test('a disk-first file that is missing is restored from the table, like any oth
 
 test('the mirrored files include the LFG groups and the weekly announcements, the latter read from disk', () => {
   assert.deepEqual([...state.STATE_FILES].sort(), [
-    'donationhighscores_message.json', 'honeypot-runtime-config.json', 'last-submission.json', 'lfg-groups.json', 'lfg-start-post.json',
+    'admin-commands-post.json', 'donationhighscores_message.json', 'honeypot-runtime-config.json', 'last-submission.json', 'lfg-groups.json', 'lfg-start-post.json',
     'pethighscores_message.json', 'stalemembers.json', 'submission-runtime-config.json', 'weeklyannounce.json',
   ]);
   assert.deepEqual([...state.DISK_FIRST_FILES], ['weeklyannounce.json']);

@@ -250,6 +250,17 @@ function createSpinGif(entries, winnerIdx) {
 
 // ── Discord command ─────────────────────────────────────────────────────────────
 module.exports = {
+  // Shown in the admin commands post.
+  help: {
+    category: 'Competitions',
+    access: 'Coordinator',
+    examples: { '': '/spinwheel entries:Alice,Bob,1-10 winners:2 title:Raffle' },
+    options: {
+      entries: 'names or ranges, e.g. Alice,Bob,1-10',
+      message: 'win message, {winner} is the name',
+      ping: '@here or @everyone with the result',
+    },
+  },
   data: new SlashCommandBuilder()
     .setName('spinwheel')
     .setDefaultMemberPermissions(0)
