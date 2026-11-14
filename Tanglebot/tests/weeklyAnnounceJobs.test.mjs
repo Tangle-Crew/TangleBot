@@ -25,9 +25,9 @@ beforeEach(() => {
   writes.length = 0;
 });
 
-function newJob() {
+function newJob({ channelId = '2', hours = 1, competitions = [] } = {}) {
   const draft = announce.createDraft({
-    ownerId: '1', channelId: '2', sendAt: new Date(Date.now() + 3600e3), fixedSendAt: false, competitions: [], choices: [],
+    ownerId: '1', channelId, sendAt: new Date(Date.now() + hours * 3600e3), fixedSendAt: false, competitions, choices: [],
   });
   announce.updateDraft(draft.id, d => d.announcements.push('hello'));
   return announce.acceptDraft(draft.id, '1');
@@ -74,4 +74,23 @@ test('cancelling and reopening are saved through the state layer', () => {
   announce.reopenJob(other.id);
   assert.deepEqual(writes, ['weeklyannounce.json']);
   assert.ok(files.get('weeklyannounce.json').drafts[other.id]);
+});
+
+const draftFor = ({ channelId = '2', hours = 1, competitions = [] }) => ({
+  id: 'new', channelId, sendAt: new Date(Date.now() + hours * 3600e3).toISOString(), competitions,
+});
+
+test('findDuplicateJob matches the same channel within a day or with a shared competition', () => {
+  const job = newJob({ competitions: [{ id: 7, title: 'A' }] });
+  assert.equal(announce.findDuplicateJob(draftFor({ hours: 5 }))?.id, job.id, 'close send time');
+  assert.equal(announce.findDuplicateJob(draftFor({ hours: 24 * 7, competitions: [{ id: 7, title: 'A' }] }))?.id, job.id, 'same competition');
+  assert.equal(announce.findDuplicateJob(draftFor({ hours: 24 * 7, competitions: [{ id: 8, title: 'B' }] })), null, 'a week later, other competition');
+  assert.equal(announce.findDuplicateJob(draftFor({ channelId: '3', hours: 1 })), null, 'other channel');
+});
+
+test('findDuplicateJob ignores jobs that are not scheduled and the draft itself', () => {
+  const job = newJob();
+  assert.equal(announce.findDuplicateJob({ ...draftFor({}), id: job.id }), null);
+  announce.updateJob(job.id, j => { j.status = 'sent'; });
+  assert.equal(announce.findDuplicateJob(draftFor({})), null);
 });

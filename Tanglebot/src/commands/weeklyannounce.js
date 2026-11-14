@@ -30,6 +30,7 @@ const {
   updateDraft,
   deleteDraft,
   acceptDraft,
+  findDuplicateJob,
   cancelJob,
   reopenJob,
   getJob,
@@ -465,7 +466,27 @@ async function handleJobAction(interaction, action, id) {
   )).catch(err => console.error('[WeeklyAnnounce] Could not update the admin log entry:', err.message));
 }
 
-async function acceptPreview(interaction, draft) {
+// Shown instead of scheduling when another post is already scheduled for the same channel and time or
+// competition: replace it, edit it instead, or go back to the draft.
+function duplicateMessage(draft, existing) {
+  const when = `${discordTimestamp(existing.sendAt, 'F')} (${discordTimestamp(existing.sendAt, 'R')})`;
+  const container = new ContainerBuilder()
+    .setAccentColor(OVER_LIMIT_COLOR)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent([
+      '## ⚠️ A post is already scheduled',
+      `A weekly post for <#${existing.channelId}> is already scheduled for ${when}, with ${plural(existing.announcements.length, 'announcement')}.`,
+      '**Replace it** schedules this draft and cancels that one. **Edit the existing one** discards this draft and opens that post for editing.',
+    ].join('\n')))
+    .addActionRowComponents(new ActionRowBuilder().addComponents(
+      button('replace', draft.id, 'Replace it', ButtonStyle.Danger, { index: existing.id }),
+      button('editexisting', draft.id, 'Edit the existing one', ButtonStyle.Secondary, { index: existing.id }),
+      button('back', draft.id, 'Back to this draft', ButtonStyle.Secondary)
+    ));
+  return { components: [container], flags: MessageFlags.IsComponentsV2, allowedMentions: { parse: [] } };
+}
+
+// replaceId: the scheduled post Replace was pressed for, cancelled once this one is scheduled.
+async function acceptPreview(interaction, draft, { replaceId = null } = {}) {
   if (new Date(draft.sendAt) <= new Date()) {
     return interaction.reply({ content: 'The send time has passed. Cancel and run `/weeklyannounce setup` again.', flags: MessageFlags.Ephemeral });
   }
@@ -473,6 +494,10 @@ async function acceptPreview(interaction, draft) {
   const parts = announcementParts(draft, channel?.guild ?? interaction.guild);
   if (parts === null) {
     return interaction.reply({ content: 'The announcements are too long even for 2 messages. Press Edit and shorten or remove one.', flags: MessageFlags.Ephemeral });
+  }
+  if (!replaceId) {
+    const existing = findDuplicateJob(draft);
+    if (existing) return interaction.update(duplicateMessage(draft, existing));
   }
 
   const job = acceptDraft(draft.id, interaction.user.id);
@@ -483,6 +508,11 @@ async function acceptPreview(interaction, draft) {
   scheduleJob(interaction.client, job);
   console.log(`[WeeklyAnnounce] ${interaction.user.tag} scheduled job ${job.id} for ${job.sendAt} in channel ${job.channelId}`);
 
+  let replaced = null;
+  if (replaceId) {
+    replaced = cancelJob(replaceId);
+    if (replaced) unscheduleJob(replaceId);
+  }
   const when = `${discordTimestamp(job.sendAt, 'F')} (${discordTimestamp(job.sendAt, 'R')})`;
   await interaction.update(closedMessage(`✅ Scheduled for ${when} in <#${job.channelId}>. The admin log has the details and the Preview, Edit and Cancel buttons.`));
 
@@ -495,7 +525,8 @@ async function acceptPreview(interaction, draft) {
   await notifyAdminLog(
     interaction.client,
     '📣 Weekly announcement scheduled',
-    `${interaction.user} scheduled the weekly post in <#${job.channelId}> for ${when}.\n${winners}, ${announcements}.`,
+    `${interaction.user} scheduled the weekly post in <#${job.channelId}> for ${when}.\n${winners}, ${announcements}.` +
+    (replaceId ? (replaced ? `\nReplaced the post that was due ${discordTimestamp(replaced.sendAt, 'F')}.` : '\n⚠️ The earlier post could not be replaced because it had already been sent, started sending or been removed.') : ''),
     [],
     DEFAULT_EMBED_COLOR,
     [jobButtons(job)]
@@ -534,6 +565,15 @@ async function handleWeeklyAnnounceButton(interaction) {
   }
   if (action === 'preview') return showPreview(interaction, draft);
   if (action === 'accept') return acceptPreview(interaction, draft);
+  if (action === 'replace') return acceptPreview(interaction, draft, { replaceId: indexRaw });
+  if (action === 'editexisting') {
+    const existing = reopenJob(indexRaw);
+    if (!existing) return interaction.update(panelMessage(draft));
+    unscheduleJob(indexRaw);
+    deleteDraft(draftId);
+    await removePreview(draftId);
+    return interaction.update(panelMessage(existing));
+  }
   if (action === 'back') {
     await interaction.update(panelMessage(draft));
     return removePreview(draftId);
