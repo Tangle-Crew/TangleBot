@@ -1,5 +1,5 @@
 const { MessageFlags } = require('discord.js');
-const { hasAnyRole } = require('./db');
+const { hasAnyRole } = require('./common');
 
 // Refuses a command unless the member has one of roleIds (unset IDs are ignored, so none set refuses
 // everyone): logs it, flags it for the command log and replies privately. Returns true if refused.

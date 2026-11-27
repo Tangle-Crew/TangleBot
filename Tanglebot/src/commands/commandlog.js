@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, MessageFlags, EmbedBuilder, escapeMarkdown } = require('discord.js');
-const { discordTimestamp, truncate } = require('../utils/db');
+const { discordTimestamp, truncate } = require('../utils/common');
 const commandLog = require('../utils/commandLog');
 const { DEFAULT_EMBED_COLOR } = require('../utils/embedColor');
 const { refuseWithoutRole } = require('../utils/roleCheck');

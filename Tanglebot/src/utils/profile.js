@@ -1,6 +1,6 @@
 const { EmbedBuilder } = require('discord.js');
 const database = require('./database');
-const { discordTimestamp, truncate } = require('./db');
+const { discordTimestamp, truncate } = require('./common');
 const { DEFAULT_EMBED_COLOR } = require('./embedColor');
 
 // Everything the database knows about one person (by Discord ID) or one OSRS account, and the

@@ -38,7 +38,7 @@ const {
   announcementParts,
   buildPost,
 } = require('../utils/weeklyAnnounce');
-const { discordTimestamp, truncate } = require('../utils/db');
+const { discordTimestamp, truncate } = require('../utils/common');
 const { DEFAULT_EMBED_COLOR } = require('../utils/embedColor');
 const { notifyAdminLog } = require('../utils/adminLog');
 const { scheduleJob, unscheduleJob } = require('../utils/weeklyAnnounceSchedule');

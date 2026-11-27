@@ -9,10 +9,10 @@ Object.assign(process.env, { OWNER_ROLE_ID: 'owner', TEMPLAR_ROLE_ID: 'templar',
 delete process.env.ADMIN_LOG_CHANNEL_ID;
 
 // Test mode is read from a file in data/; read it from a variable instead.
-const dbUtils = require('../src/utils/db.js');
+const common = require('../src/utils/common.js');
 let testModeFile = false;
-const realReadJson = dbUtils.readJson;
-dbUtils.readJson = name => (name === 'honeypot-runtime-config.json' ? { testMode: testModeFile } : realReadJson(name));
+const realReadJson = common.readJson;
+common.readJson = name => (name === 'honeypot-runtime-config.json' ? { testMode: testModeFile } : realReadJson(name));
 
 const honeypotLog = require('../src/utils/honeypotLog.js');
 const realRecordIncident = honeypotLog.recordIncident;

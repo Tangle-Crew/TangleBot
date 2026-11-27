@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const database = require('./database');
 const { databaseConfigured } = require('./commandAvailability');
-const { DATA_DIR, withTimeout, discordTimestamp } = require('./db');
+const { DATA_DIR, withTimeout, discordTimestamp } = require('./common');
 const { connectionTarget } = require('./dbStatus');
 
 const CHECK_TIMEOUT_MS = 5000;

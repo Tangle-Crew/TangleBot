@@ -1,7 +1,7 @@
 const { SlashCommandBuilder, MessageFlags, EmbedBuilder } = require('discord.js');
 const dbStatus = require('../utils/dbStatus');
 const dbHealth = require('../utils/dbHealth');
-const { withTimeout, discordTimestamp } = require('../utils/db');
+const { withTimeout, discordTimestamp } = require('../utils/common');
 const { refuseWithoutRole } = require('../utils/roleCheck');
 
 const CONNECT_TIMEOUT_MS = 5000;

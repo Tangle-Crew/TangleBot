@@ -1,5 +1,5 @@
 const { ChannelType, ChannelFlags, EmbedBuilder } = require('discord.js');
-const { truncate } = require('./db');
+const { truncate } = require('./common');
 const { readState, writeState } = require('./state');
 const { CATEGORIES, emojiLabel, isAlreadyGoneError } = require('./roleMenu');
 const { notifyAdminLog } = require('./adminLog');

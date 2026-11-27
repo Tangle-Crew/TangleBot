@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { REST, Routes } = require('discord.js');
-const { DATA_DIR } = require('./db');
+const { DATA_DIR } = require('./common');
 const { describeDbError } = require('./dbHealth');
 
 const ALERT_FILE = path.join(DATA_DIR, 'startup-alert.json');

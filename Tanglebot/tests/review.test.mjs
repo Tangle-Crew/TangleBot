@@ -42,7 +42,7 @@ function load(relative, { axios = {}, env = {}, logs = [], mocks = {}, fastTimer
         if (name in mocks) return mocks[name];
         if (name === 'axios') return axios;
         if (name === '@wise-old-man/utils' || name === 'events') return nodeRequire(name);
-        if (name === './db' || name === '../utils/db') return { readJson: () => ({}), writeJson() {}, withTimeout: promise => promise,
+        if (name === './common' || name === '../utils/common') return { readJson: () => ({}), writeJson() {}, withTimeout: promise => promise,
           truncate: (text, max) => (text.length > max ? `${text.slice(0, max - 1)}…` : text) };
         if (name === './state' || name === '../utils/state') return { readState: () => ({}), writeState() {} };
         if (name === 'discord.js') return { SlashCommandBuilder: Builder, EmbedBuilder: Builder,

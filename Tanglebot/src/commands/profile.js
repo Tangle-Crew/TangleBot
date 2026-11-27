@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const profile = require('../utils/profile');
-const { hasAnyRole } = require('../utils/db');
+const { hasAnyRole } = require('../utils/common');
 const donationHighscore = require('./donationhighscore');
 const petHighscore = require('./pethighscore');
 const { refuseWithoutRole } = require('../utils/roleCheck');

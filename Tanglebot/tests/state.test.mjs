@@ -6,14 +6,14 @@ import { createRequire } from 'node:module';
 import { mockPg } from './helpers/mockPg.mjs';
 
 const require = createRequire(import.meta.url);
-const dbUtils = require('../src/utils/db.js');
+const common = require('../src/utils/common.js');
 const database = require('../src/utils/database.js');
 const state = require('../src/utils/state.js');
 
 // Real files in data/, under names nothing else uses; removed after each test.
 const A = 'zz-test-state-a.json';
 const B = 'zz-test-state-b.json';
-const file = name => path.join(dbUtils.DATA_DIR, name);
+const file = name => path.join(common.DATA_DIR, name);
 const remove = () => { for (const f of [A, B]) fs.rmSync(file(f), { force: true }); };
 
 let savedGetPool;

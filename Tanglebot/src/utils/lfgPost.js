@@ -13,7 +13,7 @@ const {
 } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
-const { DATA_DIR, truncate, hasAnyRole } = require('./db');
+const { DATA_DIR, truncate, hasAnyRole } = require('./common');
 const { readState, writeState } = require('./state');
 const {
   CATEGORY_OPTIONS,

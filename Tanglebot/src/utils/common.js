@@ -1,3 +1,4 @@
+// Small shared helpers: the data files, a key lock, text, roles, env numbers, timestamps and timeouts.
 const fs = require('fs');
 const path = require('path');
 

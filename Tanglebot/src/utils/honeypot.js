@@ -9,7 +9,7 @@ const {
   PermissionFlagsBits,
 } = require('discord.js');
 const axios = require('axios');
-const { truncate, hasAnyRole } = require('./db');
+const { truncate, hasAnyRole } = require('./common');
 const { readState, writeState } = require('./state');
 const honeypotLog = require('./honeypotLog');
 

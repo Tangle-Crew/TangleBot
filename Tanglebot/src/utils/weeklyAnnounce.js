@@ -8,7 +8,7 @@ const {
   competitionUrl,
 } = require('./wiseOldMan');
 const { metricName, shortMetricName, metricCategory, metricUnit, formatNumber, competitionMetrics } = require('./womMetrics');
-const { withTimeout, truncate } = require('./db');
+const { withTimeout, truncate } = require('./common');
 const { readState, writeState } = require('./state');
 const { renderProgressChart, chartFileName } = require('./weeklyAnnounceChart');
 const { metricPet, findPetEmoji } = require('./bossPets');

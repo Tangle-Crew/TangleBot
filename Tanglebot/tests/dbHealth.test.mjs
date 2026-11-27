@@ -133,7 +133,7 @@ test('a hung query counts as a failure', async () => {
   const sent = [];
   const monitor = health.createMonitor({
     configured: true, now: () => Date.now(), notify: async (...a) => sent.push(a), writeHealth: () => {},
-    query: () => require('../src/utils/db.js').withTimeout(new Promise(() => {}), 'Database check', 20),
+    query: () => require('../src/utils/common.js').withTimeout(new Promise(() => {}), 'Database check', 20),
     settings: { intervalSeconds: 60, failuresBeforeAlert: 1, reminderMinutes: 60 },
   });
   await monitor.check();
