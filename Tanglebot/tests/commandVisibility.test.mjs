@@ -30,3 +30,20 @@ for (const name of PUBLIC) {
     assert.ok(json.default_member_permissions == null);
   });
 }
+
+const { commandDisabledReason } = require('../src/utils/commandAvailability.js');
+
+test('staff commands do not load without the role they check', () => {
+  assert.match(commandDisabledReason(load('spinwheel'), {}), /COORDINATOR_ROLE_ID/);
+  assert.equal(commandDisabledReason(load('spinwheel'), { COORDINATOR_ROLE_ID: 'c' }), null);
+  assert.match(commandDisabledReason(load('weeklycomp'), {}), /TEMPLAR_ROLE_ID/);
+  assert.equal(commandDisabledReason(load('weeklycomp'), { TEMPLAR_ROLE_ID: 't' }), null);
+});
+
+test('requiredEnvAny with several groups needs one from each', () => {
+  const honeypot = load('honeypot');
+  assert.match(commandDisabledReason(honeypot, { HONEYPOT_CHANNEL_ID: 'h' }), /OWNER_ROLE_ID, TEMPLAR_ROLE_ID/);
+  assert.match(commandDisabledReason(honeypot, { TEMPLAR_ROLE_ID: 't' }), /HONEYPOT_CHANNEL_ID/);
+  assert.equal(commandDisabledReason(honeypot, { HONEYPOT_VOICE_CHANNEL_ID: 'v', OWNER_ROLE_ID: 'o' }), null);
+  assert.equal(commandDisabledReason({ requiredEnvAny: ['A', 'B'] }, { B: 'x' }), null);
+});

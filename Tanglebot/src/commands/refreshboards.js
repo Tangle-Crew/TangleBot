@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const { refreshLeaderboard: refreshPetLeaderboard } = require('./pethighscore');
 const { refreshLeaderboard: refreshDonationLeaderboard } = require('./donationhighscore');
+const { refuseWithoutRole } = require('../utils/roleCheck');
 
 const TEMPLAR_ROLE_ID = process.env.TEMPLAR_ROLE_ID;
 
@@ -16,7 +17,7 @@ module.exports = {
     access: 'Templar',
     examples: { '': '/refreshboards' },
   },
-  requiredEnv: ['DATABASE_URL'],
+  requiredEnv: ['DATABASE_URL', 'TEMPLAR_ROLE_ID'],
 
   data: new SlashCommandBuilder()
     .setName('refreshboards')
@@ -24,14 +25,10 @@ module.exports = {
     .setDescription('Repost every leaderboard (pet and donation high scores) from the database'),
 
   async execute(interaction) {
-    if (TEMPLAR_ROLE_ID && !interaction.member.roles.cache.has(TEMPLAR_ROLE_ID)) {
-      console.log(`[RefreshBoards] ${interaction.user.tag} was denied /refreshboards (missing Templar role)`);
-      interaction.commandDenied = true; // for the command log
-      return interaction.reply({
-        content: 'You need the Templar role to use this command.',
-        flags: MessageFlags.Ephemeral,
-      });
-    }
+    if (await refuseWithoutRole(interaction, [TEMPLAR_ROLE_ID], {
+      logPrefix: '[RefreshBoards]', command: `/refreshboards`, missing: 'missing Templar role',
+      message: 'You need the Templar role to use this command.',
+    })) return;
 
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     console.log(`[RefreshBoards] ${interaction.user.tag} triggered /refreshboards`);

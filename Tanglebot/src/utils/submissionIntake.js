@@ -1,4 +1,4 @@
-const axios = require('axios');
+const http = require('./http');
 const { readState, writeState } = require('./state');
 
 const LAST_SUBMISSION_FILE = 'last-submission.json';
@@ -204,7 +204,7 @@ async function resolveEventIdForChannel(channelId, config) {
   }
 
   try {
-    const response = await axios.get(`${config.supabaseUrl}/rest/v1/event_discord_channels`, {
+    const response = await http.get(`${config.supabaseUrl}/rest/v1/event_discord_channels`, {
       headers: {
         apikey: config.supabaseServiceRoleKey,
         Authorization: `Bearer ${config.supabaseServiceRoleKey}`,

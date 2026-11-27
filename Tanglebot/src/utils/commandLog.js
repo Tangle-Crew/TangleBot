@@ -3,7 +3,7 @@ const path = require('path');
 const { ApplicationCommandOptionType } = require('discord.js');
 const database = require('./database');
 const { databaseConfigured } = require('./commandAvailability');
-const { DATA_DIR, intEnv } = require('./db');
+const { DATA_DIR, intEnv } = require('./common');
 
 const MAX_VALUE_CHARS = 200;
 const MAX_ERROR_CHARS = 500;

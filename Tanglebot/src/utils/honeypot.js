@@ -8,8 +8,8 @@ const {
   MessageFlags,
   PermissionFlagsBits,
 } = require('discord.js');
-const axios = require('axios');
-const { truncate, hasAnyRole } = require('./db');
+const http = require('./http');
+const { truncate, hasAnyRole, discordTimestamp } = require('./common');
 const { readState, writeState } = require('./state');
 const honeypotLog = require('./honeypotLog');
 
@@ -129,7 +129,7 @@ function findImageAttachments(message) {
 
 async function downloadImageAttachment(attachment, index) {
   try {
-    const response = await axios.get(attachment.url, { responseType: 'arraybuffer', timeout: 10000 });
+    const response = await http.get(attachment.url, { responseType: 'arraybuffer', timeout: 10000 });
     // Unique, ASCII-safe names, since several images can share a filename.
     const ext = IMAGE_EXTENSIONS_BY_CONTENT_TYPE[attachment.contentType] || 'png';
     const name = `honeypot-image-${index}.${ext}`;
@@ -407,13 +407,13 @@ async function handleHoneypotButtonInteraction(interaction) {
     details,
   });
 
-  const resolvedAtSeconds = Math.floor(Date.now() / 1000);
+  const resolvedAt = Date.now();
   const actionField = {
     name: 'Action Taken',
     value: [
       `**${ACTION_LABELS[action]}**`,
       `By: ${interaction.user} (${interaction.user.tag})`,
-      `When: <t:${resolvedAtSeconds}:F> (<t:${resolvedAtSeconds}:R>)`,
+      `When: ${discordTimestamp(resolvedAt, 'F')} (${discordTimestamp(resolvedAt, 'R')})`,
       resultText,
     ].join('\n'),
   };

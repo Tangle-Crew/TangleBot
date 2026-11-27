@@ -13,7 +13,7 @@ const {
 } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
-const { DATA_DIR, truncate, hasAnyRole } = require('./db');
+const { DATA_DIR, truncate, hasAnyRole } = require('./common');
 const { readState, writeState } = require('./state');
 const {
   CATEGORY_OPTIONS,
@@ -49,7 +49,6 @@ const {
 const {
   ensureRoleExists,
   lfgRoleName,
-  notifyAdminLog,
   scheduleReplyCleanup,
   isAlreadyGoneError,
   replyEphemeral,
@@ -57,6 +56,7 @@ const {
   isValidColor,
   isValidEmoji,
 } = require('./roleMenu');
+const { notifyAdminLog } = require('./adminLog');
 
 // Forum Channel that /lfg-post creates its threads in.
 const FORUM_CHANNEL_ID = process.env.LFG_FORUM_CHANNEL_ID;

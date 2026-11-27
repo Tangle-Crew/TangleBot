@@ -1,13 +1,7 @@
 FROM node:lts-slim
 
-RUN apt-get update && apt-get install -y \
-    libcairo2 \
-    libpango-1.0-0 \
-    libpangocairo-1.0-0 \
-    libglib2.0-0 \
-    libjpeg62-turbo \
-    libgif7 \
-    librsvg2-2 \
+# @napi-rs/canvas ships its own graphics library; it only needs fonts for the text it draws.
+RUN apt-get update && apt-get install -y --no-install-recommends fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -21,9 +21,9 @@ const {
   withFileLock,
   discordTimestamp,
   withTimeout,
-} = require('../utils/db');
+} = require('../utils/common');
 const { readState, writeState } = require('../utils/state');
-const { notifyAdminLog } = require('../utils/roleMenu');
+const { notifyAdminLog } = require('../utils/adminLog');
 const { buildXlsx } = require('../utils/xlsx');
 
 const TEMPLAR_ROLE_ID = process.env.TEMPLAR_ROLE_ID;

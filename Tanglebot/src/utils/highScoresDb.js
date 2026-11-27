@@ -1,5 +1,6 @@
 const database = require('./database');
 const { databaseConfigured } = require('./commandAvailability');
+const { formatNumber } = require('./common');
 
 // Cap on one member's total, so totals stay far inside Number.MAX_SAFE_INTEGER (about 9e15).
 const MAX_TOTAL_GP = 10_000_000_000_000;
@@ -97,7 +98,7 @@ function createStore(getDb) {
       const clamped = newAmount < 0;
       if (clamped) newAmount = 0;
       if (newAmount > MAX_TOTAL_GP) {
-        throw new Error(`That would take the total over ${MAX_TOTAL_GP.toLocaleString('en-US')} GP, which is probably a typo.`);
+        throw new Error(`That would take the total over ${formatNumber(MAX_TOTAL_GP)} GP, which is probably a typo.`);
       }
 
       if (action === 'remove') await touchMember(client, { discordId, displayName, joinedAt });

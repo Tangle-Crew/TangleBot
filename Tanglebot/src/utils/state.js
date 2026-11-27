@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const db = require('./db');
+const common = require('./common');
 const database = require('./database');
 const { databaseConfigured } = require('./commandAvailability');
 
@@ -36,7 +36,7 @@ const pending = new Set();
 let hydrated = false;
 
 const clone = value => JSON.parse(JSON.stringify(value));
-const fileExists = file => fs.existsSync(path.join(db.DATA_DIR, file));
+const fileExists = file => fs.existsSync(path.join(common.DATA_DIR, file));
 
 function upsert(pool, key, value) {
   return pool.query(
@@ -59,11 +59,11 @@ async function hydrateState({ pool = null, files = STATE_FILES } = {}) {
   for (const file of files) {
     if (cache.has(file)) {
       if (!fileExists(file)) {
-        db.writeJson(file, cache.get(file));
+        common.writeJson(file, cache.get(file));
         restored += 1;
       }
     } else if (fileExists(file)) {
-      const value = db.readJson(file);
+      const value = common.readJson(file);
       cache.set(file, clone(value));
       await upsert(p, file, value);
       imported += 1;
@@ -75,13 +75,13 @@ async function hydrateState({ pool = null, files = STATE_FILES } = {}) {
 
 // The saved state for a file ({} if there is none), like readJson.
 function readState(file) {
-  return hydrated && cache.has(file) && !DISK_FIRST_FILES.has(file) ? clone(cache.get(file)) : db.readJson(file);
+  return hydrated && cache.has(file) && !DISK_FIRST_FILES.has(file) ? clone(cache.get(file)) : common.readJson(file);
 }
 
 // Saves state for a file, like writeJson, and also to the table. A table failure is logged only:
 // the file is written first and is still current.
 function writeState(file, value) {
-  db.writeJson(file, value);
+  common.writeJson(file, value);
   if (!hydrated) return;
   cache.set(file, clone(value));
   const job = upsert(database.getPool(), file, value)

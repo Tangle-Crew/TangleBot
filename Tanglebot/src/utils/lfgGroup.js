@@ -4,7 +4,7 @@ const {
   ButtonStyle,
 } = require('discord.js');
 const { CATEGORIES, emojiMarkup } = require('./roleMenu');
-const { truncate } = require('./db');
+const { truncate } = require('./common');
 
 // /lfg-post categories, from roleMenu.js CATEGORIES.
 const CATEGORY_OPTIONS = Object.entries(CATEGORIES).map(([key, c]) => ({

@@ -1,4 +1,4 @@
-const { withFileLock } = require('./db');
+const { withFileLock } = require('./common');
 const { readState, writeState } = require('./state');
 
 // Discord's per-message limits: 10 embeds and 6000 characters (kept under, to be safe).

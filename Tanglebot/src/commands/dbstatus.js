@@ -1,14 +1,14 @@
 const { SlashCommandBuilder, MessageFlags, EmbedBuilder } = require('discord.js');
 const dbStatus = require('../utils/dbStatus');
 const dbHealth = require('../utils/dbHealth');
-const { withTimeout, discordTimestamp } = require('../utils/db');
+const { withTimeout, discordTimestamp, formatNumber } = require('../utils/common');
+const { refuseWithoutRole } = require('../utils/roleCheck');
+const { ALERT_COLOR, SUCCESS_COLOR } = require('../utils/embedColor');
 
-const CONNECT_TIMEOUT_MS = 5000;
-const COUNTS_TIMEOUT_MS = 10_000;
-const OK_COLOR = 0x2e7d32;
-const DOWN_COLOR = 0xed4245;
+// How long the connection check and the row counts may take (changed by the tests).
+const timeouts = { connectMs: 5000, countsMs: 10_000 };
 
-const fmt = n => Number(n).toLocaleString('en-US');
+const fmt = formatNumber;
 const ago = ms => discordTimestamp(ms, 'R');
 
 function connectionField(info) {
@@ -60,6 +60,7 @@ function dataField(c) {
 }
 
 module.exports = {
+  timeouts,
   // Shown in the admin commands post.
   help: {
     category: 'Bot admin',
@@ -74,12 +75,10 @@ module.exports = {
     .setDescription('Show the database connection, migrations, health monitor and row counts (Owner only)'),
 
   async execute(interaction) {
-    const ownerRoleId = process.env.OWNER_ROLE_ID;
-    if (!ownerRoleId || !interaction.member?.roles?.cache?.has(ownerRoleId)) {
-      console.log(`[DbStatus] ${interaction.user.tag} was denied /dbstatus (missing Owner role)`);
-      interaction.commandDenied = true; // for the command log
-      return interaction.reply({ content: 'Only the Owner role can use this command.', flags: MessageFlags.Ephemeral });
-    }
+    if (await refuseWithoutRole(interaction, [process.env.OWNER_ROLE_ID], {
+      logPrefix: '[DbStatus]', command: '/dbstatus', missing: 'missing Owner role',
+      message: 'Only the Owner role can use this command.',
+    })) return;
 
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     console.log(`[DbStatus] ${interaction.user.tag} ran /dbstatus`);
@@ -95,11 +94,11 @@ module.exports = {
 
     let info;
     try {
-      info = await withTimeout(dbStatus.testConnection(), 'The database connection', CONNECT_TIMEOUT_MS);
+      info = await withTimeout(dbStatus.testConnection(), 'The database connection', timeouts.connectMs);
     } catch (err) {
       console.error('[DbStatus] Connection check failed:', err.message);
       interaction.commandError = err; // for the command log
-      embed.setColor(DOWN_COLOR).addFields(
+      embed.setColor(ALERT_COLOR).addFields(
         { name: 'Connection', value: `**Not reachable:** ${dbHealth.describeDbError(err)}\n\`${String(err.message).slice(0, 300)}\`` },
         { name: 'Health monitor', value: monitor },
         { name: 'Connection pool', value: pool },
@@ -109,14 +108,14 @@ module.exports = {
 
     let data;
     try {
-      data = dataField(await withTimeout(dbStatus.tableCounts(), 'Reading the row counts', COUNTS_TIMEOUT_MS));
+      data = dataField(await withTimeout(dbStatus.tableCounts(), 'Reading the row counts', timeouts.countsMs));
     } catch (err) {
       console.error('[DbStatus] Row counts failed:', err.message);
       interaction.commandError = err; // for the command log
       data = `Could not read the row counts: ${String(err.message).slice(0, 300)}`;
     }
 
-    embed.setColor(interaction.commandError ? DOWN_COLOR : OK_COLOR).addFields(
+    embed.setColor(interaction.commandError ? ALERT_COLOR : SUCCESS_COLOR).addFields(
       { name: 'Connection', value: connectionField(info) },
       { name: 'Migrations', value: migrationsField(info) },
       { name: 'Health monitor', value: monitor },

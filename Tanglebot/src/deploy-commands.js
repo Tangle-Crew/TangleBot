@@ -1,60 +1,14 @@
-const { commandDisabledReason } = require('./utils/commandAvailability');
+// npm run deploy: registers the slash commands without starting the bot. The bot also does this
+// on every startup.
 require('dotenv').config({ quiet: true });
-const { REST, Routes } = require('discord.js');
-const fs = require('fs');
-const path = require('path');
+const { availableCommands, registerCommands } = require('./handlers/commandHandler');
 
-const discordBotToken = process.env.DISCORD_BOT_TOKEN || process.env.DISCORD_TOKEN;
-const REQUIRED_ENV_KEYS = ['CLIENT_ID', 'CLAN_ID'];
-
-const missingEnv = REQUIRED_ENV_KEYS.filter(key => !process.env[key]);
-if (!discordBotToken) {
-  missingEnv.unshift('DISCORD_BOT_TOKEN');
-}
-if (missingEnv.length > 0) {
-  throw new Error(`Missing required deploy environment variable(s): ${missingEnv.join(', ')}. Copy Tanglebot/.env.example to Tanglebot/.env and fill in real values.`);
+const missing = ['CLIENT_ID', 'CLAN_ID'].filter(key => !process.env[key]);
+if (!process.env.DISCORD_BOT_TOKEN && !process.env.DISCORD_TOKEN) missing.unshift('DISCORD_BOT_TOKEN');
+if (missing.length) {
+  throw new Error(`Missing required deploy environment variable(s): ${missing.join(', ')}. Copy Tanglebot/.env.example to Tanglebot/.env and fill in real values.`);
 }
 
-const commands = [];
-const commandsPath = path.join(__dirname, 'commands');
-
-for (const file of fs.readdirSync(commandsPath).filter(f => f.endsWith('.js'))) {
-  const command = require(path.join(commandsPath, file));
-  if (!command.data) continue;
-
-  const disabledReason = commandDisabledReason(command);
-  if (disabledReason) {
-    console.log(`[Deploy] Skipping /${command.data.name}: ${disabledReason}`);
-    continue;
-  }
-
-  commands.push(command.data.toJSON());
-}
-
-const rest = new REST().setToken(discordBotToken);
-
-(async () => {
-  try {
-    console.log(`[Deploy] Deploying ${commands.length} slash command(s)...`);
-    await rest.put(
-      Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.CLAN_ID),
-      { body: commands }
-    );
-    console.log('[Deploy] Slash commands deployed successfully.');
-  } catch (err) {
-    if (err?.code === 50001) {
-      console.error(
-        [
-          '[Deploy] Discord rejected the command deploy with Missing Access.',
-          'Check that:',
-          '- CLAN_ID is the Discord server ID where the bot is installed.',
-          '- CLIENT_ID belongs to the same Discord application as DISCORD_BOT_TOKEN.',
-          '- The bot was invited to that server with the applications.commands scope.',
-          '- You have permission to add/manage the bot in that server.',
-        ].join('\n')
-      );
-    }
-    console.error('[Deploy] Failed to deploy slash commands:', err);
-    process.exitCode = 1;
-  }
-})();
+registerCommands(availableCommands('[Deploy]'), '[Deploy]').then(ok => {
+  if (!ok) process.exitCode = 1;
+});

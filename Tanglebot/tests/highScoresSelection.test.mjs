@@ -8,6 +8,7 @@ const highScoresDb = require('../src/utils/highScoresDb.js');
 const commandPaths = ['pethighscore', 'donationhighscore', 'refreshboards'].map(n => require.resolve(`../src/commands/${n}.js`));
 
 const DB_ENV = { DATABASE_URL: 'postgres://u:p@host:5432/db' };
+const ROLE_ENV = { TEMPLAR_ROLE_ID: 'templar', OWNER_ROLE_ID: 'owner' };
 const CHANNEL_ENV = { DONATIONS_CHANNEL_ID: 'c1', PET_HIGHSCORES_CHANNEL_ID: 'c2' };
 
 let savedEnv;
@@ -26,8 +27,7 @@ function loadCommands() {
 beforeEach(() => {
   savedEnv = { ...process.env };
   savedStore = { ...highScoresDb };
-  process.env.DATABASE_URL = DB_ENV.DATABASE_URL;
-  delete process.env.TEMPLAR_ROLE_ID;
+  Object.assign(process.env, DB_ENV, ROLE_ENV);
 });
 afterEach(() => {
   for (const key of Object.keys(process.env)) if (!(key in savedEnv)) delete process.env[key];
@@ -47,10 +47,19 @@ test('without DATABASE_URL the three commands are disabled', () => {
 
 test('with DATABASE_URL the commands only need their channel', () => {
   const { pet, donation, refresh } = loadCommands();
-  assert.equal(commandDisabledReason(pet, { ...DB_ENV, ...CHANNEL_ENV }), null);
-  assert.equal(commandDisabledReason(donation, { ...DB_ENV, ...CHANNEL_ENV }), null);
-  assert.equal(commandDisabledReason(refresh, DB_ENV), null);
-  assert.match(commandDisabledReason(donation, DB_ENV), /DONATIONS_CHANNEL_ID/);
+  assert.equal(commandDisabledReason(pet, { ...DB_ENV, ...CHANNEL_ENV, ...ROLE_ENV }), null);
+  assert.equal(commandDisabledReason(donation, { ...DB_ENV, ...CHANNEL_ENV, ...ROLE_ENV }), null);
+  assert.equal(commandDisabledReason(refresh, { ...DB_ENV, ...ROLE_ENV }), null);
+  assert.match(commandDisabledReason(donation, { ...DB_ENV, ...ROLE_ENV }), /DONATIONS_CHANNEL_ID/);
+});
+
+test('the high score commands do not load without their roles', () => {
+  const { pet, donation, refresh } = loadCommands();
+  const env = { ...DB_ENV, ...CHANNEL_ENV, ...ROLE_ENV };
+  assert.match(commandDisabledReason(donation, { ...env, TEMPLAR_ROLE_ID: '' }), /TEMPLAR_ROLE_ID/);
+  assert.match(commandDisabledReason(refresh, { ...env, TEMPLAR_ROLE_ID: '' }), /TEMPLAR_ROLE_ID/);
+  assert.match(commandDisabledReason(pet, { ...env, TEMPLAR_ROLE_ID: '' }), /TEMPLAR_ROLE_ID/);
+  assert.match(commandDisabledReason(pet, { ...env, OWNER_ROLE_ID: '' }), /OWNER_ROLE_ID/);
 });
 
 test('/refreshboards describes the database', () => {
@@ -106,7 +115,7 @@ function donationInteraction(subcommand, amount) {
       guild,
       user: { id: '999', tag: 'staff' },
       client: { user: { id: 'bot' }, channels: { fetch: async () => { throw new Error('no admin log'); } } },
-      member: { roles: { cache: { has: () => true } } },
+      member: { roles: { cache: { has: id => id === 'templar' || id === 'owner' } } },
       options: {
         getSubcommand: () => subcommand,
         getUser: () => ({ id: '123456789012345678', tag: 'snow', username: 'snow' }),

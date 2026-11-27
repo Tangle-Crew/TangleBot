@@ -1,5 +1,6 @@
 const { MessageFlags, SlashCommandBuilder } = require('discord.js');
-const { hasHoneypotAdminAccess, isTestModeEnabled, setTestModeEnabled } = require('../utils/honeypot');
+const { isTestModeEnabled, setTestModeEnabled } = require('../utils/honeypot');
+const { refuseWithoutRole } = require('../utils/roleCheck');
 
 module.exports = {
   // Shown in the admin commands post.
@@ -35,17 +36,13 @@ module.exports = {
         .setDescription('Show whether honeypot testing mode is currently on')
     ),
 
-  requiredEnvAny: ['HONEYPOT_CHANNEL_ID', 'HONEYPOT_VOICE_CHANNEL_ID'],
+  requiredEnvAny: [['HONEYPOT_CHANNEL_ID', 'HONEYPOT_VOICE_CHANNEL_ID'], ['OWNER_ROLE_ID', 'TEMPLAR_ROLE_ID']],
 
   async execute(interaction) {
-    if (!hasHoneypotAdminAccess(interaction.member)) {
-      console.log(`[Honeypot] ${interaction.user.tag} was denied /honeypot (missing Owner/Templar role)`);
-      interaction.commandDenied = true; // for the command log
-      return interaction.reply({
-        content: 'You need the owner or templar role to manage the honeypot trap.',
-        flags: MessageFlags.Ephemeral,
-      });
-    }
+    if (await refuseWithoutRole(interaction, [process.env.OWNER_ROLE_ID, process.env.TEMPLAR_ROLE_ID], {
+      logPrefix: '[Honeypot]', command: '/honeypot', missing: 'missing Owner/Templar role',
+      message: 'You need the owner or templar role to manage the honeypot trap.',
+    })) return;
 
     const subcommand = interaction.options.getSubcommand();
     console.log(`[Honeypot] /honeypot ${subcommand} invoked by ${interaction.user.username}`);

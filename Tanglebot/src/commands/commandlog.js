@@ -1,7 +1,8 @@
 const { SlashCommandBuilder, MessageFlags, EmbedBuilder, escapeMarkdown } = require('discord.js');
-const { hasAnyRole, discordTimestamp, truncate } = require('../utils/db');
+const { discordTimestamp, truncate } = require('../utils/common');
 const commandLog = require('../utils/commandLog');
 const { DEFAULT_EMBED_COLOR } = require('../utils/embedColor');
+const { refuseWithoutRole } = require('../utils/roleCheck');
 
 const PAGE_SIZE = 10;
 const STATUS_ICONS = { ok: '✅', error: '❌', denied: '🚫' };
@@ -52,14 +53,10 @@ module.exports = {
     .addIntegerOption(o => o.setName('page').setDescription('Page number (10 runs a page, newest first)').setMinValue(1)),
 
   async execute(interaction) {
-    if (!hasAnyRole(interaction.member, allowedRoles())) {
-      console.log(`[CommandLog] ${interaction.user.tag} was denied /commandlog (needs Coordinator, Templar or Owner)`);
-      interaction.commandDenied = true; // for the command log
-      return interaction.reply({
-        content: 'You need the Coordinator role or higher to use this command.',
-        flags: MessageFlags.Ephemeral,
-      });
-    }
+    if (await refuseWithoutRole(interaction, allowedRoles(), {
+      logPrefix: '[CommandLog]', command: '/commandlog', missing: 'needs Coordinator, Templar or Owner',
+      message: 'You need the Coordinator role or higher to use this command.',
+    })) return;
 
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 

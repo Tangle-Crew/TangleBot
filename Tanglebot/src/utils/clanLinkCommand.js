@@ -1,6 +1,7 @@
 const { MessageFlags, SlashCommandBuilder } = require('discord.js');
 const { createAccountLinkChallenge } = require('./clanAccountLink');
 const { logClanError, clanErrorMessage } = require('./clanErrors');
+const { discordTimestamp } = require('./common');
 
 function createLinkCommand({ name, linkKind, description, rsnDescription }) {
   return {
@@ -16,14 +17,13 @@ function createLinkCommand({ name, linkKind, description, rsnDescription }) {
           rsn: interaction.options.getString('rsn', true).trim(),
           linkKind,
         });
-        const expiresUnix = Math.floor(new Date(challenge.expiresAt).getTime() / 1000);
         await interaction.editReply({ content: [
           linkKind === 'primary'
             ? `Confirm that **${challenge.resolvedRsn}** is your primary account:`
             : `Confirm **${challenge.resolvedRsn}** as an alternate account on your existing clan profile:`,
           challenge.confirmationUrl,
           '',
-          `This private, single-use link expires <t:${expiresUnix}:R>. You must sign in to the website with this Discord account.`,
+          `This private, single-use link expires ${discordTimestamp(challenge.expiresAt, 'R')}. You must sign in to the website with this Discord account.`,
         ].join('\n') });
       } catch (error) {
         logClanError(`/${name}`, error);

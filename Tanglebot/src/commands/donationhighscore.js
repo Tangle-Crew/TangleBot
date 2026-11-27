@@ -1,11 +1,12 @@
 const { SlashCommandBuilder, MessageFlags, EmbedBuilder } = require('discord.js');
 const { DEFAULT_EMBED_COLOR } = require('../utils/embedColor');
-const { withFileLock, intEnv } = require('../utils/db');
+const { withFileLock, intEnv, formatNumber } = require('../utils/common');
 const { mentionOrName, postLeaderboard: postLeaderboardShared } = require('../utils/leaderboard');
-const { notifyAdminLog } = require('../utils/roleMenu');
+const { notifyAdminLog } = require('../utils/adminLog');
 const highScoresDb = require('../utils/highScoresDb');
 const { databaseConfigured } = require('../utils/commandAvailability');
 const milestones = require('../utils/milestones');
+const { refuseWithoutRole } = require('../utils/roleCheck');
 
 const TEMPLAR_ROLE_ID = process.env.TEMPLAR_ROLE_ID;
 
@@ -70,7 +71,7 @@ function parseDonationAmount(raw) {
 }
 
 function formatGP(amount) {
-  return amount.toLocaleString('en-US');
+  return formatNumber(amount);
 }
 
 const COINS_EMOJI = '<:coins:1534943128145105158>';
@@ -264,7 +265,7 @@ module.exports = {
       amount: 'e.g. 10m, 250k, 1b or a raw number',
     },
   },
-  requiredEnv: ['DATABASE_URL', 'DONATIONS_CHANNEL_ID'],
+  requiredEnv: ['DATABASE_URL', 'DONATIONS_CHANNEL_ID', 'TEMPLAR_ROLE_ID'],
   refreshLeaderboard,
   DONATION_TIERS,
 
@@ -294,14 +295,10 @@ module.exports = {
   async execute(interaction) {
     const subcommand = interaction.options.getSubcommand();
 
-    if (TEMPLAR_ROLE_ID && !interaction.member.roles.cache.has(TEMPLAR_ROLE_ID)) {
-      console.log(`[DonationHighscore] ${interaction.user.tag} was denied /donationhighscore ${subcommand} (missing Templar role)`);
-      interaction.commandDenied = true; // for the command log
-      return interaction.reply({
-        content: 'You need the Templar role to use this command.',
-        flags: MessageFlags.Ephemeral,
-      });
-    }
+    if (await refuseWithoutRole(interaction, [TEMPLAR_ROLE_ID], {
+      logPrefix: '[DonationHighscore]', command: `/donationhighscore ${subcommand}`, missing: 'missing Templar role',
+      message: 'You need the Templar role to use this command.',
+    })) return;
 
     const channelId = process.env.DONATIONS_CHANNEL_ID;
 

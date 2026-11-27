@@ -11,7 +11,7 @@ const {
   TextInputBuilder,
   TextInputStyle,
 } = require('discord.js');
-const { truncate } = require('./db');
+const { truncate } = require('./common');
 const { replyEphemeral } = require('./roleMenu');
 
 const SUGGEST_BUTTON_ID = 'lfgsuggest:open';

@@ -5,6 +5,7 @@ const {
   getLastAcceptedSubmission,
   setConfiguredIntakeUrl,
 } = require('../utils/submissionIntake');
+const { discordTimestamp } = require('../utils/common');
 
 const DISCORD_GREEN = 0x1a5c2e;
 const DISCORD_PURPLE = 0x4a235a;
@@ -149,7 +150,6 @@ module.exports = {
 };
 
 function buildLastSubmissionEmbed(submission) {
-  const acceptedTime = Math.floor(new Date(submission.acceptedAt).getTime() / 1000);
   const isDrop = submission.type === 'drop';
 
   const fields = [
@@ -171,7 +171,7 @@ function buildLastSubmissionEmbed(submission) {
     fields.push({ name: 'Discord Message', value: `[Jump to submission](${submission.messageUrl})`, inline: false });
   }
 
-  fields.push({ name: 'Accepted', value: `<t:${acceptedTime}:R>`, inline: true });
+  fields.push({ name: 'Accepted', value: discordTimestamp(submission.acceptedAt, 'R'), inline: true });
 
   const embed = new EmbedBuilder()
     .setColor(isDrop ? DISCORD_PURPLE : DISCORD_GREEN)

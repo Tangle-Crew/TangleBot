@@ -13,4 +13,5 @@ Read [DATABASE.md](DATABASE.md). It explains how the data is stored, the migrati
 - Code comments are short and say only what the code does.
 - No secrets in the repo. `Tanglebot/.env` is ignored; document new settings in `Tanglebot/.env.example` and the README.
 - Each day's work gets a line in `What-was-done/WHAT-WAS-DONE-TODAY-<date>.md`.
-- New staff commands are hidden by default (`setDefaultMemberPermissions(0)`) and check the role when they run; the README's Command visibility section lists the Discord overrides to add.
+- New staff commands are hidden by default (`setDefaultMemberPermissions(0)`), list their role in `requiredEnv` (or `requiredEnvAny`) so they don't load without it, and check it when they run with `refuseWithoutRole` (`src/utils/roleCheck.js`); the README's Command visibility section lists the Discord overrides to add.
+- Shared helpers: `src/utils/common.js` (data files, lock, text, numbers, timestamps, `sleep`, timeouts), `adminLog.js` (`notifyAdminLog`), `embedColor.js` (colours), `http.js` (HTTP on `fetch`). Wise Old Man calls go through `wiseOldMan.js`, which keeps them under WOM's rate limit.

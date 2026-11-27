@@ -17,7 +17,7 @@ const {
   formatNumber,
   formatAmount,
 } = require('./womMetrics');
-const { truncate, discordTimestamp } = require('./db');
+const { truncate, discordTimestamp } = require('./common');
 
 // Checks run on the clock at :00, :15, :30 and :45, like a `*/15 * * * *` cron job.
 const CHECK_INTERVAL_MS = 15 * 60 * 1000;
