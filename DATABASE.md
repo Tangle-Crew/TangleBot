@@ -25,6 +25,8 @@ How TangleBot stores its information in PostgreSQL, the rules for changing it, a
 | `src/utils/profile.js` | Reads one person or one account (read only) and builds the `/profile` embeds |
 | `src/utils/memberSync.js` | Reads the Wise Old Man group and saves `accounts` and clan events (used by `/memberdata` and a timer) |
 | `src/utils/migrationTools.js` | The sheets import and its checks (used only by `/migration`; retired with the sheets) |
+| `src/utils/dbStatus.js` | Read only: the connection check, row counts and pool counters for `/dbstatus` (and `/migration dbconnection`) |
+| `src/utils/dbHealth.js` | The health monitor: `select 1` on a timer, the admin log alerts, `data/health.json` for the Docker health check |
 
 ## Core concepts
 
@@ -132,7 +134,7 @@ Milestones (donation tiers, Pet Master) are event kinds, not a table.
 
 ## Known gaps
 
-- A command that catches its own error and replies normally is logged as `ok`, unless it sets `interaction.commandError` (done for `/donationhighscore`, `/pethighscore`, `/migration` and `/commandlog`).
+- A command that catches its own error and replies normally is logged as `ok`, unless it sets `interaction.commandError` (done for `/donationhighscore`, `/pethighscore`, `/migration`, `/commandlog` and `/dbstatus`).
 - A member who left and rejoined the Discord server entirely while the bot was down shows as one stay (no leave is recorded).
 - A leave noticed by the startup sync is dated when the bot noticed it.
 - `lfg-history.jsonl` (one line per finished LFG group, for stats) is append-only and still only a file.
@@ -147,6 +149,7 @@ Milestones (donation tiers, Pet Master) are event kinds, not a table.
 ## Operations
 
 - **Backups and restore:** see the README's Database section.
+- **Health and alerts:** `/dbstatus` (Owner) shows the connection, migrations, pool and row counts. The health monitor alerts the admin log when the database stays unreachable and when it is back, a failed startup is reported once an hour, and the container has a Docker health check. See the README's Database health alerts.
 - **Useful queries:** the command log and member history queries are in the README's Database section.
 - **Dropping the old history tables** (`member_names` and `member_stays`, which nothing uses any more). `006` copied their rows into `member_events` and left them in place. Check the copy first; each query must return 0:
   ```sql

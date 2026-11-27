@@ -5,6 +5,7 @@ const { loadEvents } = require('./handlers/eventHandler');
 const { databaseConfigured } = require('./utils/commandAvailability');
 const { runMigrations } = require('./utils/database');
 const { hydrateState } = require('./utils/state');
+const { sendStartupAlert } = require('./utils/startupAlert');
 
 const discordBotToken = process.env.DISCORD_BOT_TOKEN || process.env.DISCORD_TOKEN;
 
@@ -38,6 +39,7 @@ async function main() {
       await runMigrations();
     } catch (err) {
       console.error(`[Database] Startup stopped: ${err.message}`);
+      await sendStartupAlert(err);
       process.exit(1);
     }
     // The state files are mirrored in the database. If that fails, they are simply used as files.

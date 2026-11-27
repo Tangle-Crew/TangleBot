@@ -16,7 +16,11 @@ function getPool() {
     if (!databaseConfigured()) throw new Error('DATABASE_URL is not set');
     // Timeouts so an unreachable database fails a command instead of hanging it.
     pool = new Pool({ connectionString: process.env.DATABASE_URL, connectionTimeoutMillis: 10_000, idleTimeoutMillis: 30_000 });
-    pool.on('error', err => console.error('[Database] Idle client error:', err.message));
+    pool.on('error', err => {
+      console.error('[Database] Idle client error:', err.message);
+      // Loaded here: dbHealth requires this file.
+      require('./dbHealth').checkNow();
+    });
   }
   return pool;
 }

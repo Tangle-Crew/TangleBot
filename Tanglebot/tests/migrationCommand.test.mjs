@@ -6,6 +6,7 @@ import { mockPg } from './helpers/mockPg.mjs';
 const require = createRequire(import.meta.url);
 const { commandDisabledReason } = require('../src/utils/commandAvailability.js');
 const tools = require('../src/utils/migrationTools.js');
+const dbStatus = require('../src/utils/dbStatus.js');
 
 const ENV = {
   DATABASE_URL: 'postgres://u:p@host:5432/db', GOOGLE_SERVICE_ACCOUNT_JSON: '{}',
@@ -13,6 +14,7 @@ const ENV = {
 };
 
 let savedTools;
+let savedTestConnection;
 let savedEnv;
 let command;
 let pet;
@@ -22,6 +24,7 @@ beforeEach(() => {
   savedEnv = { ...process.env };
   Object.assign(process.env, ENV);
   savedTools = { ...tools };
+  savedTestConnection = dbStatus.testConnection;
   delete require.cache[require.resolve('../src/commands/migration.js')];
   command = require('../src/commands/migration.js');
   pet = require('../src/commands/pethighscore.js');
@@ -32,6 +35,7 @@ afterEach(() => {
   for (const key of Object.keys(process.env)) if (!(key in savedEnv)) delete process.env[key];
   Object.assign(process.env, savedEnv);
   Object.assign(tools, savedTools);
+  dbStatus.testConnection = savedTestConnection;
   [pet.refreshLeaderboard, donation.refreshLeaderboard] = savedBoards;
 });
 
@@ -67,14 +71,14 @@ test('it offers the connection, sheets, status, dry run, import and verify check
 
 test('only the Owner role can use it, and nothing runs for anyone else', async () => {
   let called = false;
-  tools.testConnection = async () => { called = true; return {}; };
+  dbStatus.testConnection = async () => { called = true; return {}; };
   const { replies } = await run('dbconnection', { owner: false });
   assert.equal(called, false);
   assert.match(replies[0].content, /Only the Owner role/);
 });
 
 test('dbconnection reports the server, user, speed and migrations', async () => {
-  tools.testConnection = async () => ({
+  dbStatus.testConnection = async () => ({
     server: 'PostgreSQL 17.2', database: 'tanglebot', user: 'tanglebot', ms: 12,
     applied: ['001_a.sql'], pending: ['002_b.sql'],
   });
@@ -85,7 +89,7 @@ test('dbconnection reports the server, user, speed and migrations', async () => 
 });
 
 test('a failing check replies with the error instead of throwing', async () => {
-  tools.testConnection = async () => { throw new Error('connect ECONNREFUSED'); };
+  dbStatus.testConnection = async () => { throw new Error('connect ECONNREFUSED'); };
   const { replies, interaction } = await run('dbconnection');
   assert.match(replies[0], /dbconnection failed: connect ECONNREFUSED/);
   assert.equal(interaction.commandError.message, 'connect ECONNREFUSED');
@@ -154,27 +158,6 @@ test('a long reply is cut to fit a Discord message', async () => {
 });
 
 // ── migrationTools ───────────────────────────────────────────────────────────
-
-test('testConnection reads the server and the applied migrations', async () => {
-  const db = mockPg(sql => {
-    if (/version\(\)/.test(sql)) return { rows: [{ version: 'PostgreSQL 17.2 on x86_64-pc-linux-musl', user_name: 'tanglebot', database_name: 'tanglebot' }] };
-    if (/from schema_migrations/.test(sql)) return { rows: [{ name: '001_high_scores.sql' }] };
-  });
-  const info = await savedTools.testConnection(db.pool);
-  assert.equal(info.server, 'PostgreSQL 17.2');
-  assert.deepEqual(info.applied, ['001_high_scores.sql']);
-  assert.ok(info.pending.includes('002_member_history.sql'));
-});
-
-test('testConnection on a database with no schema_migrations table lists everything as pending', async () => {
-  const db = mockPg(sql => {
-    if (/version\(\)/.test(sql)) return { rows: [{ version: 'PostgreSQL 17.2', user_name: 'u', database_name: 'd' }] };
-    if (/from schema_migrations/.test(sql)) throw Object.assign(new Error('relation does not exist'), { code: '42P01' });
-  });
-  const info = await savedTools.testConnection(db.pool);
-  assert.deepEqual(info.applied, []);
-  assert.ok(info.pending.length >= 3);
-});
 
 test('waitingForImport is true until a donation or member pet is stored', async () => {
   for (const [has, expected] of [[false, true], [true, false]]) {
