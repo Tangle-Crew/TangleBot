@@ -117,6 +117,8 @@ let recorded;
 beforeEach(() => {
   saved = { ...highScoresDb };
   recorded = [];
+  // The leaderboard repost reads these; no real database in tests.
+  highScoresDb.getDonations = async () => [];
   highScoresDb.recordMilestones = async (id, list, by) => { recorded.push({ id, list, by }); };
 });
 afterEach(() => { Object.assign(highScoresDb, saved); });

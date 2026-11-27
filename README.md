@@ -751,7 +751,6 @@ Each feature's variables are listed in its section above. These are the base one
 | `CLIENT_ID` | Your application ID. |
 | `CLAN_ID` | Your server ID. With `CLIENT_ID`, used to register the slash commands. Also used for the leaderboards and the `LFG-` role sync. |
 | `ADMIN_LOG_CHANNEL_ID` | Optional. Staff channel for alerts, logs and the "Bot is online" message (which pings `OWNER_ROLE_ID` if set). |
-| `OWNER_ID` | Unused. |
 
 ### Database
 

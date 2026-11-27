@@ -5,8 +5,8 @@ const { withTimeout, discordTimestamp, formatNumber } = require('../utils/common
 const { refuseWithoutRole } = require('../utils/roleCheck');
 const { ALERT_COLOR, SUCCESS_COLOR } = require('../utils/embedColor');
 
-const CONNECT_TIMEOUT_MS = 5000;
-const COUNTS_TIMEOUT_MS = 10_000;
+// How long the connection check and the row counts may take (changed by the tests).
+const timeouts = { connectMs: 5000, countsMs: 10_000 };
 
 const fmt = formatNumber;
 const ago = ms => discordTimestamp(ms, 'R');
@@ -60,6 +60,7 @@ function dataField(c) {
 }
 
 module.exports = {
+  timeouts,
   // Shown in the admin commands post.
   help: {
     category: 'Bot admin',
@@ -93,7 +94,7 @@ module.exports = {
 
     let info;
     try {
-      info = await withTimeout(dbStatus.testConnection(), 'The database connection', CONNECT_TIMEOUT_MS);
+      info = await withTimeout(dbStatus.testConnection(), 'The database connection', timeouts.connectMs);
     } catch (err) {
       console.error('[DbStatus] Connection check failed:', err.message);
       interaction.commandError = err; // for the command log
@@ -107,7 +108,7 @@ module.exports = {
 
     let data;
     try {
-      data = dataField(await withTimeout(dbStatus.tableCounts(), 'Reading the row counts', COUNTS_TIMEOUT_MS));
+      data = dataField(await withTimeout(dbStatus.tableCounts(), 'Reading the row counts', timeouts.countsMs));
     } catch (err) {
       console.error('[DbStatus] Row counts failed:', err.message);
       interaction.commandError = err; // for the command log

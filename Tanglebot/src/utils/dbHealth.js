@@ -259,5 +259,5 @@ function checkNow() {
 
 module.exports = {
   start, getState, checkNow, createMonitor, healthSettings,
-  describeDbError, isConnectionError, formatDuration, writeHealthFile, HEALTH_FILE,
+  describeDbError, isConnectionError, formatDuration,
 };

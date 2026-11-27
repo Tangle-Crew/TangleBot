@@ -101,9 +101,10 @@ test('a failing connection gives the plain error and the monitor, and sets comma
 
 test('a hung connection still answers within the timeout', async () => {
   dbStatus.testConnection = () => new Promise(() => {});
+  command.timeouts.connectMs = 50;
   const started = Date.now();
-  const { fields } = await run();
-  assert.ok(Date.now() - started < 7000);
+  const { fields } = await run().finally(() => { command.timeouts.connectMs = 5000; });
+  assert.ok(Date.now() - started < 2000);
   assert.match(fields.Connection, /Timed out/);
 });
 
