@@ -37,7 +37,7 @@ test('a member donation history shows each change with the new total and who mad
   assert.match(embed.description, /Total now: \*\*160,000,000\*\* GP/);
   assert.match(embed.description, /<t:\d+:d> \+100,000,000 → 180,000,000 GP by Staff/);
   assert.match(embed.description, /-20,000,000 → 160,000,000 GP by Staff/);
-  assert.match(embed.description, /imported at 80,000,000 GP/);
+  assert.match(embed.description, /starting total 80,000,000 GP/);
   assert.match(embed.description, /\+5,000,000 → 5,000,000 GP by Staff \(manual\)/);
   assert.equal(embed.footer.text, 'Page 1 of 1 · 4 changes');
   assert.match(embed.fields[0].value, /Oct 2026: \+100,000,000 \/ -20,000,000 GP \(2 changes\)/);
@@ -75,13 +75,13 @@ test('a pet timeline shows adds and removals with who made them, and what has no
   assert.match(embed.description, /Pets now: \*\*5\*\*/);
   assert.match(embed.description, /<t:\d+:d> ➖ Tangleroot \(by Staff\)/);
   assert.match(embed.description, /<t:\d+:d> ➕ Heron\n/);
-  assert.match(embed.description, /Pets owned before the sheets were imported have no date/);
+  assert.match(embed.description, /Pets owned before the bot kept a log have no date/);
   assert.equal(embed.fields[0].name, 'Pets added by month');
   assert.equal(embed.fields[0].value, 'Oct 2026: 3');
 
   const clan = history.petEmbed(petData(), { subject: null, page: 1 }).toJSON();
   assert.match(clan.description, /\*\*Alice\*\* ➖ Tangleroot/);
-  assert.doesNotMatch(clan.description, /before the sheets/);
+  assert.doesNotMatch(clan.description, /before the bot kept a log/);
 });
 
 test('getDonationHistory asks for one member or the whole clan, a page at a time', async () => {
@@ -167,7 +167,7 @@ test('a page past the end, and a member with nothing recorded, are explained', a
   history.getPetHistory = async () => petData({ rows: [], total: 0, owned: 0, months: [] });
   assert.equal((await run('pets', { user: { id: '9', username: 'x' } })).replies.at(-1), 'Nothing is recorded for <@9> yet.');
 
-  // Pets owned from the import but no logged changes still shows the timeline.
+  // Pets owned with no logged changes still shows the timeline.
   history.getPetHistory = async () => petData({ rows: [], total: 0, owned: 4, months: [] });
   const owned = await run('pets', { user: { id: '9', username: 'x' } });
   assert.match(owned.replies.at(-1).embeds[0].toJSON().description, /Pets now: \*\*4\*\*/);

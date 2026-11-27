@@ -40,7 +40,7 @@ const plan = over => milestones.planMilestones({
   donationRows: [], petRows: [], petCounts: new Map(), existing: [], tiers, masterThreshold: 10, ...over,
 });
 
-test('the donation log is replayed into tier changes, and a tier held at the import is dated to it', () => {
+test('the donation log is replayed into tier changes, and a tier held at a starting total is dated to it', () => {
   const { events, notes } = plan({
     donationRows: [
       { discord_id: 'A', total_after: '80000000', source: 'import', created_at: d('2026-11-01T00:00:00Z') },

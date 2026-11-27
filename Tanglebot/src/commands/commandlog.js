@@ -29,7 +29,7 @@ module.exports = {
     examples: { '': '/commandlog command:donationhighscore add status:error' },
     options: {
       user: 'only this person',
-      command: 'only this command, e.g. migration',
+      command: 'only this command, e.g. donationhighscore',
       status: 'ok, error or denied',
       page: 'page number (10 a page)',
     },
@@ -42,7 +42,7 @@ module.exports = {
     .setDefaultMemberPermissions(0)
     .setDescription('Show recent command runs: who ran what, when, and whether it worked')
     .addUserOption(o => o.setName('user').setDescription('Only commands run by this person'))
-    .addStringOption(o => o.setName('command').setDescription('Only this command, e.g. migration or donationhighscore add'))
+    .addStringOption(o => o.setName('command').setDescription('Only this command, e.g. donationhighscore or pethighscore add'))
     .addStringOption(o =>
       o
         .setName('status')

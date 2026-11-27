@@ -52,7 +52,7 @@ function run(cmd, { roles = [], values = {}, subcommand = 'add' } = {}) {
 }
 
 const row = (over = {}) => ({
-  id: 1, discord_id: '999', discord_name: 'Pauli (Owner)', command: 'migration import', options: { confirm: true },
+  id: 1, discord_id: '999', discord_name: 'Pauli (Owner)', command: 'memberdata sync', options: { confirm: true },
   status: 'ok', error: null, duration_ms: 12, created_at: new Date('2026-11-10T20:00:00Z'), ...over,
 });
 
@@ -83,17 +83,17 @@ test('it passes the filters and page to the query and shows who, what, when and 
   };
   const { replies } = await run(command, {
     roles: ['coord'],
-    values: { user: { id: '999' }, command: '/migration', status: 'error', page: 2 },
+    values: { user: { id: '999' }, command: '/memberdata', status: 'error', page: 2 },
   });
-  assert.deepEqual(args, { discordId: '999', command: 'migration', status: 'error', limit: 10, offset: 10 });
+  assert.deepEqual(args, { discordId: '999', command: 'memberdata', status: 'error', limit: 10, offset: 10 });
 
   const embed = replies[0].embeds[0].data;
-  assert.match(embed.description, /Pauli \(Owner\)\*\* \(999\) · \/migration import `confirm:true`/);
+  assert.match(embed.description, /Pauli \(Owner\)\*\* \(999\) · \/memberdata sync `confirm:true`/);
   assert.match(embed.description, /✅ ok/);
   assert.match(embed.description, /❌ error: boom/);
   assert.match(embed.description, /🚫 denied/);
   assert.match(embed.description, /\\\*bold\\\* name/, 'markdown in names is escaped');
-  assert.match(embed.footer.text, /Page 2 of 3 · 23 runs matching user 999, command "migration", status error/);
+  assert.match(embed.footer.text, /Page 2 of 3 · 23 runs matching user 999, command "memberdata", status error/);
 });
 
 test('a page past the end and an empty result say so', async () => {
@@ -131,7 +131,7 @@ test('queryLog filters by user, command prefix and status, newest first, with a 
 // Every staff command that refuses a person for lacking a role flags it for the command log.
 const DENIAL_CASES = [
   ['donationhighscore', {}], ['pethighscore', {}], ['pethighscore', { subcommand: 'new' }], ['refreshboards', {}],
-  ['migration', { subcommand: 'status' }], ['dbstatus', {}], ['spinwheel', {}], ['honeypot', {}],
+  ['dbstatus', {}], ['spinwheel', {}], ['honeypot', {}],
   ['stalemembers', { values: { time: 6, minxp: '250k' } }], ['weeklycomp', {}],
   ['weeklyannounce', { subcommand: 'setup' }],
 ];

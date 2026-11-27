@@ -55,7 +55,7 @@ function planMilestones({ donationRows, petRows, petCounts, existing, tiers, mas
     const after = tierFor(tiers, Number(row.total_after));
     previousTier.set(row.discord_id, after);
     if (before === after) continue;
-    // A tier already held when the sheets were imported has no known date; it is dated to the import.
+    // A tier already held at a starting total (source import) has no known date; it is dated to that row.
     const basis = row.source === 'import' ? 'import' : 'log';
     if (basis === 'import') notes.importedBasis += 1;
     add(row.discord_id, { kind: 'donation_tier_changed', oldValue: before, newValue: after, data: { total: Number(row.total_after), basis } }, row.created_at);

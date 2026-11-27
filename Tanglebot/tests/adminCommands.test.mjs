@@ -115,7 +115,7 @@ test('the post leaves out everyone commands and groups the rest by role', () => 
   ]);
   const embedsOf = payloads[0].embeds.map(e => JSON.stringify(e.toJSON()));
   const ownerStart = embedsOf[1];
-  assert.ok(ownerStart.includes('[/migration]') && !ownerStart.includes('[/pethighscore]'));
+  assert.ok(ownerStart.includes('[/dbstatus]') && !ownerStart.includes('[/pethighscore]'));
   assert.ok(embedsOf[2].includes('[/pethighscore]'));
   const pet = payloads.filter(p => messageText(p).includes('**/pethighscore '));
   assert.equal(pet.length, 1);

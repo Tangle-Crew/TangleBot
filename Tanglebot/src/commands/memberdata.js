@@ -101,7 +101,7 @@ const SUBCOMMANDS = {
       `  ${fmt(counts.tierChanges)} donation tier changes`,
       `  ${fmt(counts.masterReached)} Pet Master reached, ${fmt(counts.masterLost)} Pet Master lost`,
     ];
-    if (notes.importedBasis) lines.push(`${fmt(notes.importedBasis)} tier(s) were held at the sheets import: dated to the import, not to when they were reached.`);
+    if (notes.importedBasis) lines.push(`${fmt(notes.importedBasis)} tier(s) were already held at a member's starting total: dated to that, not to when they were reached.`);
     if (notes.alreadyMasterBeforeLog) lines.push(`${fmt(notes.alreadyMasterBeforeLog)} member(s) were already Pet Masters before their logged changes: no date is known for that.`);
     if (!apply) lines.push('Run again with confirm set to True to save them. Already saved milestones are never added twice.');
     return lines;
