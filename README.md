@@ -739,7 +739,7 @@ The roles are named by `OWNER_ROLE_ID`, `TEMPLAR_ROLE_ID` and `COORDINATOR_ROLE_
 
 ### Adding a new command
 
-Fill in the command's optional `help` export so it appears in the admin commands post: `category`, `access` (a role name, or a map by subcommand path such as `{ '': 'Templar', new: 'Owner' }`), `examples` (by subcommand path, `''` for a command without subcommands) and `options` (short text for options whose Discord description is over about 60 characters). A test fails if a staff command has no `access`, or if a key no longer matches a subcommand or option after a rename. New staff commands are hidden by default (`setDefaultMemberPermissions(0)`) and must check the role when they run.
+Fill in the command's optional `help` export so it appears in the admin commands post: `category`, `access` (a role name, or a map by subcommand path such as `{ '': 'Templar', new: 'Owner' }`), `examples` (by subcommand path, `''` for a command without subcommands) and `options` (short text for options whose Discord description is over about 60 characters). A test fails if a staff command has no `access`, or if a key no longer matches a subcommand or option after a rename. New staff commands are hidden by default (`setDefaultMemberPermissions(0)`), list their role in `requiredEnv` so they don't load without it, and check it when they run with `refuseWithoutRole` from `src/utils/roleCheck.js`.
 
 ### Environment variables
 
