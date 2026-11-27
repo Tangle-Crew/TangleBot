@@ -1,6 +1,7 @@
-const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const { createCanvas } = require('@napi-rs/canvas');
 const GIFEncoder = require('gif-encoder-2');
+const { refuseWithoutRole } = require('../utils/roleCheck');
 
 const COORDINATOR_ROLE_ID = process.env.COORDINATOR_ROLE_ID;
 
@@ -261,6 +262,7 @@ module.exports = {
       ping: '@here or @everyone with the result',
     },
   },
+  requiredEnv: ['COORDINATOR_ROLE_ID'],
   data: new SlashCommandBuilder()
     .setName('spinwheel')
     .setDefaultMemberPermissions(0)
@@ -298,11 +300,10 @@ module.exports = {
     ),
 
   async execute(interaction) {
-    if (!interaction.member.roles.cache.has(COORDINATOR_ROLE_ID)) {
-      console.log(`[Spinwheel] ${interaction.user.tag} was denied /spinwheel (missing Coordinator role)`);
-      interaction.commandDenied = true; // for the command log
-      return interaction.reply({ content: 'You need the Coordinator role to use this command.', flags: MessageFlags.Ephemeral });
-    }
+    if (await refuseWithoutRole(interaction, [COORDINATOR_ROLE_ID], {
+      logPrefix: '[Spinwheel]', command: '/spinwheel', missing: 'missing Coordinator role',
+      message: 'You need the Coordinator role to use this command.',
+    })) return;
 
     await interaction.deferReply();
 

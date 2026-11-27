@@ -6,7 +6,7 @@ import { mockPg } from './helpers/mockPg.mjs';
 const require = createRequire(import.meta.url);
 
 Object.assign(process.env, { DATABASE_URL: 'postgres://u:p@host:5432/db' });
-delete process.env.TEMPLAR_ROLE_ID;
+Object.assign(process.env, { TEMPLAR_ROLE_ID: 'templar', OWNER_ROLE_ID: 'owner' });
 delete process.env.PET_MASTER_ROLE_ID;
 for (const tier of ['ZENYTE', 'ONYX', 'DRAGONSTONE', 'DIAMOND', 'RUBY']) delete process.env[`DONATION_${tier}_ROLE_ID`];
 

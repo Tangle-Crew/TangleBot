@@ -37,7 +37,7 @@ A Discord bot built for the **Tangle Crew** clan in [Old School RuneScape](https
 | [`/honeypot`](#honeypot-channel-trap) | Test mode for the honeypot trap | Owner or Templar |
 | [`/dbstatus`](#-dbstatus--database-status) | Database connection, migrations, health monitor and row counts | Owner |
 
-Role checks for **Templar** and **Owner** on the high score commands and `/refreshboards` fail **open**: if `TEMPLAR_ROLE_ID` / `OWNER_ROLE_ID` is unset, anyone can use them. `/spinwheel`, `/weeklycomp`, `/weeklyannounce`, `/stalemembers` and `/honeypot` fail **closed**: if their role ID is unset, no one can.
+Every staff command needs the role it checks: if that role's ID is unset, the command isn't loaded.
 
 ---
 
@@ -87,7 +87,7 @@ Both take a `player` and an `amount`: a raw number or shorthand like `10k`, `10m
 |---|---|---|
 | `DONATIONS_CHANNEL_ID` | Yes | Channel for the leaderboard. The command isn't loaded without it. |
 | `DATABASE_URL` | Yes | PostgreSQL connection string. See [Database](#database). The command isn't loaded without it. |
-| `TEMPLAR_ROLE_ID` | Recommended | Restricts the command to Templars (fails open). |
+| `TEMPLAR_ROLE_ID` | Yes | The role that can use the command. The command isn't loaded without it. |
 | `DONATION_<TIER>_THRESHOLD` | No | GP needed per tier. Defaults: Zenyte 1B, Onyx 600M, Dragonstone 300M, Diamond 150M, Ruby 75M. |
 | `DONATION_<TIER>_ROLE_ID` | No | Role granted at each tier. Leave blank to skip that tier's role. |
 | `DEFAULT_EMBED_COLOR` | No | Embed color (default `006400`). |
@@ -132,8 +132,8 @@ Pet slots autocomplete and skip pets picked in another slot. Once `user` is set,
 |---|---|---|
 | `PET_HIGHSCORES_CHANNEL_ID` | Yes | Channel for the leaderboard. The command isn't loaded without it. |
 | `DATABASE_URL` | Yes | PostgreSQL connection string. See [Database](#database). The command isn't loaded without it. |
-| `TEMPLAR_ROLE_ID` | Recommended | Restricts `add`/`remove` to Templars (fails open). |
-| `OWNER_ROLE_ID` | Recommended | Restricts `new` to Owners (fails open). |
+| `TEMPLAR_ROLE_ID` | Yes | The role that can use `add` and `remove`. The command isn't loaded without it. |
+| `OWNER_ROLE_ID` | Yes | The role that can use `new`. The command isn't loaded without it. |
 | `PET_MASTER_ROLE_ID` | No | Role granted at `PET_MASTER_THRESHOLD` pets. Leave blank to skip. |
 | `PET_MASTER_THRESHOLD` | No | Pets needed for Pet Master (default 10). |
 | `DEFAULT_EMBED_COLOR` | No | Embed color (default `006400`). |
@@ -160,13 +160,13 @@ Each pet's emoji is its `emoji_id` in the `pets` table; pets without one show �
 
 Reposts the pet and donation leaderboards from the database, e.g. after editing a table by hand. The reply says whether each board was refreshed, skipped (env vars not set) or failed, with the error. The same refresh runs on startup.
 
-Only loads with `DATABASE_URL`. Restricted to Templars (`TEMPLAR_ROLE_ID`, fails open).
+Only loads with `DATABASE_URL` and `TEMPLAR_ROLE_ID`, and only Templars can use it.
 
 ---
 
 ### 🩺 `/dbstatus` — Database Status
 
-Owner-only (`OWNER_ROLE_ID`, fails closed). Shows the state of the database in one private embed, green when it is reachable and red when not. Only loads while `DATABASE_URL` and `OWNER_ROLE_ID` are set. It writes nothing.
+Owner-only (`OWNER_ROLE_ID`). Shows the state of the database in one private embed, green when it is reachable and red when not. Only loads while `DATABASE_URL` and `OWNER_ROLE_ID` are set. It writes nothing.
 
 | Section | What it shows |
 |---|---|
@@ -397,7 +397,7 @@ Replies privately. **Requires** `TEMPLAR_ROLE_ID`.
 
 | Variable | Required | Description |
 |---|---|---|
-| `TEMPLAR_ROLE_ID` | Yes | The role that can run the command, and the role the ending reminder pings. |
+| `TEMPLAR_ROLE_ID` | Yes | The role that can run the command, and the role the ending reminder pings. The command isn't loaded without it. |
 | `WOM_GROUP_ID` | Recommended | Your WOM group. Also enables the ending reminder. |
 | `WOM_GROUP_VERIFICATION_CODE` | Recommended | wiseoldman.net → your group → settings → Verification Code. Also used by the reminder's update all. |
 | `WOM_API_KEY` | No | Raises WOM's rate limit from 20 to 100 requests a minute. Ask on the Wise Old Man Discord. |
@@ -480,7 +480,7 @@ Schedules one post for 5 minutes after the next clan competition ends, so WOM's 
 
 | Variable | Required | Description |
 |---|---|---|
-| `TEMPLAR_ROLE_ID` | Yes | Who can run the command and use its panel (fails closed). The command isn't loaded without it. |
+| `TEMPLAR_ROLE_ID` | Yes | Who can run the command and use its panel. The command isn't loaded without it. |
 | `WOM_GROUP_ID` | Yes | The group whose competitions are read. The command isn't loaded without it. |
 | `ADMIN_LOG_CHANNEL_ID` | Yes | Receives each scheduled post, each send, late sends and failures. The command isn't loaded without it. |
 | `WEEKLY_ANNOUNCE_CHANNEL_ID` | Recommended | The channel the post goes to. When set, the command has no `channel` option. |
@@ -685,7 +685,7 @@ With `DATABASE_URL` set, every incident is also saved in the `honeypot_incidents
 | `HONEYPOT_CHANNEL_ID` | One of these two | A text channel to trap. |
 | `HONEYPOT_VOICE_CHANNEL_ID` | One of these two | A voice channel's text chat to trap. |
 | `ADMIN_LOG_CHANNEL_ID` | Recommended | Where reports go. Without it the poster is still timed out, but nothing is reported. |
-| `OWNER_ROLE_ID` / `TEMPLAR_ROLE_ID` | Recommended | Who can use the buttons and `/honeypot` (fails closed). |
+| `OWNER_ROLE_ID` / `TEMPLAR_ROLE_ID` | Recommended | Who can use the buttons and `/honeypot` (if neither is set, no one can use the buttons and `/honeypot` isn't loaded). |
 
 `/honeypot` is only loaded when a trap channel is set.
 

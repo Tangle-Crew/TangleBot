@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const history = require('../utils/history');
-const { hasAnyRole } = require('../utils/db');
+const { refuseWithoutRole } = require('../utils/roleCheck');
 
 // Coordinator, Templar or Owner. Reads the database only, so DATABASE_URL is required.
 const allowedRoles = () => [process.env.COORDINATOR_ROLE_ID, process.env.TEMPLAR_ROLE_ID, process.env.OWNER_ROLE_ID];
@@ -39,14 +39,10 @@ module.exports = {
     ),
 
   async execute(interaction) {
-    if (!hasAnyRole(interaction.member, allowedRoles())) {
-      console.log(`[History] ${interaction.user.tag} was denied /history (needs Coordinator, Templar or Owner)`);
-      interaction.commandDenied = true; // for the command log
-      return interaction.reply({
-        content: 'You need the Coordinator role or higher to use this command.',
-        flags: MessageFlags.Ephemeral,
-      });
-    }
+    if (await refuseWithoutRole(interaction, allowedRoles(), {
+      logPrefix: '[History]', command: '/history', missing: 'needs Coordinator, Templar or Owner',
+      message: 'You need the Coordinator role or higher to use this command.',
+    })) return;
 
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 

@@ -6,6 +6,7 @@ const { withFileLock, intEnv } = require('../utils/db');
 const highScoresDb = require('../utils/highScoresDb');
 const { databaseConfigured } = require('../utils/commandAvailability');
 const milestones = require('../utils/milestones');
+const { refuseWithoutRole } = require('../utils/roleCheck');
 
 const TEMPLAR_ROLE_ID = process.env.TEMPLAR_ROLE_ID;
 const OWNER_ROLE_ID = process.env.OWNER_ROLE_ID;
@@ -291,14 +292,10 @@ async function syncMasterRole(guild, discordId, count) {
 }
 
 async function handleNewPet(interaction) {
-  if (OWNER_ROLE_ID && !interaction.member.roles.cache.has(OWNER_ROLE_ID)) {
-    console.log(`[PetHighscore] ${interaction.user.tag} was denied /pethighscore new (missing Owner role)`);
-    interaction.commandDenied = true; // for the command log
-    return interaction.reply({
-      content: 'Only the Owner role can register new pets.',
-      flags: MessageFlags.Ephemeral,
-    });
-  }
+  if (await refuseWithoutRole(interaction, [OWNER_ROLE_ID], {
+    logPrefix: '[PetHighscore]', command: '/pethighscore new', missing: 'missing Owner role',
+    message: 'Only the Owner role can register new pets.',
+  })) return;
 
   const name = interaction.options.getString('name', true).trim();
   const emojiInput = interaction.options.getString('emoji', true);
@@ -366,7 +363,7 @@ module.exports = {
       emoji: 'the custom emoji, or its numeric ID',
     },
   },
-  requiredEnv: ['DATABASE_URL', 'PET_HIGHSCORES_CHANNEL_ID'],
+  requiredEnv: ['DATABASE_URL', 'PET_HIGHSCORES_CHANNEL_ID', 'TEMPLAR_ROLE_ID', 'OWNER_ROLE_ID'],
   refreshLeaderboard,
   PET_MASTER_THRESHOLD,
 
@@ -462,14 +459,10 @@ module.exports = {
       return handleNewPet(interaction);
     }
 
-    if (TEMPLAR_ROLE_ID && !interaction.member.roles.cache.has(TEMPLAR_ROLE_ID)) {
-      console.log(`[PetHighscore] ${interaction.user.tag} was denied /pethighscore ${subcommand} (missing Templar role)`);
-      interaction.commandDenied = true; // for the command log
-      return interaction.reply({
-        content: 'You need the Templar role to use this command.',
-        flags: MessageFlags.Ephemeral,
-      });
-    }
+    if (await refuseWithoutRole(interaction, [TEMPLAR_ROLE_ID], {
+      logPrefix: '[PetHighscore]', command: `/pethighscore ${subcommand}`, missing: 'missing Templar role',
+      message: 'You need the Templar role to use this command.',
+    })) return;
 
     await ensurePetsLoaded();
 

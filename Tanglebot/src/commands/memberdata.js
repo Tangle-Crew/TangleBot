@@ -5,6 +5,7 @@ const competitionSync = require('../utils/competitionSync');
 const donationHighscore = require('./donationhighscore');
 const petHighscore = require('./pethighscore');
 const { codeBlock } = require('../utils/discordText');
+const { refuseWithoutRole } = require('../utils/roleCheck');
 
 const OWNER_ROLE_ID = process.env.OWNER_ROLE_ID;
 const MAX_DIFFERENCES = 15;
@@ -165,11 +166,10 @@ module.exports = {
   async execute(interaction) {
     const subcommand = interaction.options.getSubcommand();
 
-    if (!OWNER_ROLE_ID || !interaction.member.roles.cache.has(OWNER_ROLE_ID)) {
-      console.log(`[MemberData] ${interaction.user.tag} was denied /memberdata ${subcommand} (missing Owner role)`);
-      interaction.commandDenied = true; // for the command log
-      return interaction.reply({ content: 'Only the Owner role can use this command.', flags: MessageFlags.Ephemeral });
-    }
+    if (await refuseWithoutRole(interaction, [OWNER_ROLE_ID], {
+      logPrefix: '[MemberData]', command: `/memberdata ${subcommand}`, missing: 'missing Owner role',
+      message: 'Only the Owner role can use this command.',
+    })) return;
 
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     console.log(`[MemberData] ${interaction.user.tag} ran /memberdata ${subcommand}`);

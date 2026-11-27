@@ -177,6 +177,7 @@ module.exports = {
       verification_code: null,
     },
   },
+  requiredEnv: ['TEMPLAR_ROLE_ID'],
   data: buildCommandData(),
   parseDateInput,
   hasMixedTypes,

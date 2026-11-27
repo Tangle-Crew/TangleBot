@@ -2,6 +2,7 @@ const { SlashCommandBuilder, MessageFlags, EmbedBuilder } = require('discord.js'
 const dbStatus = require('../utils/dbStatus');
 const dbHealth = require('../utils/dbHealth');
 const { withTimeout, discordTimestamp } = require('../utils/db');
+const { refuseWithoutRole } = require('../utils/roleCheck');
 
 const CONNECT_TIMEOUT_MS = 5000;
 const COUNTS_TIMEOUT_MS = 10_000;
@@ -74,12 +75,10 @@ module.exports = {
     .setDescription('Show the database connection, migrations, health monitor and row counts (Owner only)'),
 
   async execute(interaction) {
-    const ownerRoleId = process.env.OWNER_ROLE_ID;
-    if (!ownerRoleId || !interaction.member?.roles?.cache?.has(ownerRoleId)) {
-      console.log(`[DbStatus] ${interaction.user.tag} was denied /dbstatus (missing Owner role)`);
-      interaction.commandDenied = true; // for the command log
-      return interaction.reply({ content: 'Only the Owner role can use this command.', flags: MessageFlags.Ephemeral });
-    }
+    if (await refuseWithoutRole(interaction, [process.env.OWNER_ROLE_ID], {
+      logPrefix: '[DbStatus]', command: '/dbstatus', missing: 'missing Owner role',
+      message: 'Only the Owner role can use this command.',
+    })) return;
 
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     console.log(`[DbStatus] ${interaction.user.tag} ran /dbstatus`);
