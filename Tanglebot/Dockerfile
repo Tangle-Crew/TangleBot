@@ -18,4 +18,6 @@ RUN npm ci --omit=dev
 COPY src/ ./src/
 COPY migrations/ ./migrations/
 
+HEALTHCHECK --interval=60s --timeout=10s --start-period=120s --retries=3 CMD ["node", "src/healthcheck.js"]
+
 CMD ["node", "src/index.js"]

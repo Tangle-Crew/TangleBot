@@ -1,6 +1,5 @@
 // Moving the donation and pet Google Sheets into PostgreSQL: import, verify and connection checks.
 // Used only by /migration, so nothing runs unless the Owner runs it in Discord. The sheets are only ever read.
-const fs = require('fs');
 const database = require('./database');
 const { MAX_TOTAL_GP } = require('./highScoresDb');
 
@@ -289,28 +288,6 @@ function describeSheets({ donations, highscores, catalog }) {
   };
 }
 
-// Connects, and reports the server, how long a round trip took, and which migrations are applied.
-async function testConnection(db = database.getPool()) {
-  const started = Date.now();
-  const { rows } = await db.query('select version() as version, current_user as user_name, current_database() as database_name');
-  const ms = Date.now() - started;
-  let applied = [];
-  try {
-    applied = (await db.query('select name from schema_migrations order by name')).rows.map(r => r.name);
-  } catch (err) {
-    if (err.code !== '42P01') throw err; // no schema_migrations table yet
-  }
-  const files = fs.readdirSync(database.MIGRATIONS_DIR).filter(f => database.MIGRATION_FILE.test(f)).sort();
-  return {
-    server: /PostgreSQL [\d.]+/.exec(rows[0].version)?.[0] ?? rows[0].version,
-    user: rows[0].user_name,
-    database: rows[0].database_name,
-    ms,
-    applied,
-    pending: files.filter(f => !applied.includes(f)),
-  };
-}
-
 // Row counts for the tables the import fills.
 async function databaseStatus(db = database.getPool()) {
   const one = async sql => (await db.query(sql)).rows[0];
@@ -378,5 +355,5 @@ async function runVerify({ db = database.getPool(), data = null, log } = {}) {
 
 module.exports = {
   parseSheets, importData, verifyData, printSummary, printVerification,
-  readSheets, describeSheets, testConnection, databaseStatus, waitingForImport, runImport, runVerify,
+  readSheets, describeSheets, databaseStatus, waitingForImport, runImport, runVerify,
 };

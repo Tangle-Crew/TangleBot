@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const tools = require('../utils/migrationTools');
+const dbStatus = require('../utils/dbStatus');
 const { codeBlock } = require('../utils/discordText');
 const petHighscore = require('./pethighscore');
 const donationHighscore = require('./donationhighscore');
@@ -70,7 +71,7 @@ function importLines({ summary, verification }, warnings) {
 
 const SUBCOMMANDS = {
   async dbconnection() {
-    return connectionLines(await tools.testConnection());
+    return connectionLines(await dbStatus.testConnection());
   },
 
   async sheets() {

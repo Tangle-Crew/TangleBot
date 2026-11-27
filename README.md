@@ -35,6 +35,7 @@ A Discord bot built for the **Tangle Crew** clan in [Old School RuneScape](https
 | [`/weeklyannounce`](#-weeklyannounce--weekly-winners-and-announcements) | Schedules the weekly winners and announcements post for 5 minutes after the next competition ends | Templar |
 | [`/stalemembers`](#-stalemembers--inactive-clan-members) | Lists WOM group members who were inactive or gained too little XP over a number of months | Templar (posts in the admin log) |
 | [`/honeypot`](#honeypot-channel-trap) | Test mode for the honeypot trap | Owner or Templar |
+| [`/dbstatus`](#-dbstatus--database-status) | Database connection, migrations, health monitor and row counts | Owner |
 
 Role checks for **Templar** and **Owner** on the high score commands and `/refreshboards` fail **open**: if `TEMPLAR_ROLE_ID` / `OWNER_ROLE_ID` is unset, anyone can use them. `/spinwheel`, `/weeklycomp`, `/weeklyannounce`, `/stalemembers` and `/honeypot` fail **closed**: if their role ID is unset, no one can.
 
@@ -207,6 +208,22 @@ Owner-only (`OWNER_ROLE_ID`) tools for the one-off move from the Google Sheets t
 | `verify` | Compares the sheets with the database member by member (donation totals, pet lists, and the catalog's names, emoji IDs and order) and lists every difference. Members changed by a command since the import, pets added since, and skipped pet keys are shown as notes, not differences. | Nothing |
 
 The sheets are only ever read. Only one import runs at a time. Running `import` again is safe: totals and the catalog are updated, a new `donation_log` row is added only if a total changed, and a member whose donations or pets were changed by a command since the first import is left alone, with a warning.
+
+---
+
+### 🩺 `/dbstatus` — Database Status
+
+Owner-only (`OWNER_ROLE_ID`, fails closed). Shows the state of the database in one private embed, green when it is reachable and red when not. Only loads while `DATABASE_URL` and `OWNER_ROLE_ID` are set. It writes nothing.
+
+| Section | What it shows |
+|---|---|
+| Connection | Whether the database answers, the round trip in ms, the PostgreSQL version, the database, the user and the host. The password is never shown. |
+| Migrations | How many are applied, the latest one, and any pending (applied on the next restart). |
+| Health monitor | The last [health check](#database) and its result, the current outage (since when, how many failed checks) or the last one (when, how long), and the check interval. |
+| Connection pool | Open, idle and waiting clients. |
+| Data | Members, donors and total GP, collectors, pets owned and the catalog size, `donation_log` and `pet_log` rows, accounts, member events, competitions, command log rows and the oldest one, honeypot incidents, and the database size. |
+
+If the database is down it still answers within about 5 seconds, with the error in plain words and the monitor's state, and the run is logged as `error`.
 
 ---
 
@@ -750,7 +767,7 @@ Role-based visibility is set by a server admin in **Server Settings > Integratio
 Add these overrides once:
 
 - **Templar:** `/donationhighscore`, `/pethighscore`, `/refreshboards`, `/stalemembers`, `/weeklyannounce`, `/weeklycomp`, `/honeypot`, `/submission`
-- **Owner:** `/migration`, `/memberdata`
+- **Owner:** `/migration`, `/memberdata`, `/dbstatus`
 - **Coordinator:** `/spinwheel`, `/commandlog`, `/profile`, `/history`
 
 Owner also holds Templar, so it needs no separate override for the Templar commands. A renamed or new staff command needs its override added once. Admins always see every command.
@@ -792,6 +809,9 @@ Each feature's variables are listed in its section above. These are the base one
 | `DATABASE_URL` | `postgres://<user>:<password>@<host>:5432/<database>`. In Docker Compose the host is the database service's name, e.g. `postgres://tanglebot:<password>@tanglebot-db:5432/tanglebot`. Leave it unset to keep using the Google Sheets. |
 | `COMMAND_LOG_RETENTION_DAYS` | Optional. Days of command log to keep (default 365, `0` keeps everything). |
 | `MEMBER_SYNC_INTERVAL_MINUTES` | Optional. Minutes between automatic Wise Old Man syncs (default 60, `0` for manual only). Needs `WOM_GROUP_ID`. |
+| `DB_HEALTH_CHECK_SECONDS` | Optional. Seconds between [database health checks](#database) (default 60, `0` turns the checks and their alerts off). |
+| `DB_HEALTH_FAILURES_BEFORE_ALERT` | Optional. Failed checks in a row before the down alert (default 3). |
+| `DB_HEALTH_REMINDER_MINUTES` | Optional. Minutes between reminders while the database stays down (default 60, `0` for none). |
 
 <details>
 <summary><strong>Migrations</strong></summary>
@@ -819,7 +839,7 @@ Every slash command run is recorded: who ran it (their Discord ID and their name
 | `status` | Meaning |
 |---|---|
 | `ok` | The command ran. |
-| `error` | The command threw an error, isn't loaded, or reported an error itself (`/donationhighscore`, `/pethighscore`, `/migration` and `/commandlog` do). |
+| `error` | The command threw an error, isn't loaded, or reported an error itself (`/donationhighscore`, `/pethighscore`, `/migration`, `/commandlog` and `/dbstatus` do). |
 | `denied` | The person didn't have the role for it. Recorded for every staff command that checks a role. |
 
 A command that catches its own error and replies normally is recorded as `ok`.
@@ -867,6 +887,24 @@ docker exec tanglebot-db dropdb -U tanglebot tanglebot_restore_test
 ```
 
 To restore over the live database, stop the bot first, then use `pg_restore --clean --if-exists -d tanglebot` instead of the scratch database.
+
+</details>
+
+<details>
+<summary><strong>Database health alerts</strong></summary>
+
+While the bot runs, it checks the database every `DB_HEALTH_CHECK_SECONDS` (default 60) with `select 1`. A check that gets no answer within 5 seconds counts as failed. `/dbstatus` shows the latest result.
+
+- **Down alert:** after `DB_HEALTH_FAILURES_BEFORE_ALERT` failed checks in a row (default 3, so about 3 minutes; a quick database restart sends nothing), a red "Database unreachable" embed goes to `ADMIN_LOG_CHANNEL_ID`, pinging `OWNER_ROLE_ID` if set. It gives the error in plain words (refused, host not found, timed out, login failed, database missing, too many connections, shutting down), when it started, the host and database (never the password), and what doesn't work until it is back: `/donationhighscore`, `/pethighscore`, `/refreshboards`, `/history`, `/profile`, `/commandlog`, `/memberdata`, the automatic WOM sync and the command log.
+- **Reminders:** while it stays down, one "Database still unreachable" reminder every `DB_HEALTH_REMINDER_MINUTES` (default 60, `0` for none).
+- **Recovery:** on the first good check after an alert, a green "Database reachable again" embed with how long it was down. If it recovers before the alert, nothing is sent.
+- **Sooner checks:** when a command fails with a connection error, or the pool reports a lost connection, the bot checks straight away (at most once every 10 seconds) instead of waiting for the next check. The alert still needs the failures in a row.
+- **Startup alert:** if the database can't be reached when the bot starts, or a migration file fails, the bot posts "Bot did not start" with the reason to the admin log (through Discord's API, without logging in), then exits as before. Docker restarts it, so this is sent at most once an hour; the last send time is kept in `data/startup-alert.json`.
+- **Docker health:** each check writes `data/health.json`. The image's `HEALTHCHECK` runs `node src/healthcheck.js` every 60 seconds, which fails when that file is older than 3 check intervals or says the database is down, so `docker ps` shows the bot as `healthy` or `unhealthy`. With `DB_HEALTH_CHECK_SECONDS=0` it always passes.
+
+A bot process that has died, or hangs, can't post anything. The Docker health status covers that: point Uptime Kuma, or whatever monitors the host, at the container's health to be told about it.
+
+To test it, stop the database container for about 5 minutes: the alert comes after about 3 minutes, the recovery once it is started again, and `docker ps` shows `unhealthy` and then `healthy`. With the database stopped, restarting the bot sends one "Bot did not start" message, not one per restart.
 
 </details>
 

@@ -1,0 +1,3 @@
+# What was done today (2026-11-27)
+
+- Database status and health alerts (branch `db-status-and-health`): new Owner-only `/dbstatus` (connection, migrations, health monitor, pool, row counts); `dbHealth.js` checks the database every `DB_HEALTH_CHECK_SECONDS` and alerts the admin log after `DB_HEALTH_FAILURES_BEFORE_ALERT` failures, with hourly reminders and a recovery message; a "Bot did not start" admin log message (at most once an hour) when the database or a migration fails at startup; `data/health.json` and a Docker `HEALTHCHECK` (`src/healthcheck.js`). `testConnection` moved from `migrationTools.js` to the new `dbStatus.js`; `notifyAdminLog` takes optional message content for the Owner ping.

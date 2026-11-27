@@ -27,6 +27,7 @@ const { handleSuggestButton, handleSuggestModalSubmit } = require('../utils/lfgS
 const { logCommand, startCommandLogPrune } = require('../utils/commandLog');
 const { databaseConfigured } = require('../utils/commandAvailability');
 const { startMemberSync } = require('../utils/memberSync');
+const dbHealth = require('../utils/dbHealth');
 const migrationTools = require('../utils/migrationTools');
 const { registerMemberHistory, syncMemberRoster } = require('../utils/memberHistory');
 const { startCompEndingReminder } = require('../utils/compEndingReminder');
@@ -74,6 +75,7 @@ function loadEvents(client) {
   let stopCompEndingReminder = null;
   let stopCommandLogPrune = null;
   let stopMemberSync = null;
+  let stopDbHealth = null;
   const submissionConfig = loadSubmissionConfig();
   client.submissionConfig = submissionConfig;
 
@@ -101,6 +103,7 @@ function loadEvents(client) {
     stopCompEndingReminder = startCompEndingReminder(client);
     stopCommandLogPrune = startCommandLogPrune();
     stopMemberSync = startMemberSync(client);
+    stopDbHealth = dbHealth.start(client);
     // Before the slower startup steps, so a post due while the bot was down goes out promptly.
     if (client.commands.has('weeklyannounce')) {
       try {
@@ -256,6 +259,10 @@ function loadEvents(client) {
       stopCompEndingReminder();
       stopCompEndingReminder = null;
     }
+    if (stopDbHealth) {
+      stopDbHealth();
+      stopDbHealth = null;
+    }
     stopWeeklyAnnouncements();
   });
 }
@@ -286,7 +293,10 @@ async function runCommand(interaction, command) {
   }
   // Commands that catch their own errors set interaction.commandError so they are still logged as failed,
   // and commands that refuse someone for lacking a role set interaction.commandDenied.
-  await logCommand(interaction, { startedAt, error: error ?? interaction.commandError ?? null, denied: Boolean(interaction.commandDenied) });
+  const failure = error ?? interaction.commandError ?? null;
+  // A connection error starts a database check now instead of at the next interval.
+  if (dbHealth.isConnectionError(failure)) dbHealth.checkNow();
+  await logCommand(interaction, { startedAt, error: failure, denied: Boolean(interaction.commandDenied) });
 }
 
 async function replyOrFollowUp(interaction, content) {

@@ -131,7 +131,7 @@ test('queryLog filters by user, command prefix and status, newest first, with a 
 // Every staff command that refuses a person for lacking a role flags it for the command log.
 const DENIAL_CASES = [
   ['donationhighscore', {}], ['pethighscore', {}], ['pethighscore', { subcommand: 'new' }], ['refreshboards', {}],
-  ['migration', { subcommand: 'status' }], ['spinwheel', {}], ['honeypot', {}],
+  ['migration', { subcommand: 'status' }], ['dbstatus', {}], ['spinwheel', {}], ['honeypot', {}],
   ['stalemembers', { values: { time: 6, minxp: '250k' } }], ['weeklycomp', {}],
   ['weeklyannounce', { subcommand: 'setup' }],
 ];
