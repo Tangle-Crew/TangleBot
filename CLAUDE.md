@@ -4,7 +4,7 @@ A Discord bot for an OSRS clan. The app is in `Tanglebot/` (Node.js, discord.js)
 
 ## Before you touch the database
 
-Read [DATABASE.md](DATABASE.md). It explains how the data is stored, the migration rules (applied migrations are never edited, with one documented exception), the conventions, the checklist for a change, and the roadmap. Update it in the same change.
+Read [DATABASE.md](DATABASE.md). It explains how the data is stored, the migration rules (applied migrations are never edited, with one documented exception), the conventions and the checklist for a change. Update it in the same change.
 
 ## Working here
 

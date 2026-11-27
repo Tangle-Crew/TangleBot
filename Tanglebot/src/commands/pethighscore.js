@@ -1,31 +1,18 @@
 const { SlashCommandBuilder, MessageFlags, EmbedBuilder } = require('discord.js');
-const { getRows, updateRow, appendRow, parseAppendedRowNumber } = require('../utils/googleSheets');
 const { DEFAULT_EMBED_COLOR } = require('../utils/embedColor');
 const { mentionOrName, postLeaderboard: postLeaderboardShared } = require('../utils/leaderboard');
 const { notifyAdminLog } = require('../utils/roleMenu');
 const { withFileLock, intEnv } = require('../utils/db');
 const highScoresDb = require('../utils/highScoresDb');
+const { databaseConfigured } = require('../utils/commandAvailability');
 const milestones = require('../utils/milestones');
 
 const TEMPLAR_ROLE_ID = process.env.TEMPLAR_ROLE_ID;
 const OWNER_ROLE_ID = process.env.OWNER_ROLE_ID;
 const PET_MASTER_THRESHOLD = intEnv('PET_MASTER_THRESHOLD', 10);
 
-// withFileLock key (not a file) serializing edits to the pet sheet, and (with the database)
-// reading the members and posting them.
-const PET_LOCK_KEY = 'pethighscores-sheet';
-
-// True when DATABASE_URL is set; otherwise the Google Sheet is used.
-const usingDb = () => highScoresDb.usingDatabase();
-
-// Tab names from Tanglebot/example/pethighscores_template.xlsx.
-const SHEET_TAB = 'Highscores';
-const DATA_RANGE = `${SHEET_TAB}!A2:C`;
-const APPEND_RANGE = `${SHEET_TAB}!A:C`;
-
-const PET_CATALOG_SHEET_TAB = 'Pets';
-const PET_CATALOG_RANGE = `${PET_CATALOG_SHEET_TAB}!A2:C`;
-const PET_CATALOG_APPEND_RANGE = `${PET_CATALOG_SHEET_TAB}!A:C`;
+// withFileLock key (not a file) serializing reading the members and posting them.
+const PET_LOCK_KEY = 'pethighscores-board';
 
 // Pet slots exposed on add/remove; only the first is required.
 const PET_OPTION_NAMES = ['pet', 'pet2', 'pet3', 'pet4', 'pet5'];
@@ -44,17 +31,9 @@ function rebuildPetIndexes() {
   });
 }
 
-// Reads the pet catalog from the database or the Pets tab.
-async function fetchPetCatalog() {
-  if (usingDb()) return highScoresDb.getPetCatalog();
-  const rows = await getRows(process.env.PET_HIGHSCORES_SHEET_ID, PET_CATALOG_RANGE);
-  return rows
-    .filter(r => r[0])
-    .map(r => ({
-      key: String(r[0]).trim(),
-      name: String(r[1] || '').trim(),
-      emojiId: String(r[2] || '').trim(),
-    }));
+// Reads the pet catalog from the database.
+function fetchPetCatalog() {
+  return highScoresDb.getPetCatalog();
 }
 
 // The pet catalog, shared by autocomplete and commands. Reloaded by reloadPets.
@@ -68,14 +47,14 @@ function ensurePetsLoaded() {
       })
       .catch(err => {
         petsLoadPromise = null; // retry next call instead of caching the failure
-        console.error(`[PetHighscore] Failed to load pet catalog from ${usingDb() ? 'the database' : 'the Pets sheet tab'}:`, err);
+        console.error('[PetHighscore] Failed to load pet catalog from the database:', err);
         throw err;
       });
   }
   return petsLoadPromise;
 }
 
-// Re-reads the Pets tab. On failure the current catalog stays in use.
+// Re-reads the pet catalog. On failure the current catalog stays in use.
 function reloadPets() {
   petsLoadPromise = null;
   return ensurePetsLoaded();
@@ -111,7 +90,7 @@ function petEmoji(pet) {
   return `<:${pet.key}:${pet.emojiId}>`;
 }
 
-// Orders pet keys as on the Pets tab.
+// Orders pet keys by the catalog's order.
 function sortPetKeys(keys) {
   return [...keys].sort((a, b) => (PET_ORDER.get(a) ?? 999) - (PET_ORDER.get(b) ?? 999));
 }
@@ -210,22 +189,8 @@ async function postLeaderboard(guild, channelId, entries, botUserId) {
     logPrefix: 'PetHighscore',
     isOwnLeaderboardMessage,
     onDisplayNameChange: async (entry) => {
-      if (usingDb()) {
-        try {
-          await highScoresDb.updateDisplayName(entry);
-        } catch (err) {
-          console.error(`[PetHighscore] Failed to persist refreshed display name for ${entry.discordId}:`, err);
-        }
-        return;
-      }
-      if (entry.rowNumber == null) return;
       try {
-        await updateRow(
-          process.env.PET_HIGHSCORES_SHEET_ID,
-          `${SHEET_TAB}!A${entry.rowNumber}:C${entry.rowNumber}`,
-          [entry.discordId, entry.displayName, entry.petKeys.join(', ')]
-        );
-        console.log(`[PetHighscore] Refreshed stored display name for ${entry.discordId} -> "${entry.displayName}"`);
+        await highScoresDb.updateDisplayName(entry);
       } catch (err) {
         console.error(`[PetHighscore] Failed to persist refreshed display name for ${entry.discordId}:`, err);
       }
@@ -234,45 +199,24 @@ async function postLeaderboard(guild, channelId, entries, botUserId) {
 }
 
 async function fetchEntries() {
-  if (usingDb()) {
-    const members = await highScoresDb.getMemberPets();
-    return members.map(e => {
-      const petKeys = sortPetKeys(e.petKeys);
-      return { ...e, petKeys, count: petKeys.length };
-    });
-  }
-  console.log('[PetHighscore] Fetching pet highscore entries from sheet');
-  const rows = await getRows(process.env.PET_HIGHSCORES_SHEET_ID, DATA_RANGE);
-  return rows
-    .map((r, i) => ({
-      rowNumber: i + 2, // header row + 1-indexed; set before filtering out blank rows
-      discordId: r[0] ? String(r[0]).trim() : '',
-      displayName: r[1] ? String(r[1]).trim() : '',
-      petKeys: r[2] ? String(r[2]).split(',').map(k => k.trim()).filter(Boolean) : [],
-    }))
-    .filter(e => e.discordId)
-    .map(e => ({ ...e, count: e.petKeys.length }));
+  const members = await highScoresDb.getMemberPets();
+  return members.map(e => {
+    const petKeys = sortPetKeys(e.petKeys);
+    return { ...e, petKeys, count: petKeys.length };
+  });
 }
 
-// Member rows cached for autocomplete. Anything that writes reads the sheet fresh instead, since
-// hand edits can shift rows and a stale row number would overwrite the wrong member.
+// Members cached for autocomplete. Refreshed each time the leaderboard is posted.
 let entriesLoadPromise = null;
 function ensureEntriesLoaded() {
   if (!entriesLoadPromise) {
     entriesLoadPromise = fetchEntries().catch(err => {
       entriesLoadPromise = null;
-      console.error('[PetHighscore] Failed to load entries from the Highscores sheet tab:', err);
+      console.error('[PetHighscore] Failed to load entries from the database:', err);
       throw err;
     });
   }
   return entriesLoadPromise;
-}
-
-// Reads member rows from the sheet and makes them the autocomplete cache.
-async function loadFreshEntries() {
-  const entries = await fetchEntries();
-  entriesLoadPromise = Promise.resolve(entries);
-  return entries;
 }
 
 function sortedForDisplay(entries) {
@@ -290,26 +234,17 @@ function postFromDatabase(guild, channelId, botUserId) {
   });
 }
 
-// Reposts the leaderboard from the sheet or database. Runs on startup and from /refreshboards. Returns false
+// Reposts the leaderboard from the database. Runs on startup and from /refreshboards. Returns false
 // if the leaderboard isn't configured; errors are thrown to the caller.
 async function refreshLeaderboard(client) {
   const channelId = process.env.PET_HIGHSCORES_CHANNEL_ID;
-  if (!channelId) return false;
-  if (!usingDb() && (!process.env.PET_HIGHSCORES_SHEET_ID || !process.env.GOOGLE_SERVICE_ACCOUNT_JSON)) return false;
+  if (!channelId || !databaseConfigured()) return false;
 
   await reloadPets();
   // Without it, fetch() returns every server instead of one and the post fails with a cryptic error.
   if (!process.env.CLAN_ID) throw new Error('CLAN_ID is not set, so the server to post in is unknown.');
   const guild = await client.guilds.fetch(process.env.CLAN_ID);
-  if (usingDb()) {
-    await postFromDatabase(guild, channelId, client.user.id);
-    return true;
-  }
-  // Locked because the display-name refresh writes rows too.
-  await withFileLock(PET_LOCK_KEY, async () => {
-    const entries = await loadFreshEntries();
-    await postLeaderboard(guild, channelId, sortedForDisplay(entries), client.user.id);
-  });
+  await postFromDatabase(guild, channelId, client.user.id);
   return true;
 }
 
@@ -396,13 +331,9 @@ async function handleNewPet(interaction) {
   const pet = { key, name, emojiId };
 
   try {
-    if (usingDb()) {
-      await highScoresDb.addPetToCatalog(pet);
-    } else {
-      await appendRow(process.env.PET_HIGHSCORES_SHEET_ID, PET_CATALOG_APPEND_RANGE, [key, name, emojiId]);
-    }
+    await highScoresDb.addPetToCatalog(pet);
   } catch (err) {
-    console.error(`[PetHighscore] Failed to add the pet to ${usingDb() ? 'the database' : 'the Pets sheet tab'}:`, err);
+    console.error('[PetHighscore] Failed to add the pet to the database:', err);
     return interaction.editReply(`Error saving the new pet: ${err.message}`);
   }
 
@@ -435,8 +366,7 @@ module.exports = {
       emoji: 'the custom emoji, or its numeric ID',
     },
   },
-  requiredEnv: ['PET_HIGHSCORES_CHANNEL_ID'],
-  requiredEnvWithoutDatabase: ['PET_HIGHSCORES_SHEET_ID', 'GOOGLE_SERVICE_ACCOUNT_JSON'],
+  requiredEnv: ['DATABASE_URL', 'PET_HIGHSCORES_CHANNEL_ID'],
   refreshLeaderboard,
   PET_MASTER_THRESHOLD,
 
@@ -543,7 +473,6 @@ module.exports = {
 
     await ensurePetsLoaded();
 
-    const sheetId = process.env.PET_HIGHSCORES_SHEET_ID;
     const channelId = process.env.PET_HIGHSCORES_CHANNEL_ID;
 
     const targetUser = interaction.options.getUser('user', true);
@@ -588,67 +517,26 @@ module.exports = {
       const displayName = member?.displayName || targetUser.username;
 
       // Changes the pets in one transaction, then reposts the leaderboard unless nothing changed.
-      const changeInDatabase = async () => {
-        const result = await highScoresDb.changeMemberPets({
-          discordId: targetUser.id,
-          displayName,
-          joinedAt: member?.joinedAt ?? null,
-          petKeys: pets.map(p => p.key),
-          action: subcommand,
-          byDiscordId: interaction.user.id,
-        });
-        const toApply = pets.filter(p => result.applied.includes(p.key));
-        const skipped = pets.filter(p => result.skipped.includes(p.key));
-        if (toApply.length === 0) return { toApply, skipped, newKeys: result.petKeys, appliedNames: '', noOp: true };
+      const result = await highScoresDb.changeMemberPets({
+        discordId: targetUser.id,
+        displayName,
+        joinedAt: member?.joinedAt ?? null,
+        petKeys: pets.map(p => p.key),
+        action: subcommand,
+        byDiscordId: interaction.user.id,
+      });
+      const toApply = pets.filter(p => result.applied.includes(p.key));
+      const skipped = pets.filter(p => result.skipped.includes(p.key));
+      const newKeys = result.petKeys;
+      const appliedNames = toApply.map(p => p.name).join(', ');
+      const noOp = toApply.length === 0;
+      if (!noOp) {
         try {
           await postFromDatabase(guild, channelId, interaction.client.user.id);
         } catch (err) {
           console.error('[PetHighscore] Failed to update leaderboard post after a pet edit:', err.message);
         }
-        return { toApply, skipped, newKeys: result.petKeys, appliedNames: toApply.map(p => p.name).join(', '), noOp: false };
-      };
-
-      const { toApply, skipped, newKeys, appliedNames, noOp } = usingDb() ? await changeInDatabase() : await withFileLock(PET_LOCK_KEY, async () => {
-        const entries = await loadFreshEntries();
-        const existingIndex = entries.findIndex(e => e.discordId === targetUser.id);
-        const existing = existingIndex === -1 ? null : entries[existingIndex];
-        const currentKeys = existing ? existing.petKeys : [];
-
-        const toApply = subcommand === 'add'
-          ? pets.filter(p => !currentKeys.includes(p.key))
-          : pets.filter(p => currentKeys.includes(p.key));
-        const skipped = subcommand === 'add'
-          ? pets.filter(p => currentKeys.includes(p.key))
-          : pets.filter(p => !currentKeys.includes(p.key));
-
-        if (toApply.length === 0) {
-          return { toApply, skipped, newKeys: currentKeys, appliedNames: '', noOp: true };
-        }
-
-        const newKeys = subcommand === 'add'
-          ? sortPetKeys([...currentKeys, ...toApply.map(p => p.key)])
-          : sortPetKeys(currentKeys.filter(k => !toApply.some(p => p.key === k)));
-
-        const rowValues = [targetUser.id, displayName, newKeys.join(', ')];
-
-        if (existing) {
-          await updateRow(sheetId, `${SHEET_TAB}!A${existing.rowNumber}:C${existing.rowNumber}`, rowValues);
-          entries[existingIndex] = { ...existing, displayName, petKeys: newKeys, count: newKeys.length };
-        } else {
-          const appendResult = await appendRow(sheetId, APPEND_RANGE, rowValues);
-          const rowNumber = parseAppendedRowNumber(appendResult?.updates?.updatedRange);
-          entries.push({ discordId: targetUser.id, displayName, petKeys: newKeys, count: newKeys.length, rowNumber });
-        }
-
-        // Inside the lock so posts land in write order. A failed post doesn't abort the command.
-        try {
-          await postLeaderboard(guild, channelId, sortedForDisplay(entries), interaction.client.user.id);
-        } catch (err) {
-          console.error('[PetHighscore] Failed to update leaderboard post after a pet edit:', err.message);
-        }
-
-        return { toApply, skipped, newKeys, appliedNames: toApply.map(p => p.name).join(', '), noOp: false };
-      });
+      }
 
       if (noOp) {
         const names = skipped.map(p => `**${p.name}**`).join(', ');
@@ -679,10 +567,8 @@ module.exports = {
         );
       }
 
-      if (usingDb()) {
-        const before = subcommand === 'add' ? newKeys.length - toApply.length : newKeys.length + toApply.length;
-        await recordMasterMilestone(targetUser.id, before, newKeys.length, interaction.user.id);
-      }
+      const before = subcommand === 'add' ? newKeys.length - toApply.length : newKeys.length + toApply.length;
+      await recordMasterMilestone(targetUser.id, before, newKeys.length, interaction.user.id);
       const roleChange = await syncMasterRole(guild, targetUser.id, newKeys.length);
 
       const verb = subcommand === 'add' ? 'Added' : 'Removed';

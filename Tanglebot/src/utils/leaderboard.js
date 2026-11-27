@@ -75,7 +75,7 @@ async function findPreviousLeaderboardMessages(channel, botUserId, isOwnLeaderbo
 //   dataFile                                     data/ JSON file storing the last-posted message IDs
 //   logPrefix                                    tag for console logs, e.g. "PetHighscore"
 //   isOwnLeaderboardMessage(firstEmbed) -> bool   identifies this leaderboard's own post during recovery
-//   onDisplayNameChange(entry) -> Promise         (optional) saves a refreshed display name back to the sheet or database
+//   onDisplayNameChange(entry) -> Promise         (optional) saves a refreshed display name to the database
 async function postLeaderboard(guild, channelId, entries, botUserId, options) {
   // One post at a time per leaderboard.
   return withFileLock(options.dataFile, () => postLeaderboardLocked(guild, channelId, entries, botUserId, options));

@@ -141,7 +141,7 @@ test('milestones previews unless confirmed, then saves, and explains what cannot
   assert.match(preview.replies.at(-1), /Preview \(nothing was saved\)/);
   assert.match(preview.replies.at(-1), /12 donation tier changes/);
   assert.match(preview.replies.at(-1), /4 Pet Master reached, 1 Pet Master lost/);
-  assert.match(preview.replies.at(-1), /9 tier\(s\) were held at the sheets import/);
+  assert.match(preview.replies.at(-1), /9 tier\(s\) were already held at a member's starting total/);
   assert.match(preview.replies.at(-1), /2 member\(s\) were already Pet Masters/);
   assert.match(preview.replies.at(-1), /Run again with confirm set to True/);
 

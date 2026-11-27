@@ -75,7 +75,7 @@ async function logCommand(interaction, outcome, deps) {
 }
 
 // A page of the log, newest first, plus how many rows match. Filters: discordId, command (starts
-// with, e.g. "migration" matches "migration import"), status.
+// with, e.g. "pethighscore" matches "pethighscore add"), status.
 async function queryLog({ discordId = null, command = null, status = null, limit = 10, offset = 0 } = {}, db = database.getPool()) {
   const where = [];
   const params = [];

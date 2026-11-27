@@ -96,12 +96,12 @@ test('runCommand logs a command that ran, one that threw, and one that reported 
     await runCommand(withReplies(interaction()), { execute: async () => {} });
     await runCommand(withReplies(interaction()), { execute: async () => { throw new Error('exploded'); } });
     const selfHandled = withReplies(interaction());
-    await runCommand(selfHandled, { execute: async i => { i.commandError = new Error('sheet unreachable'); } });
+    await runCommand(selfHandled, { execute: async i => { i.commandError = new Error('store unreachable'); } });
   } finally {
     fs.appendFileSync = original;
     if (saved !== undefined) process.env.DATABASE_URL = saved;
   }
-  assert.deepEqual(lines.map(l => [l.status, l.error]), [['ok', null], ['error', 'exploded'], ['error', 'sheet unreachable']]);
+  assert.deepEqual(lines.map(l => [l.status, l.error]), [['ok', null], ['error', 'exploded'], ['error', 'store unreachable']]);
   assert.equal(replies.length, 1);
   assert.match(replies[0].content, /Something went wrong/);
 });

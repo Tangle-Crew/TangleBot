@@ -89,7 +89,7 @@ function donationEmbed(history, { subject, page }) {
     const who = subject ? '' : `**${name(r.member_name)}** `;
     const by = r.by_name ? ` by ${name(r.by_name)}` : '';
     const what = r.source === 'import'
-      ? `${who}imported at ${fmt(r.total_after)} GP`
+      ? `${who}starting total ${fmt(r.total_after)} GP`
       : `${who}${signed(r.change_gp)} → ${fmt(r.total_after)} GP${by}`;
     return `${day(r.created_at)} ${what}${r.source === 'manual' ? ' (manual)' : ''}`;
   });
@@ -127,7 +127,7 @@ function petEmbed(history, { subject, page }) {
       subject ? `Pets now: **${fmt(history.owned)}**` : `Pets owned across the clan: **${fmt(history.owned)}**`,
       '',
       ...(lines.length ? lines : ['No pet changes recorded.']),
-      ...(subject ? ['', '_Pets owned before the sheets were imported have no date._'] : []),
+      ...(subject ? ['', '_Pets owned before the bot kept a log have no date._'] : []),
     ].join('\n'))
     .setFooter({ text: `Page ${page} of ${pagesOf(history.total)} · ${fmt(history.total)} change${history.total === 1 ? '' : 's'}` })
     .setColor(DEFAULT_EMBED_COLOR);
