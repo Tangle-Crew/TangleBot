@@ -206,7 +206,7 @@ Owner-only. Keeps the database's list of the clan's OSRS accounts, and their his
 | `milestones` | Rebuilds donation tier and Pet Master [milestones](#database) from `donation_log` and `pet_log`. A preview unless `confirm` is True. Safe to run again: milestones already saved are never added twice. | Database only, when confirmed |
 | `verify` | Compares the saved accounts with the WOM group: missing, wrongly ranked, renamed, or no longer in the group. | Nothing |
 
-WOM is only read, one call every 3.5 seconds (0.7 with `WOM_API_KEY`) to stay inside its rate limit. Only one sync runs at a time. Running `sync` again is safe: events already saved are not added twice.
+WOM is only read, one call every 3.5 seconds (0.7 with `WOM_API_KEY`) to stay inside its rate limit. All of the bot's WOM calls also share one limit of 18 a minute (90 with a key), so features running at the same time never go over it together. Only one sync runs at a time. Running `sync` again is safe: events already saved are not added twice.
 
 ---
 

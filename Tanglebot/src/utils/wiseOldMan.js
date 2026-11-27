@@ -1,16 +1,55 @@
 const { EventEmitter } = require('events');
 const { WOMClient } = require('@wise-old-man/utils');
+const { sleep } = require('./common');
 
 const WOM_ASSETS_BASE_URL = 'https://raw.githubusercontent.com/wise-old-man/wise-old-man/master/app/public/img';
 const FALLBACK_IMAGE_URL = `${WOM_ASSETS_BASE_URL}/fallback-icon.png`;
 
+// WOM allows 20 requests a minute, 100 with an API key, shared by every feature. These leave a margin.
+const WOM_CALLS_PER_MINUTE = process.env.WOM_API_KEY ? 90 : 18;
+
+// Lets at most `limit` calls start in any `windowMs`; a call over it waits for the oldest to age out.
+function createRateLimiter({ limit, windowMs = 60_000, now = Date.now, wait = sleep }) {
+  const started = [];
+  let queue = Promise.resolve();
+  return function take() {
+    const turn = queue.then(async () => {
+      for (;;) {
+        const t = now();
+        while (started.length && t - started[0] >= windowMs) started.shift();
+        if (started.length < limit) {
+          started.push(t);
+          return;
+        }
+        await wait(windowMs - (t - started[0]));
+      }
+    });
+    queue = turn.catch(() => {});
+    return turn;
+  };
+}
+
+const takeWomSlot = createRateLimiter({ limit: WOM_CALLS_PER_MINUTE });
+
+// The client with every method call waiting for a slot under the shared limit.
+function rateLimited(target) {
+  return new Proxy(target, {
+    get(obj, key) {
+      const value = obj[key];
+      if (typeof value === 'function') return (...args) => takeWomSlot().then(() => value.apply(obj, args));
+      if (value && typeof value === 'object') return rateLimited(value);
+      return value;
+    },
+  });
+}
+
 let client = null;
 function womClient() {
   if (!client) {
-    client = new WOMClient({
+    client = rateLimited(new WOMClient({
       apiKey: process.env.WOM_API_KEY || undefined,
       userAgent: 'tanglebot',
-    });
+    }));
   }
   return client;
 }
@@ -143,6 +182,7 @@ function competitionUrl(id) {
 }
 
 module.exports = {
+  createRateLimiter,
   resolveMetricImageUrl,
   createGroupCompetition,
   getAllGroupCompetitions,
