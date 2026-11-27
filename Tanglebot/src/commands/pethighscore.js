@@ -1,7 +1,7 @@
 const { SlashCommandBuilder, MessageFlags, EmbedBuilder } = require('discord.js');
 const { DEFAULT_EMBED_COLOR } = require('../utils/embedColor');
 const { mentionOrName, postLeaderboard: postLeaderboardShared } = require('../utils/leaderboard');
-const { notifyAdminLog } = require('../utils/roleMenu');
+const { notifyAdminLog } = require('../utils/adminLog');
 const { withFileLock, intEnv } = require('../utils/db');
 const highScoresDb = require('../utils/highScoresDb');
 const { databaseConfigured } = require('../utils/commandAvailability');

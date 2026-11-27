@@ -2,7 +2,7 @@ const database = require('./database');
 const wiseOldMan = require('./wiseOldMan');
 const { databaseConfigured } = require('./commandAvailability');
 const competitionSync = require('./competitionSync');
-const { notifyAdminLog } = require('./roleMenu');
+const { notifyAdminLog } = require('./adminLog');
 const { intEnv } = require('./db');
 
 // Copies the clan's Wise Old Man (WOM) group into the accounts and member_events tables: who is in

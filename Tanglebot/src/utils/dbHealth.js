@@ -104,7 +104,7 @@ function createMonitor({
   client = null,
   configured = databaseConfigured(),
   query = () => withTimeout(database.getPool().query('select 1'), 'Database check', CHECK_TIMEOUT_MS),
-  notify = (...args) => require('./roleMenu').notifyAdminLog(...args),
+  notify = (...args) => require('./adminLog').notifyAdminLog(...args),
   writeHealth = writeHealthFile,
   now = () => Date.now(),
   settings = healthSettings(),

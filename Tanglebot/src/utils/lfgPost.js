@@ -49,7 +49,6 @@ const {
 const {
   ensureRoleExists,
   lfgRoleName,
-  notifyAdminLog,
   scheduleReplyCleanup,
   isAlreadyGoneError,
   replyEphemeral,
@@ -57,6 +56,7 @@ const {
   isValidColor,
   isValidEmoji,
 } = require('./roleMenu');
+const { notifyAdminLog } = require('./adminLog');
 
 // Forum Channel that /lfg-post creates its threads in.
 const FORUM_CHANNEL_ID = process.env.LFG_FORUM_CHANNEL_ID;

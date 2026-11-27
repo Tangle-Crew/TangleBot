@@ -2,7 +2,7 @@ const { EmbedBuilder } = require('discord.js');
 const { DEFAULT_EMBED_COLOR } = require('./embedColor');
 const { describeCommands, buildCommandEmbeds, packEmbeds, BLANK, MAX_FIELD_VALUE } = require('./commandDocs');
 const { syncStaticMessages } = require('./staticMessages');
-const { notifyAdminLog } = require('./roleMenu');
+const { notifyAdminLog } = require('./adminLog');
 
 const STATE_KEY = 'admin-commands-post.json';
 

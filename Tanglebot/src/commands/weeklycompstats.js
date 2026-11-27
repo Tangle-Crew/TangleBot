@@ -27,7 +27,7 @@ const {
 } = require('../utils/womMetrics');
 const { DEFAULT_EMBED_COLOR } = require('../utils/embedColor');
 const { truncate, discordTimestamp, withTimeout } = require('../utils/db');
-const { notifyAdminLog } = require('../utils/roleMenu');
+const { notifyAdminLog } = require('../utils/adminLog');
 
 const PAGE_SIZE = 10;
 // WOM allows 20 requests a minute (100 with a key). A load costs 1 + 1 per running competition,

@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const state = require('./state');
-const { isAlreadyGoneError, notifyAdminLog } = require('./roleMenu');
+const { isAlreadyGoneError } = require('./roleMenu');
+const { notifyAdminLog } = require('./adminLog');
 
 function hashOf(payloads) {
   return crypto.createHash('sha256').update(JSON.stringify(payloads)).digest('hex');

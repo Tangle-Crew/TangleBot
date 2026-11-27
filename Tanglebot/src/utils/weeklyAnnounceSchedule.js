@@ -1,6 +1,6 @@
 const { AttachmentBuilder, ChannelType, escapeMarkdown } = require('discord.js');
 const { getJob, listPendingJobs, updateJob, buildPost } = require('./weeklyAnnounce');
-const { notifyAdminLog } = require('./roleMenu');
+const { notifyAdminLog } = require('./adminLog');
 const { discordTimestamp, truncate } = require('./db');
 
 // setTimeout's longest delay (about 24.8 days); longer waits are re-armed when it fires.

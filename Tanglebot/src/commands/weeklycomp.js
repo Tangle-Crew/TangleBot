@@ -10,7 +10,7 @@ const {
 } = require('discord.js');
 const { WOM_METRICS, findMetric, shortMetricName, metricCategory } = require('../utils/womMetrics');
 const { resolveMetricImageUrl, createGroupCompetition } = require('../utils/wiseOldMan');
-const { notifyAdminLog } = require('../utils/roleMenu');
+const { notifyAdminLog } = require('../utils/adminLog');
 const { clearStandingsCache } = require('./weeklycompstats');
 
 const TEMPLAR_ROLE_ID = process.env.TEMPLAR_ROLE_ID;

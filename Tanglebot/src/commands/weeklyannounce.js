@@ -40,7 +40,7 @@ const {
 } = require('../utils/weeklyAnnounce');
 const { discordTimestamp, truncate } = require('../utils/db');
 const { DEFAULT_EMBED_COLOR } = require('../utils/embedColor');
-const { notifyAdminLog } = require('../utils/roleMenu');
+const { notifyAdminLog } = require('../utils/adminLog');
 const { scheduleJob, unscheduleJob } = require('../utils/weeklyAnnounceSchedule');
 
 const TEMPLAR_ROLE_ID = process.env.TEMPLAR_ROLE_ID;

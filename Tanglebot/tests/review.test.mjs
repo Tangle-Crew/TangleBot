@@ -360,7 +360,7 @@ test('titles split before their metrics, whichever order WOM lists them in', () 
 
 const loadWeeklyComp = (options = {}) => load('commands/weeklycomp.js', {
   ...options,
-  mocks: { '../utils/roleMenu': { notifyAdminLog() {} }, './weeklycompstats': { clearStandingsCache() {} },
+  mocks: { '../utils/adminLog': { notifyAdminLog() {} }, './weeklycompstats': { clearStandingsCache() {} },
     '../utils/wiseOldMan': {}, ...options.mocks },
 });
 const metricChoice = (value, name) => ({ value, name });
@@ -423,7 +423,7 @@ test('a multi-metric competition shows its per-metric breakdown without the tota
   assert.equal(JSON.stringify([...breakdown.get(1)]), JSON.stringify([['attack', 600], ['strength', 400]]));
   assert.equal(JSON.stringify([...breakdown.get(2)]), JSON.stringify([['attack', 0], ['strength', 500]]));
 
-  const stats = load('commands/weeklycompstats.js', { mocks: { '../utils/roleMenu': { notifyAdminLog() {} }, '../utils/embedColor': { DEFAULT_EMBED_COLOR: 0 } } });
+  const stats = load('commands/weeklycompstats.js', { mocks: { '../utils/adminLog': { notifyAdminLog() {} }, '../utils/embedColor': { DEFAULT_EMBED_COLOR: 0 } } });
   const competition = attackStrength();
   const ranked = wom.rankParticipants(competition);
   const [board] = stats.buildBoards([{ competition, ranked, total: 1500, breakdown }]);
