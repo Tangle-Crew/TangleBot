@@ -64,6 +64,16 @@ function intEnv(name, fallback) {
   return Number.isNaN(value) ? fallback : value;
 }
 
+// 1234567 -> "1,234,567".
+function formatNumber(n) {
+  return Number(n).toLocaleString('en-US');
+}
+
+// Resolves after ms.
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 // A Discord timestamp, shown in each viewer's timezone. Styles: t, T, d, D, f, F, R.
 function discordTimestamp(date, style) {
   return `<t:${Math.floor(new Date(date).getTime() / 1000)}:${style}>`;
@@ -89,4 +99,6 @@ module.exports = {
   intEnv,
   discordTimestamp,
   withTimeout,
+  formatNumber,
+  sleep,
 };

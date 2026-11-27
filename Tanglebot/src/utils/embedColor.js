@@ -13,4 +13,8 @@ function parseEmbedColor(raw) {
 
 const DEFAULT_EMBED_COLOR = parseEmbedColor(process.env.DEFAULT_EMBED_COLOR);
 
-module.exports = { DEFAULT_EMBED_COLOR };
+// Alerts and failures (red), and recoveries and OK states (green).
+const ALERT_COLOR = 0xed4245;
+const SUCCESS_COLOR = 0x2e7d32;
+
+module.exports = { DEFAULT_EMBED_COLOR, ALERT_COLOR, SUCCESS_COLOR };

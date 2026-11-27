@@ -3,7 +3,8 @@ const wiseOldMan = require('./wiseOldMan');
 const { databaseConfigured } = require('./commandAvailability');
 const competitionSync = require('./competitionSync');
 const { notifyAdminLog } = require('./adminLog');
-const { intEnv } = require('./common');
+const { intEnv, discordTimestamp, sleep } = require('./common');
+const { SUCCESS_COLOR } = require('./embedColor');
 
 // Copies the clan's Wise Old Man (WOM) group into the accounts and member_events tables: who is in
 // the group with which rank, plus the join, leave, rank change and name change history.
@@ -20,7 +21,6 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const ACTIVITY_MARGIN_MS = DAY_MS;
 const NAME_CHANGE_MARGIN_MS = 30 * DAY_MS;
 
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const toDate = value => (value ? new Date(value) : null);
 const time = value => new Date(value).getTime();
 
@@ -295,7 +295,6 @@ function syncIntervalMinutes() {
 // A failing automatic sync alerts the admin log once, repeats at most this often while it keeps
 // failing, and says when it works again.
 const ALERT_REPEAT_MS = 6 * 60 * 60 * 1000;
-const RECOVERED_COLOR = 0x2e7d32;
 
 // What the automatic sync has done: when it started failing, when it last alerted, its last result.
 const automatic = { failingSince: null, lastAlertAt: 0, last: null, announcedWaiting: false };
@@ -310,7 +309,7 @@ function resetAutomaticState() {
   Object.assign(automatic, { failingSince: null, lastAlertAt: 0, last: null, announcedWaiting: false });
 }
 
-const stamp = date => `<t:${Math.floor(new Date(date).getTime() / 1000)}:R>`;
+const stamp = date => discordTimestamp(date, 'R');
 
 // One automatic run: syncs the members, then the finished competitions. A failure alerts the admin
 // log (not while a manual sync is running, which is not a failure). deps replace the real work.
@@ -352,7 +351,7 @@ async function automaticRun({ client = null, groupId, intervalMinutes, deps = {}
     if (automatic.failingSince) {
       const since = automatic.failingSince;
       automatic.failingSince = null;
-      await d.notify(client, '✅ Member sync recovered', `The automatic Wise Old Man sync is working again. It had been failing since ${stamp(since)}.`, [], RECOVERED_COLOR);
+      await d.notify(client, '✅ Member sync recovered', `The automatic Wise Old Man sync is working again. It had been failing since ${stamp(since)}.`, [], SUCCESS_COLOR);
     }
   } catch (err) {
     if (err.code === 'SYNC_RUNNING') return;

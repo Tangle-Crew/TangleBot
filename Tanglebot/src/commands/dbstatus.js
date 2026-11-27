@@ -1,15 +1,14 @@
 const { SlashCommandBuilder, MessageFlags, EmbedBuilder } = require('discord.js');
 const dbStatus = require('../utils/dbStatus');
 const dbHealth = require('../utils/dbHealth');
-const { withTimeout, discordTimestamp } = require('../utils/common');
+const { withTimeout, discordTimestamp, formatNumber } = require('../utils/common');
 const { refuseWithoutRole } = require('../utils/roleCheck');
+const { ALERT_COLOR, SUCCESS_COLOR } = require('../utils/embedColor');
 
 const CONNECT_TIMEOUT_MS = 5000;
 const COUNTS_TIMEOUT_MS = 10_000;
-const OK_COLOR = 0x2e7d32;
-const DOWN_COLOR = 0xed4245;
 
-const fmt = n => Number(n).toLocaleString('en-US');
+const fmt = formatNumber;
 const ago = ms => discordTimestamp(ms, 'R');
 
 function connectionField(info) {
@@ -98,7 +97,7 @@ module.exports = {
     } catch (err) {
       console.error('[DbStatus] Connection check failed:', err.message);
       interaction.commandError = err; // for the command log
-      embed.setColor(DOWN_COLOR).addFields(
+      embed.setColor(ALERT_COLOR).addFields(
         { name: 'Connection', value: `**Not reachable:** ${dbHealth.describeDbError(err)}\n\`${String(err.message).slice(0, 300)}\`` },
         { name: 'Health monitor', value: monitor },
         { name: 'Connection pool', value: pool },
@@ -115,7 +114,7 @@ module.exports = {
       data = `Could not read the row counts: ${String(err.message).slice(0, 300)}`;
     }
 
-    embed.setColor(interaction.commandError ? DOWN_COLOR : OK_COLOR).addFields(
+    embed.setColor(interaction.commandError ? ALERT_COLOR : SUCCESS_COLOR).addFields(
       { name: 'Connection', value: connectionField(info) },
       { name: 'Migrations', value: migrationsField(info) },
       { name: 'Health monitor', value: monitor },

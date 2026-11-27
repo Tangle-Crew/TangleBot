@@ -1,5 +1,6 @@
 const database = require('./database');
 const wiseOldMan = require('./wiseOldMan');
+const { sleep } = require('./common');
 
 // Copies the clan's finished WOM competitions and their results into the competitions and
 // competition_results tables. WOM is only read. A competition is saved once it has ended.
@@ -7,7 +8,6 @@ const wiseOldMan = require('./wiseOldMan');
 const CALL_GAP_MS = process.env.WOM_API_KEY ? 700 : 3500;
 const DEFAULT_LIMIT = 120;
 const INSERT_BATCH = 1000;
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 let running = false;
 

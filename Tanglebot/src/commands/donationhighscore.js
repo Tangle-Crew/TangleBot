@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, MessageFlags, EmbedBuilder } = require('discord.js');
 const { DEFAULT_EMBED_COLOR } = require('../utils/embedColor');
-const { withFileLock, intEnv } = require('../utils/common');
+const { withFileLock, intEnv, formatNumber } = require('../utils/common');
 const { mentionOrName, postLeaderboard: postLeaderboardShared } = require('../utils/leaderboard');
 const { notifyAdminLog } = require('../utils/adminLog');
 const highScoresDb = require('../utils/highScoresDb');
@@ -71,7 +71,7 @@ function parseDonationAmount(raw) {
 }
 
 function formatGP(amount) {
-  return amount.toLocaleString('en-US');
+  return formatNumber(amount);
 }
 
 const COINS_EMOJI = '<:coins:1534943128145105158>';

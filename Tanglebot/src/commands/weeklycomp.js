@@ -12,6 +12,7 @@ const { WOM_METRICS, findMetric, shortMetricName, metricCategory } = require('..
 const { resolveMetricImageUrl, createGroupCompetition } = require('../utils/wiseOldMan');
 const { notifyAdminLog } = require('../utils/adminLog');
 const { clearStandingsCache } = require('./weeklycompstats');
+const { discordTimestamp } = require('../utils/common');
 
 const TEMPLAR_ROLE_ID = process.env.TEMPLAR_ROLE_ID;
 const DISCORD_GREEN = 0x1a5c2e;
@@ -262,7 +263,7 @@ module.exports = {
 
     // WOM and Discord both reject a start in the past, so catch it before anything is created.
     if (startsAt <= new Date()) {
-      return reject(`The start time (<t:${Math.floor(startsAt.getTime() / 1000)}:F>) has already passed. Pick a time in the future.`);
+      return reject(`The start time (${discordTimestamp(startsAt, 'F')}) has already passed. Pick a time in the future.`);
     }
 
     const endsAt = new Date(startsAt.getTime() + durationDays * 24 * 60 * 60 * 1000);
@@ -290,8 +291,8 @@ module.exports = {
       .setTitle(`Confirm: ${eventTitle}`)
       .setDescription(
         `**Metric${metrics.length === 1 ? '' : 's'}:** ${metricsLabel}\n` +
-        `**Starts:** <t:${Math.floor(startsAt.getTime() / 1000)}:F>\n` +
-        `**Ends:** <t:${Math.floor(endsAt.getTime() / 1000)}:F>\n` +
+        `**Starts:** ${discordTimestamp(startsAt, 'F')}\n` +
+        `**Ends:** ${discordTimestamp(endsAt, 'F')}\n` +
         `**Duration:** ${durationDays} day${durationDays === 1 ? '' : 's'}\n\n` +
         `This creates a public Discord event and ${compsLabel}. Confirm?`
       );
@@ -378,8 +379,8 @@ module.exports = {
       .setTitle(`📅 ${eventTitle}`)
       .setDescription(
         `**Metric${metrics.length === 1 ? '' : 's'}:** ${metricsLabel}\n` +
-        `**Starts:** <t:${Math.floor(startsAt.getTime() / 1000)}:F>\n` +
-        `**Ends:** <t:${Math.floor(endsAt.getTime() / 1000)}:F>\n\n` +
+        `**Starts:** ${discordTimestamp(startsAt, 'F')}\n` +
+        `**Ends:** ${discordTimestamp(endsAt, 'F')}\n\n` +
         `[Discord Event](${event.url})\n` +
         `[${eventTitle}](${url})`
       )

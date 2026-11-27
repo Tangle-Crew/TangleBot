@@ -1,6 +1,6 @@
 const { EmbedBuilder, escapeMarkdown } = require('discord.js');
 const database = require('./database');
-const { discordTimestamp, truncate } = require('./common');
+const { discordTimestamp, truncate, formatNumber } = require('./common');
 const { DEFAULT_EMBED_COLOR } = require('./embedColor');
 
 // The donation and pet history from donation_log and pet_log, for one member or the whole clan,
@@ -8,7 +8,7 @@ const { DEFAULT_EMBED_COLOR } = require('./embedColor');
 
 const PAGE_SIZE = 10;
 const MONTHS_SHOWN = 6;
-const fmt = n => n.toLocaleString('en-US');
+const fmt = formatNumber;
 const day = date => discordTimestamp(date, 'd');
 const name = row => escapeMarkdown(row || 'unknown');
 const signed = n => `${n >= 0 ? '+' : '-'}${fmt(Math.abs(n))}`;

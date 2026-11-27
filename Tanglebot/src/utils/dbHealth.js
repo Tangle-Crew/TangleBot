@@ -6,11 +6,10 @@ const database = require('./database');
 const { databaseConfigured } = require('./commandAvailability');
 const { DATA_DIR, withTimeout, discordTimestamp } = require('./common');
 const { connectionTarget } = require('./dbStatus');
+const { ALERT_COLOR, SUCCESS_COLOR } = require('./embedColor');
 
 const CHECK_TIMEOUT_MS = 5000;
 const CHECK_NOW_MIN_GAP_MS = 10_000;
-const DOWN_COLOR = 0xed4245;
-const RECOVERED_COLOR = 0x2e7d32;
 const HEALTH_FILE = 'health.json';
 const AFFECTED = '/donationhighscore, /pethighscore, /refreshboards, /history, /profile, /commandlog, /memberdata and the automatic WOM sync, and the command log';
 
@@ -146,7 +145,7 @@ function createMonitor({
         { name: 'Database', value: `\`${where}\``, inline: true },
         { name: 'Not working until it is back', value: AFFECTED },
       ],
-      DOWN_COLOR,
+      ALERT_COLOR,
       [],
       ping()
     );
@@ -176,7 +175,7 @@ function createMonitor({
             '✅ Database reachable again',
             `The database is answering again. It was unreachable for ${formatDuration(at - state.downSince)}, since ${discordTimestamp(state.downSince, 'f')}.`,
             [],
-            RECOVERED_COLOR
+            SUCCESS_COLOR
           );
         }
       }

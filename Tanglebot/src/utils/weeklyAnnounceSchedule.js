@@ -1,7 +1,7 @@
 const { AttachmentBuilder, ChannelType, escapeMarkdown } = require('discord.js');
 const { getJob, listPendingJobs, updateJob, buildPost } = require('./weeklyAnnounce');
 const { notifyAdminLog } = require('./adminLog');
-const { discordTimestamp, truncate } = require('./common');
+const { discordTimestamp, truncate, sleep } = require('./common');
 
 // setTimeout's longest delay (about 24.8 days); longer waits are re-armed when it fires.
 const MAX_TIMEOUT_MS = 2 ** 31 - 1;
@@ -22,7 +22,6 @@ const LATE_COLOR = 0xe67e22;
 
 const timers = new Map(); // job ID -> timeout
 
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function messageLink(guildId, channelId, messageId) {
   return `https://discord.com/channels/${guildId}/${channelId}/${messageId}`;

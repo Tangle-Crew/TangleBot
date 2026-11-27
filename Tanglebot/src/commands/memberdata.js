@@ -6,10 +6,11 @@ const donationHighscore = require('./donationhighscore');
 const petHighscore = require('./pethighscore');
 const { codeBlock } = require('../utils/discordText');
 const { refuseWithoutRole } = require('../utils/roleCheck');
+const { formatNumber } = require('../utils/common');
 
 const OWNER_ROLE_ID = process.env.OWNER_ROLE_ID;
 const MAX_DIFFERENCES = 15;
-const fmt = n => n.toLocaleString('en-US');
+const fmt = formatNumber;
 
 const EVENT_LABELS = {
   joined: 'joined the clan', left: 'left the clan', rank_changed: 'rank changes', name_changed: 'name changes',

@@ -9,7 +9,7 @@ const {
   PermissionFlagsBits,
 } = require('discord.js');
 const axios = require('axios');
-const { truncate, hasAnyRole } = require('./common');
+const { truncate, hasAnyRole, discordTimestamp } = require('./common');
 const { readState, writeState } = require('./state');
 const honeypotLog = require('./honeypotLog');
 
@@ -407,13 +407,13 @@ async function handleHoneypotButtonInteraction(interaction) {
     details,
   });
 
-  const resolvedAtSeconds = Math.floor(Date.now() / 1000);
+  const resolvedAt = Date.now();
   const actionField = {
     name: 'Action Taken',
     value: [
       `**${ACTION_LABELS[action]}**`,
       `By: ${interaction.user} (${interaction.user.tag})`,
-      `When: <t:${resolvedAtSeconds}:F> (<t:${resolvedAtSeconds}:R>)`,
+      `When: ${discordTimestamp(resolvedAt, 'F')} (${discordTimestamp(resolvedAt, 'R')})`,
       resultText,
     ].join('\n'),
   };

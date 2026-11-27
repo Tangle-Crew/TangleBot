@@ -38,8 +38,8 @@ const {
   announcementParts,
   buildPost,
 } = require('../utils/weeklyAnnounce');
-const { discordTimestamp, truncate } = require('../utils/common');
-const { DEFAULT_EMBED_COLOR } = require('../utils/embedColor');
+const { discordTimestamp, truncate, formatNumber } = require('../utils/common');
+const { DEFAULT_EMBED_COLOR, ALERT_COLOR } = require('../utils/embedColor');
 const { notifyAdminLog } = require('../utils/adminLog');
 const { scheduleJob, unscheduleJob } = require('../utils/weeklyAnnounceSchedule');
 
@@ -54,7 +54,6 @@ const CHANNEL_ID = process.env.WEEKLY_ANNOUNCE_CHANNEL_ID?.trim() || null;
 const ID_PREFIX = 'weeklyannounce';
 // The panel's side stripe turns amber once the announcements are over MESSAGE_LIMIT.
 const OVER_LIMIT_COLOR = 0xf0a020;
-const BLOCKED_COLOR = 0xed4245;
 const TITLE_MAX = 80;
 // Discord lets a Preview press remove its private messages for this long.
 const PREVIEW_CLEANUP_WINDOW_MS = 15 * 60 * 1000;
@@ -98,7 +97,7 @@ function isTemplar(member) {
 }
 
 function plural(count, word) {
-  return `${count.toLocaleString('en-US')} ${word}${count === 1 ? '' : 's'}`;
+  return `${formatNumber(count)} ${word}${count === 1 ? '' : 's'}`;
 }
 
 // The permissions from SEND_PERMISSIONS the bot is missing in channel, by name.
@@ -161,7 +160,7 @@ function buildPanel(draft) {
   const { announcements } = draft;
   const length = joinAnnouncements(announcements).length;
   const overLimit = length > MESSAGE_LIMIT;
-  const counter = `${length.toLocaleString('en-US')} / ${MESSAGE_LIMIT.toLocaleString('en-US')} characters`;
+  const counter = `${formatNumber(length)} / ${formatNumber(MESSAGE_LIMIT)} characters`;
 
   const container = new ContainerBuilder()
     .setAccentColor(overLimit ? OVER_LIMIT_COLOR : DEFAULT_EMBED_COLOR)
@@ -245,7 +244,7 @@ function buildTextModal(draftId, index, text) {
 }
 
 function formatCount(count) {
-  return count.toLocaleString('en-US');
+  return formatNumber(count);
 }
 
 // Who the post pings, warning when the bot can't: @everyone, @here and roles that aren't
@@ -327,7 +326,7 @@ function buildChecklist(draft, post, channel, { withButtons = true } = {}) {
 
   const acceptLabel = parts?.length === 2 ? 'Accept and send announcements as 2 messages' : 'Accept';
   const container = new ContainerBuilder()
-    .setAccentColor(blocked ? BLOCKED_COLOR : parts?.length === 2 ? OVER_LIMIT_COLOR : DEFAULT_EMBED_COLOR)
+    .setAccentColor(blocked ? ALERT_COLOR : parts?.length === 2 ? OVER_LIMIT_COLOR : DEFAULT_EMBED_COLOR)
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')));
   if (withButtons) {
     container.addActionRowComponents(new ActionRowBuilder().addComponents(

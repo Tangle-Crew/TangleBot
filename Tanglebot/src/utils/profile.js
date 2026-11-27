@@ -1,13 +1,13 @@
 const { EmbedBuilder } = require('discord.js');
 const database = require('./database');
-const { discordTimestamp, truncate } = require('./common');
+const { discordTimestamp, truncate, formatNumber } = require('./common');
 const { DEFAULT_EMBED_COLOR } = require('./embedColor');
 
 // Everything the database knows about one person (by Discord ID) or one OSRS account, and the
 // embeds that show it. Read only.
 
 const FIELD_MAX = 1024;
-const fmt = n => n.toLocaleString('en-US');
+const fmt = formatNumber;
 const day = date => discordTimestamp(date, 'D');
 const field = (name, lines) => ({ name, value: truncate(lines.join('\n') || '-', FIELD_MAX) });
 
