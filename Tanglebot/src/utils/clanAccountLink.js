@@ -1,4 +1,4 @@
-const axios = require('axios');
+const http = require('./http');
 const { normalizeBaseUrl } = require('./baseUrl');
 const { logClanError, ClanCommandError } = require('./clanErrors');
 
@@ -45,7 +45,7 @@ async function callServiceRpc(name, body = {}, env = process.env) {
   }
 
   try {
-    const response = await axios.post(`${config.supabaseUrl}/rest/v1/rpc/${name}`, body, {
+    const response = await http.post(`${config.supabaseUrl}/rest/v1/rpc/${name}`, body, {
       timeout: 10_000,
       headers: {
         apikey: config.serviceRoleKey,

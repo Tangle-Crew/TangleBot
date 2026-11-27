@@ -28,7 +28,7 @@ class Builder {
   setFooter() { return this; }
 }
 // mocks: replacements by require() name; fastTimers: setTimeout waits 0 ms.
-function load(relative, { axios = {}, env = {}, logs = [], mocks = {}, fastTimers = false,
+function load(relative, { http = {}, env = {}, logs = [], mocks = {}, fastTimers = false,
   fetch = async () => { throw new Error('Unexpected network request'); } } = {}) {
   const cache = new Map();
   function requireFile(file) {
@@ -40,7 +40,7 @@ function load(relative, { axios = {}, env = {}, logs = [], mocks = {}, fastTimer
       ...(fastTimers ? { setTimeout: fn => setTimeout(fn, 0) } : {}),
       require: name => {
         if (name in mocks) return mocks[name];
-        if (name === 'axios') return axios;
+        if (name === './http' || name === '../utils/http') return http;
         if (name === '@wise-old-man/utils' || name === 'events') return nodeRequire(name);
         if (name === './common' || name === '../utils/common') return { readJson: () => ({}), writeJson() {}, withTimeout: promise => promise,
           truncate: (text, max) => (text.length > max ? `${text.slice(0, max - 1)}…` : text) };
@@ -150,7 +150,7 @@ test('time budget returns unprocessed members rather than false success', async 
 });
 
 test('blank website URL falls back to the absolute clan website', async () => {
-  const { getConfig, createAccountLinkChallenge } = load('utils/clanAccountLink.js', { axios: {
+  const { getConfig, createAccountLinkChallenge } = load('utils/clanAccountLink.js', { http: {
     post: async () => ({ data: { challenge_token: 'test', expires_at: '2026-10-03T20:00:00Z', resolved_rsn: 'Player', link_kind: 'primary' } }),
   } });
   for (const value of [undefined, '', '   ']) assert.equal(getConfig({ CLAN_WEBSITE_URL: value }).websiteUrl, 'https://tanglecrew.group');
@@ -163,7 +163,7 @@ test('blank website URL falls back to the absolute clan website', async () => {
 test('service errors are sanitized for users and secrets redacted from logs', async () => {
   const logs = [];
   const env = { SUPABASE_URL: 'https://example.test', SUPABASE_SERVICE_ROLE_KEY: 'super-secret-key' };
-  const { callServiceRpc } = load('utils/clanAccountLink.js', { env, logs, axios: {
+  const { callServiceRpc } = load('utils/clanAccountLink.js', { env, logs, http: {
     post: async () => { throw { response: { status: 401, data: { message: 'Invalid API key super-secret-key' } } }; },
   } });
   await assert.rejects(callServiceRpc('example'), error => {
@@ -187,7 +187,7 @@ test('all four roster commands require explicit true opt-in', () => {
 
 test('rank reviews default private but allow explicit public output', async () => {
   const env = { SUPABASE_URL: 'url', SUPABASE_SERVICE_ROLE_KEY: 'key' };
-  const command = load('commands/rankreview.js', { env, axios: { post: async () => ({ data: [] }) } });
+  const command = load('commands/rankreview.js', { env, http: { post: async () => ({ data: [] }) } });
   for (const [option, flags] of [[null, 64], [false, undefined], [true, 64]]) {
     let actual;
     await command.execute({ options: { getBoolean: () => option },
@@ -215,7 +215,7 @@ test('parser accepts phase aliases, partial names, and either identifier', () =>
 
 test('ordinary text chat never routes or replies, even with submission labels', async () => {
   let requests = 0;
-  const { handleSubmissionMessage } = load('utils/submissionIntake.js', { axios: {
+  const { handleSubmissionMessage } = load('utils/submissionIntake.js', { http: {
     get: async () => { requests++; throw new Error('Must not route ordinary chat'); },
   } });
   for (const content of ['Drop: rate is awful lol', 'Boss: is annoying', 'Item: looks nice', 'KC: 42']) {
@@ -229,7 +229,7 @@ test('ordinary text chat never routes or replies, even with submission labels', 
 test('intake still rejects multiple photos and forwards valid monster-only proof', async () => {
   const bodies = [];
   const { handleSubmissionMessage } = load('utils/submissionIntake.js', {
-    axios: { get: async () => ({ data: [{ event_id: 'event' }] }) },
+    http: { get: async () => ({ data: [{ event_id: 'event' }] }) },
     fetch: async (_, options) => { bodies.push(JSON.parse(options.body)); return { ok: true, text: async () => '{}' }; },
   });
   const config = { enabled: true, supabaseUrl: 'https://example.test', intakeUrl: 'https://example.test/intake', intakeSecret: 'test' };
@@ -257,7 +257,7 @@ test('link commands show actionable database errors and log each failure once', 
   for (const commandName of ['link', 'linkalt']) {
     for (const message of ['Link a primary account with /link before adding an alt.', 'That account is already linked to another Discord member. Contact an administrator.']) {
       const logs = [];
-      const command = load(`commands/${commandName}.js`, { env, logs, axios: {
+      const command = load(`commands/${commandName}.js`, { env, logs, http: {
         post: async () => { throw { response: { status: 400, data: { code: 'P0001', message } } }; },
       } });
       let reply;
@@ -275,7 +275,7 @@ test('link commands keep auth, server and unknown database errors private, loggi
   for (const [status, code, message] of [[401, 'P0001', 'Invalid API key'], [500, 'P0001', 'internal failure'],
     [400, 'P0001', 'Service role access is required.'], [400, '42P01', 'missing table'], [400, 'P0001', 'Unexpected internal database problem']]) {
     const logs = [];
-    const command = load('commands/link.js', { env, logs, axios: {
+    const command = load('commands/link.js', { env, logs, http: {
       post: async () => { throw { response: { status, data: { code, message } } }; },
     } });
     let reply;
@@ -289,7 +289,7 @@ test('link commands keep auth, server and unknown database errors private, loggi
 });
 
 test('complete proof text gets a missing-image reminder only in configured channels', async () => {
-  const { handleSubmissionMessage } = load('utils/submissionIntake.js', { axios: {
+  const { handleSubmissionMessage } = load('utils/submissionIntake.js', { http: {
     get: async (_, options) => ({ data: options.params.channel_id === 'eq.proofs' ? [{ event_id: 'event' }] : [] }),
   } });
   for (const channelId of ['proofs', 'chat']) {
@@ -311,7 +311,7 @@ test('concurrent GIM command reports already running and releases lock afterward
   f.guild.roles.fetch = () => pending;
   const command = load('commands/gimrolesync.js', {
     env: { SUPABASE_URL: 'url', SUPABASE_SERVICE_ROLE_KEY: 'key' },
-    axios: { post: async () => ({ data: plan([assignment(ids.a, ids.roleA)]) }) },
+    http: { post: async () => ({ data: plan([assignment(ids.a, ids.roleA)]) }) },
   });
   const replies = [];
   const interaction = { guild: f.guild, deferReply: async () => {}, editReply: async value => replies.push(value) };

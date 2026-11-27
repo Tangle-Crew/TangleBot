@@ -1019,7 +1019,6 @@ To run with Docker instead, use `docker compose up -d --build` from the repo roo
 - [discord.js](https://discord.js.org/) v14
 - [@napi-rs/canvas](https://github.com/Brooooooklyn/canvas) and [gif-encoder-2](https://github.com/benjaminadk/gif-encoder-2) — the `/spinwheel` GIF
 - [pg](https://node-postgres.com/) — PostgreSQL for the high score commands and member history
-- [axios](https://axios-http.com/) — Supabase
 - [@wise-old-man/utils](https://github.com/wise-old-man/wise-old-man) — Wise Old Man API client
 - [Claude by Anthropic](https://claude.ai/) — AI-assisted development
 

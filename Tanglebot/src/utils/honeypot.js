@@ -8,7 +8,7 @@ const {
   MessageFlags,
   PermissionFlagsBits,
 } = require('discord.js');
-const axios = require('axios');
+const http = require('./http');
 const { truncate, hasAnyRole, discordTimestamp } = require('./common');
 const { readState, writeState } = require('./state');
 const honeypotLog = require('./honeypotLog');
@@ -129,7 +129,7 @@ function findImageAttachments(message) {
 
 async function downloadImageAttachment(attachment, index) {
   try {
-    const response = await axios.get(attachment.url, { responseType: 'arraybuffer', timeout: 10000 });
+    const response = await http.get(attachment.url, { responseType: 'arraybuffer', timeout: 10000 });
     // Unique, ASCII-safe names, since several images can share a filename.
     const ext = IMAGE_EXTENSIONS_BY_CONTENT_TYPE[attachment.contentType] || 'png';
     const name = `honeypot-image-${index}.${ext}`;
