@@ -37,10 +37,11 @@ const {
   joinAnnouncements,
   announcementParts,
   buildPost,
+  postScheduledEntry,
+  updateJob,
 } = require('../utils/weeklyAnnounce');
 const { discordTimestamp, truncate, formatNumber } = require('../utils/common');
 const { DEFAULT_EMBED_COLOR, ALERT_COLOR } = require('../utils/embedColor');
-const { notifyAdminLog } = require('../utils/adminLog');
 const { scheduleJob, unscheduleJob } = require('../utils/weeklyAnnounceSchedule');
 
 const TEMPLAR_ROLE_ID = process.env.TEMPLAR_ROLE_ID;
@@ -394,15 +395,6 @@ async function showPreview(interaction, draft) {
   }
 }
 
-// Preview, Edit and Cancel for the scheduled post's admin log entry, which work until it starts sending.
-function jobButtons(job) {
-  return new ActionRowBuilder().addComponents(
-    button('jobpreview', job.id, 'Preview', ButtonStyle.Success),
-    button('jobedit', job.id, 'Edit', ButtonStyle.Secondary),
-    button('jobcancel', job.id, 'Cancel', ButtonStyle.Danger)
-  );
-}
-
 // The admin log entry the button was pressed on, with a new title and description and no buttons.
 function closedLogEntry(interaction, title, description) {
   const embed = EmbedBuilder.from(interaction.message.embeds[0]).setTitle(title).setDescription(description);
@@ -515,21 +507,15 @@ async function acceptPreview(interaction, draft, { replaceId = null } = {}) {
   const when = `${discordTimestamp(job.sendAt, 'F')} (${discordTimestamp(job.sendAt, 'R')})`;
   await interaction.update(closedMessage(`✅ Scheduled for ${when} in <#${job.channelId}>. The admin log has the details and the Preview, Edit and Cancel buttons.`));
 
-  const winners = job.competitions.length
-    ? `Winners from ${job.competitions.map(c => `**${escapeMarkdown(c.title)}**`).join(', ')}`
-    : 'Winners from the competitions that have ended by then';
-  const announcements = job.announcements.length
-    ? `then ${plural(job.announcements.length, 'announcement')} (${plural(joinAnnouncements(job.announcements).length, 'character')}, ${plural(parts.length, 'message')})`
-    : 'no announcements';
-  await notifyAdminLog(
-    interaction.client,
-    '📣 Weekly announcement scheduled',
-    `${interaction.user} scheduled the weekly post in <#${job.channelId}> for ${when}.\n${winners}, ${announcements}.` +
-    (replaceId ? (replaced ? `\nReplaced the post that was due ${discordTimestamp(replaced.sendAt, 'F')}.` : '\n⚠️ The earlier post could not be replaced because it had already been sent, started sending or been removed.') : ''),
-    [],
-    DEFAULT_EMBED_COLOR,
-    [jobButtons(job)]
-  );
+  // Saved on the job, so the entry keeps it when it's posted again.
+  let logNote = '';
+  if (replaceId) {
+    logNote = replaced
+      ? `Replaced the post that was due ${discordTimestamp(replaced.sendAt, 'F')}.`
+      : '⚠️ The earlier post could not be replaced because it had already been sent, started sending or been removed.';
+  }
+  const logged = (logNote && updateJob(job.id, j => { j.logNote = logNote; })) || job;
+  await postScheduledEntry(interaction.client, logged, channel?.guild ?? interaction.guild);
 }
 
 function rejectNonTemplar(interaction) {

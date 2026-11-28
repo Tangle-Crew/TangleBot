@@ -1,4 +1,4 @@
-const { escapeMarkdown, ChannelType } = require('discord.js');
+const { escapeMarkdown, ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const {
   getAllGroupCompetitions,
   getCompetitionDetails,
@@ -8,7 +8,9 @@ const {
   competitionUrl,
 } = require('./wiseOldMan');
 const { metricName, shortMetricName, metricCategory, metricUnit, formatNumber, competitionMetrics } = require('./womMetrics');
-const { withTimeout, truncate } = require('./common');
+const { withTimeout, truncate, discordTimestamp, formatNumber: formatCount } = require('./common');
+const { DEFAULT_EMBED_COLOR } = require('./embedColor');
+const { notifyAdminLog } = require('./adminLog');
 const { readState, writeState } = require('./state');
 const { renderProgressChart, chartFileName } = require('./weeklyAnnounceChart');
 const { metricPet, findPetEmoji } = require('./bossPets');
@@ -541,7 +543,7 @@ function reopenJob(id) {
   if (!job || job.status !== 'scheduled') return null;
   delete store.jobs[id];
   const draft = { ...job, updatedAt: new Date().toISOString() };
-  for (const field of ['status', 'acceptedBy', 'acceptedAt', 'claimedAt', 'resumed', 'sent']) delete draft[field];
+  for (const field of ['status', 'acceptedBy', 'acceptedAt', 'claimedAt', 'resumed', 'sent', 'logMessageId', 'logNote']) delete draft[field];
   store.drafts[id] = draft;
   saveStore(store);
   return draft;
@@ -595,6 +597,54 @@ function resolveMentions(text, guild) {
 // Message 2's texts for the draft as it would be sent, or null if too long for two messages.
 function announcementParts(draft, guild) {
   return splitAnnouncements(draft.announcements.map(text => resolveMentions(text, guild)));
+}
+
+// Preview, Edit and Cancel for the scheduled post's admin log entry, which work until it starts sending.
+function jobButtons(job) {
+  const button = (action, label, style) =>
+    new ButtonBuilder().setCustomId(`weeklyannounce:${action}:${job.id}`).setLabel(label).setStyle(style);
+  return new ActionRowBuilder().addComponents(
+    button('jobpreview', 'Preview', ButtonStyle.Success),
+    button('jobedit', 'Edit', ButtonStyle.Secondary),
+    button('jobcancel', 'Cancel', ButtonStyle.Danger)
+  );
+}
+
+// Posts the scheduled post's admin log entry and saves its message ID on the job. It ends with the
+// job's logNote, then note, if set. Returns the sent message, or undefined if it wasn't sent.
+async function postScheduledEntry(client, job, guild, note = '') {
+  const plural = (count, word) => `${formatCount(count)} ${word}${count === 1 ? '' : 's'}`;
+  const winners = job.competitions.length
+    ? `Winners from ${job.competitions.map(c => `**${escapeMarkdown(c.title)}**`).join(', ')}`
+    : 'Winners from the competitions that have ended by then';
+  const parts = announcementParts(job, guild);
+  const announcements = job.announcements.length
+    ? `then ${plural(job.announcements.length, 'announcement')} (${plural(joinAnnouncements(job.announcements).length, 'character')}${parts ? `, ${plural(parts.length, 'message')}` : ''})`
+    : 'no announcements';
+  const message = await notifyAdminLog(
+    client,
+    '📣 Weekly announcement scheduled',
+    `<@${job.acceptedBy}> scheduled the weekly post in <#${job.channelId}> for ${discordTimestamp(job.sendAt, 'F')} (${discordTimestamp(job.sendAt, 'R')}).\n` +
+    `${winners}, ${announcements}.${[job.logNote, note].filter(Boolean).map(line => `\n${line}`).join('')}`,
+    [],
+    DEFAULT_EMBED_COLOR,
+    [jobButtons(job)]
+  );
+  // Not saved if the post was reopened and accepted again while this was sending.
+  if (message?.id) updateJob(job.id, j => { if (j.acceptedAt === job.acceptedAt) j.logMessageId = message.id; });
+  return message;
+}
+
+// The pending posts that announce the competition's winners: those with it picked, and Automatic
+// ones for which it's among the last to end by their send time. all: the group's competitions.
+function findJobsCovering(competition, all) {
+  const endsAt = new Date(competition.endsAt).getTime();
+  return listPendingJobs().filter(job => {
+    if (job.competitions.length) return job.competitions.some(c => c.id === competition.id);
+    const sendAt = new Date(job.sendAt).getTime();
+    const ends = all.map(c => new Date(c.endsAt).getTime()).filter(end => end <= sendAt);
+    return endsAt <= sendAt && endsAt === Math.max(...ends);
+  });
 }
 
 // Names chart files after their metric, numbering repeats.
@@ -697,6 +747,8 @@ module.exports = {
   getJob,
   listPendingJobs,
   updateJob,
+  postScheduledEntry,
+  findJobsCovering,
   joinAnnouncements,
   announcementParts,
   buildPost,

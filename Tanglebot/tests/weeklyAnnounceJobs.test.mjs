@@ -94,3 +94,26 @@ test('findDuplicateJob ignores jobs that are not scheduled and the draft itself'
   announce.updateJob(job.id, j => { j.status = 'sent'; });
   assert.equal(announce.findDuplicateJob(draftFor({})), null);
 });
+
+test('findJobsCovering matches a picked competition, or Automatic when it is the last to end by the send time', () => {
+  const comp = (id, hours) => ({ id, endsAt: new Date(Date.now() + hours * 3600e3).toISOString() });
+  const all = [comp(7, 0.5), comp(8, 48)];
+  const covering = id => announce.findJobsCovering(all.find(c => c.id === id), all).map(j => j.id);
+  assert.deepEqual(covering(7), []);
+
+  const picked = newJob({ hours: 100, competitions: [{ id: 7, title: 'A' }] });
+  assert.deepEqual(covering(7), [picked.id]);
+  assert.deepEqual(covering(8), []);
+
+  announce.cancelJob(picked.id);
+  const automatic = newJob({ hours: 1 });
+  assert.deepEqual(covering(7), [automatic.id]);
+  assert.deepEqual(covering(8), [], 'still running at the send time');
+
+  announce.updateJob(automatic.id, j => { j.sendAt = new Date(Date.now() + 72 * 3600e3).toISOString(); });
+  assert.deepEqual(covering(7), [], 'a later competition ends before the send');
+  assert.deepEqual(covering(8), [automatic.id]);
+
+  announce.updateJob(automatic.id, j => { j.status = 'sent'; });
+  assert.deepEqual(covering(8), []);
+});

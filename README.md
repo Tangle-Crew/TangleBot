@@ -425,6 +425,11 @@ Every 15 minutes (on the quarter hour, and once on startup) the bot checks the W
 1. Runs **update all** on the group, then waits 5 minutes if any players were queued.
 2. Posts **one** message in `ADMIN_LOG_CHANNEL_ID` pinging `TEMPLAR_ROLE_ID`, with the top 3 of each ending competition.
 3. Adds a combined top 5 for each category (bossing, skilling, …) with two or more ending competitions.
+4. Checks for a pending `/weeklyannounce` post covering those competitions: one with them picked, or an Automatic one that would take its winners from them. Unaccepted drafts and posts already sent don't count.
+   - If one is scheduled, the reminder gives its send time and channel. Its "Weekly announcement scheduled" entry (with Preview, Edit and Cancel) is posted again after the reminder and the earlier one deleted. A post scheduled before this check existed keeps its earlier entry too, as its message ID wasn't saved.
+   - The reminder asks you to check the post if it sends before the competition ends (it would show the standings then, not the final results), or if it's Automatic and sends more than 24 hours after the end (a competition ending later but before the send would replace this one).
+   - A post that's being sent is reported as such, and its entry is left alone.
+   - Competitions with nothing pending are listed as still needing an announcement.
 
 Each competition is reminded once. The bot checks the admin log channel for its earlier reminders, so this survives restarts and deploys. It needs **Read Message History** in that channel, or no reminder is sent.
 
