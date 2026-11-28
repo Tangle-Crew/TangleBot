@@ -11,7 +11,7 @@ const load = name => require(`../src/commands/${name}.js`);
 
 const STAFF = [
   'donationhighscore', 'pethighscore', 'refreshboards', 'dbstatus', 'commandlog', 'memberdata', 'profile', 'history', 'stalemembers',
-  'weeklyannounce', 'weeklycomp', 'honeypot', 'spinwheel', 'submission',
+  'weeklyannounce', 'weeklycomp', 'honeypot', 'spinwheel', 'submission', 'quietmembers', 'activitybackfill',
 ];
 const PUBLIC = ['lfg-post', 'lfg-roles', 'link', 'linkalt', 'weeklycompstats'];
 
