@@ -29,6 +29,9 @@ const { startMemberSync } = require('../utils/memberSync');
 const dbHealth = require('../utils/dbHealth');
 const { registerMemberHistory, syncMemberRoster } = require('../utils/memberHistory');
 const { startCompEndingReminder } = require('../utils/compEndingReminder');
+const { registerMemberActivity, startTracking, recordCommand } = require('../utils/memberActivity');
+const { handleQuietMembersButton } = require('../commands/quietmembers');
+const { handleActivityBackfillButton } = require('../commands/activitybackfill');
 const { handleWeeklyAnnounceButton, handleWeeklyAnnounceSelect, handleWeeklyAnnounceModal } = require('../commands/weeklyannounce');
 const { restoreWeeklyAnnouncements, stopWeeklyAnnouncements } = require('../utils/weeklyAnnounceSchedule');
 
@@ -43,6 +46,8 @@ const BUTTON_ROUTES = [
   { prefix: 'lfgsyncgroup:', handler: handleRetiredSyncedGroupButton, errorLabel: '[LFG] Retired group button interaction error:', errorReply: 'Something went wrong with that LFG group.' },
   { prefix: 'stalemembers:', handler: handleStaleMembersButton, errorLabel: '[StaleMembers] Button interaction error:', errorReply: 'Something went wrong with that stale members list.' },
   { prefix: 'weeklyannounce:', handler: handleWeeklyAnnounceButton, errorLabel: '[WeeklyAnnounce] Button interaction error:', errorReply: 'Something went wrong updating that weekly announcement.' },
+  { prefix: 'quietmembers:', handler: handleQuietMembersButton, errorLabel: '[QuietMembers] Button interaction error:', errorReply: 'Something went wrong with that quiet members list.' },
+  { prefix: 'activitybackfill:', handler: handleActivityBackfillButton, errorLabel: '[Backfill] Button interaction error:', errorReply: 'Something went wrong with that channel list.' },
 ];
 const SELECT_ROUTES = [
   { prefix: 'lfgmanage:', handler: handleLfgManageSelect, errorLabel: '[LFG] Manage select interaction error:', errorReply: 'Something went wrong updating that group.' },
@@ -85,6 +90,8 @@ function loadEvents(client) {
 
   client.once(Events.ClientReady, async (c) => {
     console.log(`[Bot] Logged in as ${c.user.tag}`);
+    // Early, so people already in voice are caught. Runs in the background; never throws.
+    startTracking(client);
     try {
       await syncCommands(client);
     } catch (err) {
@@ -174,6 +181,7 @@ function loadEvents(client) {
   });
 
   registerMemberHistory(client);
+  registerMemberActivity(client);
 
   client.on(Events.MessageCreate, async (message) => {
     try {
@@ -222,6 +230,7 @@ function loadEvents(client) {
     if (!command) {
       if (interaction.isChatInputCommand()) {
         await logCommand(interaction, { startedAt: Date.now(), error: 'Command is not loaded' });
+        await recordCommand(interaction);
       }
       return;
     }
@@ -278,6 +287,8 @@ async function runCommand(interaction, command) {
   // A connection error starts a database check now instead of at the next interval.
   if (dbHealth.isConnectionError(failure)) dbHealth.checkNow();
   await logCommand(interaction, { startedAt, error: failure, denied: Boolean(interaction.commandDenied) });
+  // Running a command counts as activity, whatever its result.
+  await recordCommand(interaction, new Date(startedAt));
 }
 
 async function replyOrFollowUp(interaction, content) {

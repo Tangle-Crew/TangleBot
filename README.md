@@ -34,6 +34,8 @@ A Discord bot built for the **Tangle Crew** clan in [Old School RuneScape](https
 | [`/weeklycompstats`](#-weeklycompstats--competition-leaderboard) | Standings for the running WOM competitions | Everyone |
 | [`/weeklyannounce`](#-weeklyannounce--weekly-winners-and-announcements) | Schedules the weekly winners and announcements post for 5 minutes after the next competition ends | Templar |
 | [`/stalemembers`](#-stalemembers--inactive-clan-members) | Lists WOM group members who were inactive or gained too little XP over a number of months | Templar (posts in the admin log) |
+| [`/quietmembers`](#-quietmembers--members-who-joined-and-never-interacted) | Lists members who joined and have not sent a message, joined voice or run a command | Templar (posts in the admin log) |
+| [`/activitybackfill`](#-activitybackfill--past-activity-one-time) | One-time backfill of past activity, off unless switched on | Owner |
 | [`/honeypot`](#honeypot-channel-trap) | Test mode for the honeypot trap | Owner or Templar |
 | [`/dbstatus`](#-dbstatus--database-status) | Database connection, migrations, health monitor and row counts | Owner |
 
@@ -601,6 +603,58 @@ The group's ranks are loaded from WOM on startup for autocomplete and reused for
 
 ---
 
+### 🤫 `/quietmembers` — Members Who Joined and Never Interacted
+
+Lists server members who joined more than a number of days ago and have not sent a message, joined a voice channel or run a slash command since. It only reports: the bot does nothing to anyone. `days` is optional (default 7). **Requires** `DATABASE_URL`, `CLAN_ID`, `TEMPLAR_ROLE_ID` and `ADMIN_LOG_CHANNEL_ID`.
+
+The report is always posted in the admin log; run from any other channel, you get a private link to it. It has a header (who checked and when, the totals, when tracking started, the backfill state and how many channels and threads the backfill couldn't read; before any run has finished, that count is marked as partial), then two lists, each its own message, oldest join first, 15 a page:
+
+- **🔇 No activity recorded:** joined after tracking started, so the bot has been watching since they joined.
+- **❔ Joined before tracking:** shown as **No messages or commands found** once a backfill has finished (voice before tracking is unknown), and **Unknown** until then.
+
+Rows show the name, join date and days in the server, and mark 🔁 rejoined (more than one join in the bot's member history) and 📜 rules not accepted. The header has **🔄 Update** and **📄 Export all**; each list has **◀ Prev**, **Next ▶** and **📄 Export**. Any Templar can use them. Exports are private `.xlsx` files, and a copy is saved in `data/quietmembers-exports/` (the newest 5 are kept). A new report replaces the previous one. If one of its list messages is deleted, Update posts the report again. After a restart, pages and exports say the list has expired; Update still works. If Discord returns less than 90% of the member list, no report is posted.
+
+<details>
+<summary><strong>What counts as activity</strong></summary>
+
+Only **times** are saved (the first and latest of each kind per person), never message content.
+
+- A message, including a reply. Join, boost, pin and other system notices don't count.
+- Joining a voice channel. Moving, muting and deafening don't count, except moving from the honeypot voice channel into another one. Anyone already in voice when the bot starts is counted.
+- A slash or context menu command: TangleBot's own (including refused and failed ones), and other bots' when their reply is public. Another bot's private reply can't be seen.
+
+Reactions, buttons and menus don't count. DMs, other servers, bots and the honeypot channels are ignored. A rejoin starts again: only activity since the latest join counts.
+
+Tracking runs whenever `DATABASE_URL` and `CLAN_ID` are set. The first activity of each kind is saved at once, then at most hourly. Activity while the bot or the database is down is missed; a later backfill can recover messages and public command replies, not voice joins.
+
+</details>
+
+---
+
+### 🗄️ `/activitybackfill` — Past Activity (one time)
+
+Fills in activity from before tracking, from channel history and the command log. Owner only. It is loaded only while `ACTIVITY_BACKFILL_ENABLED=true`. **Also requires** `DATABASE_URL`, `CLAN_ID`, `OWNER_ROLE_ID` and `ADMIN_LOG_CHANNEL_ID`. Every subcommand posts to the admin log.
+
+| Subcommand | What it does |
+|---|---|
+| `check` | Lists the channels the bot can't (fully) read. Reads no messages. |
+| `start` | Starts a run, or continues a stopped or incomplete one. After a finished run, starts a new full pass. |
+| `status` | The current state, progress and the channels it can't read. |
+| `stop` | Stops the run after its current request and posts the summary. |
+
+**Permissions:** the bot needs **View Channel** and **Read Message History** wherever it should look, **Connect** for voice and stage text chats, and **Manage Threads** to read private threads it hasn't joined. `check` names each channel missing one of these. Threads inside a channel the bot can't view can't be listed or counted. A new `check` or `status` replaces the previous channel list; run summaries are kept. The lists have pages and an export, which expire on a restart.
+
+It reads text, announcement, voice and stage chats, forum and media posts, and active and archived threads, back to the earliest join among current members. It saves its place as it goes. After a restart it waits for `start`. Continuing a run also reads what was sent since the pass began in channels and threads already read, so messages sent while the bot was down are not missed. A run is **finished** when every readable channel is done; channels it can't read are skipped and counted in the report. Any other error leaves it **incomplete**, and `start` retries those channels. Deleted messages and channels can't be seen.
+
+**To use it:**
+
+1. Set `ACTIVITY_BACKFILL_ENABLED=true` and restart. Add the command's Owner [visibility override](#command-visibility).
+2. Run `/activitybackfill check`, fix the access that matters, and check again. The first time, compare the list with the server.
+3. Run `/activitybackfill start` and read the summary. If channels failed, or you fixed more access, run `start` again.
+4. Set `ACTIVITY_BACKFILL_ENABLED=false` and restart.
+
+---
+
 ## Message Features
 
 ### KC and Drop Proof Intake
@@ -719,8 +773,8 @@ Role-based visibility is set by a server admin in **Server Settings > Integratio
 
 Add these overrides once:
 
-- **Templar:** `/donationhighscore`, `/pethighscore`, `/refreshboards`, `/stalemembers`, `/weeklyannounce`, `/weeklycomp`, `/honeypot`, `/submission`
-- **Owner:** `/memberdata`, `/dbstatus`
+- **Templar:** `/donationhighscore`, `/pethighscore`, `/refreshboards`, `/stalemembers`, `/quietmembers`, `/weeklyannounce`, `/weeklycomp`, `/honeypot`, `/submission`
+- **Owner:** `/memberdata`, `/dbstatus`, `/activitybackfill` (while it is switched on)
 - **Coordinator:** `/spinwheel`, `/commandlog`, `/profile`, `/history`
 
 Owner also holds Templar, so it needs no separate override for the Templar commands. A renamed or new staff command needs its override added once. Admins always see every command.
@@ -776,6 +830,7 @@ On startup, before any command loads, the bot applies every `Tanglebot/migration
 - `004_command_log_name_and_denied.sql`: the `discord_name` column on `command_log`, and the `denied` status.
 - `005_accounts_and_events.sql`: `accounts` (OSRS accounts from Wise Old Man) and `member_events` (clan history).
 - `010_bot_state.sql`: `bot_state` (a copy of small state files).
+- `011_member_activity.sql`: `member_activity` (when each person was first and last active).
 - `009_honeypot_incidents.sql`: `honeypot_incidents` (the honeypot log).
 - `008_competitions.sql`: `competitions` and `competition_results` (finished WOM competitions and how each player did).
 - `007_milestone_source.sql`: allows the `bot` source on `member_events`, for milestones.
@@ -895,7 +950,7 @@ select a.rsn, e.old_value, e.new_value, e.occurred_at from member_events e join 
 
 Some of the bot's small state lives in files in `Tanglebot/data/`. With `DATABASE_URL` set, these files are also kept in the `bot_state` table (the key is the file name, the value is its JSON), so a lost or wiped `data/` folder doesn't lose them:
 
-- the leaderboard message IDs (`pethighscores_message.json`, `donationhighscores_message.json`), the `/stalemembers` list message IDs, the LFG start post ID, the open LFG groups (`lfg-groups.json`), the scheduled weekly announcements (`weeklyannounce.json`), the honeypot test mode, the intake URL override and the last accepted submission.
+- the leaderboard message IDs (`pethighscores_message.json`, `donationhighscores_message.json`), the `/stalemembers` and `/quietmembers` list message IDs, activity tracking and backfill progress (`member-activity.json`), the LFG start post ID, the open LFG groups (`lfg-groups.json`), the scheduled weekly announcements (`weeklyannounce.json`), the honeypot test mode, the intake URL override and the last accepted submission.
 
 How it works: at startup the bot loads the table. A file that has no row yet is copied into it, and a row whose file is missing is written back to disk (the log says how many). While running, every change is written to the file as before and to the table. The files stay current, so removing `DATABASE_URL` works without any step, and without `DATABASE_URL` nothing changes at all. If the table can't be read at startup, the bot logs it and uses the files.
 

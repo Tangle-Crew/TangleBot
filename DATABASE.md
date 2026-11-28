@@ -16,6 +16,8 @@ How TangleBot stores its information in PostgreSQL and the rules for changing it
 | `src/utils/highScoresDb.js` | Donations, pets and member storage; the only place those tables are written |
 | `src/utils/memberHistory.js` | Records Discord joins, leaves and name changes; the startup roster sync |
 | `src/utils/commandLog.js` | Writes, reads and prunes the command log |
+| `src/utils/memberActivity.js` | What counts as activity, live tracking, and all `member_activity` reads and writes |
+| `src/utils/activityBackfill.js` | `/activitybackfill`: the channel access check and the run (saves through `memberActivity.js`) |
 | `src/utils/milestones.js` | Finds and rebuilds milestones (donation tier changes, Pet Master) from the logs |
 | `src/utils/competitionSync.js` | Reads finished WOM competitions and saves them and their results |
 | `src/utils/honeypotLog.js` | Records honeypot incidents (never throws, does nothing without the database) |
@@ -50,10 +52,11 @@ How TangleBot stores its information in PostgreSQL and the rules for changing it
 | `competitions` | A finished WOM competition | `wom_competition_id` (PK), `title`, `metric`, `metrics`, `starts_at`, `ends_at`, `participant_count`, `total_gained` | `competitionSync.js` (`/memberdata competitions`, then the automatic sync) |
 | `competition_results` | One player's result in a competition | `(wom_competition_id, wom_player_id)` (PK), `account_id` (empty if the account was not saved yet), `rsn`, `rank`, `gained`. Only players who gained | `competitionSync.js` |
 | `honeypot_incidents` | One honeypot event | `discord_id` and `discord_name` (no foreign key), `action` (`timeout`, `ban`, `false_positive`), `outcome` (`done`, `failed`, `skipped`, `test`), `test_mode`, `channel_id`, `by_discord_id`, `by_discord_name`, `details` (jsonb, never message content), `created_at` | `honeypot.js`, through `honeypotLog.js`; append-only |
-| `bot_state` | A copy of one small state file | `key` (the file name, PK), `value` (jsonb, the file's contents), `updated_at` | `state.js` (loaded at startup; written with every change). Files covered: the leaderboard message IDs, `stalemembers.json`, `lfg-start-post.json`, `lfg-groups.json`, `weeklyannounce.json` (read from disk, see below), the honeypot test mode, the intake URL override and `last-submission.json`, `admin-commands-post.json` (the admin commands post's message IDs and content hash) |
+| `member_activity` | One person's activity of one kind | `(discord_id, kind)` (PK, no foreign key), `kind` (`message`, `voice`, `command`), `first_at`, `last_at`. Times only, never content | `memberActivity.js`: live, and the backfill |
+| `bot_state` | A copy of one small state file | `key` (the file name, PK), `value` (jsonb, the file's contents), `updated_at` | `state.js` (loaded at startup; written with every change). Files covered: the leaderboard message IDs, `stalemembers.json`, `lfg-start-post.json`, `lfg-groups.json`, `weeklyannounce.json` (read from disk, see below), the honeypot test mode, the intake URL override and `last-submission.json`, `admin-commands-post.json` (the admin commands post's message IDs and content hash), `member-activity.json` (when activity tracking started, the backfill's progress and result, and its channel list post), `quietmembers.json` (the newest report's message IDs) |
 | `schema_migrations` | An applied migration file | `name` (PK), `applied_at` | The migration runner |
 
-How they connect: `accounts.member_id` (empty for now) points at `members`, `member_events` points at an account or a member, and `competition_results` points at `competitions` and (when known) an account. `donations`, `donation_log`, `member_pets` and `pet_log` all point at `members.discord_id`. `member_pets` and `pet_log` also point at `pets.key`. `command_log` and `honeypot_incidents` deliberately point at nothing: anyone who runs a command or trips the trap is logged, member or not.
+How they connect: `accounts.member_id` (empty for now) points at `members`, `member_events` points at an account or a member, and `competition_results` points at `competitions` and (when known) an account. `donations`, `donation_log`, `member_pets` and `pet_log` all point at `members.discord_id`. `member_pets` and `pet_log` also point at `pets.key`. `command_log`, `honeypot_incidents` and `member_activity` deliberately point at nothing: anyone who runs a command, trips the trap or is active is recorded, member or not.
 
 Milestones (donation tiers, Pet Master) are event kinds, not a table.
 
@@ -99,6 +102,7 @@ Milestones (donation tiers, Pet Master) are event kinds, not a table.
 - **History as events:** a new kind of history is a new event kind, with no schema change. A unique key on events keeps a re-sync from duplicating them.
 - **Sync failures are alerted, not just logged:** an automatic sync that fails posts to the admin log once, repeats at most every 6 hours, and says when it recovers, so a stopped sync is noticed rather than found weeks later.
 - **Manual first:** data moves (the WOM sync, the competition history) are Owner commands with a preview and a verify step, run by hand the first time. Nothing imports on startup, and the timer does nothing until the first manual WOM sync has happened.
+- **`member_activity` is a summary, not a log:** one row per person and kind, updated in place. Every write keeps the earliest `first_at` and the latest `last_at`, so live tracking and a repeated backfill can overlap safely. There is no count, because it could not be kept right across re-reads. `/quietmembers` only needs "anything since their latest join".
 - **`command_log` has no foreign key:** staff attempts by people not in `members` should still be logged.
 - **Donation total cap:** 10 trillion GP per member, as a typo guard and to stay inside safe Number range.
 - **Competitions are saved by the sync, not when `/weeklyannounce` sends:** that covers every competition, announced or not, and needs no hook into the announcement code.
@@ -107,6 +111,8 @@ Milestones (donation tiers, Pet Master) are event kinds, not a table.
 
 ## Known gaps
 
+- Commands run in a thread under a honeypot channel are ignored live, but the backfill counts them: `command_log` has no parent channel.
+- Activity while the bot or database is down is not recorded. The backfill can recover messages and public command replies, not voice joins, and cannot see deleted messages or channels.
 - A command that catches its own error and replies normally is logged as `ok`, unless it sets `interaction.commandError` (done for `/donationhighscore`, `/pethighscore`, `/commandlog` and `/dbstatus`).
 - A member who left and rejoined the Discord server entirely while the bot was down shows as one stay (no leave is recorded).
 - A leave noticed by the startup sync is dated when the bot noticed it.
