@@ -18,11 +18,15 @@ const {
   formatAmount,
 } = require('./womMetrics');
 const { truncate, discordTimestamp } = require('./common');
+const { findJobsCovering, postScheduledEntry, getJob } = require('./weeklyAnnounce');
 
 // Checks run on the clock at :00, :15, :30 and :45, like a `*/15 * * * *` cron job.
 const CHECK_INTERVAL_MS = 15 * 60 * 1000;
 // A competition is reminded on the first check within its last hour.
 const REMINDER_WINDOW_MS = 60 * 60 * 1000;
+// An Automatic post sending longer than this after a competition ends may end up announcing a later
+// one.
+const AUTOMATIC_CERTAIN_MS = 24 * 60 * 60 * 1000;
 // Time for WOM to process the queued updates before the standings are read.
 const UPDATE_SETTLE_MS = 5 * 60 * 1000;
 // Competitions reminded since the bot started. Across restarts, the admin log channel is the
@@ -64,15 +68,107 @@ function formatStandings(rows, metric, breakdown = null) {
     .join('\n');
 }
 
-function buildReminderEmbed(results, updateStatus) {
+// The pending weekly posts covering the competitions: { posts: [{ job, competitions }], missing:
+// [competition] }, with each post's covered competitions, or null if they couldn't be checked. all:
+// the group's competitions.
+function findScheduledAnnouncements(competitions, all) {
+  const posts = new Map();
+  const missing = [];
+  try {
+    for (const competition of competitions) {
+      const covering = findJobsCovering(competition, all);
+      if (covering.length === 0) missing.push(competition);
+      for (const job of covering) {
+        if (!posts.has(job.id)) posts.set(job.id, { job, competitions: [] });
+        posts.get(job.id).competitions.push(competition);
+      }
+    }
+  } catch (err) {
+    console.error('[CompReminder] Could not check for scheduled announcements:', err.message);
+    return null;
+  }
+  return { posts: [...posts.values()], missing };
+}
+
+// Why a scheduled post may not announce the final results of the competitions it covers.
+function postWarnings({ job, competitions }) {
+  if (job.status !== 'scheduled') return [];
+  const sendAt = new Date(job.sendAt).getTime();
+  const endsAt = c => new Date(c.endsAt).getTime();
+  const warnings = [];
+  const early = competitions.filter(c => sendAt < endsAt(c));
+  if (early.length) {
+    warnings.push(`It sends before ${early.map(c => c.title).join(', ')} ends, so it will show the standings then, not the final results.`);
+  }
+  if (!job.competitions.length && competitions.some(c => sendAt - endsAt(c) > AUTOMATIC_CERTAIN_MS)) {
+    warnings.push('It is Automatic, so if another competition ends after this and before it sends, it will announce that one instead.');
+  }
+  return warnings;
+}
+
+// The embed's lines on what's scheduled. '' when nothing is.
+function describeScheduled(scheduled) {
+  if (!scheduled?.posts.length) return '';
+  const lines = scheduled.posts.map(post => {
+    const { job } = post;
+    if (job.status === 'sending') return `📤 The announcement for <#${job.channelId}> is being sent now.`;
+    const when = `${discordTimestamp(job.sendAt, 'F')} in <#${job.channelId}>`;
+    const warnings = postWarnings(post);
+    if (!warnings.length) return `✅ An announcement is already scheduled for ${when}.`;
+    return [`⚠️ An announcement is scheduled for ${when}, but check it:`, ...warnings.map(w => `└ ${w}`)].join('\n');
+  });
+  if (scheduled.posts.some(({ job }) => job.status === 'scheduled')) {
+    lines.push('Preview, Edit and Cancel are on its "Weekly announcement scheduled" entry.');
+  }
+  if (scheduled.missing.length) {
+    lines.push(`⚠️ No announcement is scheduled for: ${scheduled.missing.map(c => c.title).join(', ')}`);
+  }
+  return lines.join('\n');
+}
+
+// Posts the job's admin log entry again and deletes the earlier one. Does nothing unless the post is
+// still scheduled. The earlier entry is kept if the new one couldn't be sent, and the new one is
+// deleted instead if the post was cancelled, reopened or started sending meanwhile.
+async function repostScheduledEntry(client, channel, { id, acceptedAt }) {
+  const stillScheduled = () => {
+    const job = getJob(id);
+    return job?.status === 'scheduled' && job.acceptedAt === acceptedAt ? job : null;
+  };
+  const job = stillScheduled();
+  if (!job) return;
+  const message = await postScheduledEntry(client, job, channel.guild, 'Posted again for the competition ending reminder.');
+  if (!message) return;
+  const outdated = stillScheduled() ? job.logMessageId : message.id;
+  if (!outdated) return;
+  try {
+    await channel.messages.delete(outdated);
+  } catch (err) {
+    console.warn(`[CompReminder] Could not delete an admin log entry of weekly post ${id}:`, err.message);
+  }
+}
+
+function reminderContent(count, scheduled) {
+  const subject = count === 1 ? 'A WOM competition is' : `${count} WOM competitions are`;
+  let action = 'please make the announcement.';
+  if (scheduled?.posts.length) {
+    if (scheduled.missing.length) action = 'some still need an announcement.';
+    else if (scheduled.posts.some(post => postWarnings(post).length)) action = 'an announcement is scheduled, please check it.';
+    else if (scheduled.posts.every(({ job }) => job.status === 'sending')) action = 'the announcement is being sent now.';
+    else action = 'the announcement is already scheduled.';
+  }
+  return `${subject} ending within the hour — ${action}`;
+}
+
+function buildReminderEmbed(results, updateStatus, scheduled) {
   const endsAtList = [...new Set(results.map(r => discordTimestamp(r.competition.endsAt, 'R')))];
   const embed = new EmbedBuilder()
     .setColor(REMINDER_COLOR)
     .setTitle(`${REMINDER_TITLE_PREFIX}${results.length === 1 ? '' : 's'} Ending Soon`)
     .setDescription(truncate(
-      `${results.length === 1 ? 'This competition ends' : `These ${results.length} competitions end`} ${endsAtList.join(' / ')} — time to make the announcement!\n\n` +
+      `${results.length === 1 ? 'This competition ends' : `These ${results.length} competitions end`} ${endsAtList.join(' / ')}` +
+      `${scheduled?.posts.length ? '.' : ' — time to make the announcement!'}\n\n` +
       results.map(r => `• [${r.competition.title}](${competitionUrl(r.competition.id)})`).join('\n') +
-      `\n\n${updateStatus}`,
+      [describeScheduled(scheduled), updateStatus].filter(Boolean).map(text => `\n\n${text}`).join(''),
       4096
     ))
     .setTimestamp();
@@ -253,13 +349,15 @@ async function checkEndingCompetitions(client, config) {
     return;
   }
 
+  const scheduled = findScheduledAnnouncements(toSend.map(r => r.competition), competitions);
+
   // Marked before sending; a failed send unmarks them so the next check retries.
   for (const c of ending) remindedIds.add(c.id);
   try {
     const ping = config.templarRoleId ? `<@&${config.templarRoleId}> ` : '';
     await channel.send({
-      content: `${ping}${toSend.length === 1 ? 'A WOM competition is' : `${toSend.length} WOM competitions are`} ending within the hour — please make the announcement.`,
-      embeds: [buildReminderEmbed(toSend, update.status)],
+      content: `${ping}${reminderContent(toSend.length, scheduled)}`,
+      embeds: [buildReminderEmbed(toSend, update.status, scheduled)],
       allowedMentions: { roles: config.templarRoleId ? [config.templarRoleId] : [] },
     });
   } catch (err) {
@@ -271,6 +369,15 @@ async function checkEndingCompetitions(client, config) {
     `[CompReminder] Sent reminder for ${toSend.length} competition(s) to admin log channel ${config.adminLogChannelId}` +
     `${config.templarRoleId ? ', pinging Templar' : ' (TEMPLAR_ROLE_ID not set, no ping)'}.`
   );
+
+  // Moves each scheduled post's entry below the reminder.
+  for (const { job } of scheduled?.posts ?? []) {
+    try {
+      await repostScheduledEntry(client, channel, job);
+    } catch (err) {
+      console.error(`[CompReminder] Could not re-post weekly post ${job.id}:`, err.message);
+    }
+  }
 }
 
 function describeCompetition(competition) {
